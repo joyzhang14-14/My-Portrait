@@ -43,9 +43,11 @@ struct ContentView: View {
     @State private var timeline = TimelineState()
     @State private var chat = ChatController()
     @State private var chatStore = ChatStore.shared
-    @State private var memoryScope: MemoryScope = .events
+    /// Memories 上次停在哪 —— 从 config 恢复,切换时写回(见
+    /// `persistMemoryLanding`)。切走再切回不会被扔回 Events。
+    @State private var memoryScope: MemoryScope = MemoryLanding.restoredScope()
     /// Memories 区 text/Neural Graph 查看模式(切换钮在侧栏,内容在 mainPane)。
-    @State private var memoryViewMode: MemoryViewMode = .text
+    @State private var memoryViewMode: MemoryViewMode = MemoryLanding.restoredViewMode()
     /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
     @State private var memoryInputJump: Int64? = nil
     @State private var cronJobSelection: UUID? = nil
@@ -177,6 +179,15 @@ struct ContentView: View {
             guard let date = notif.object as? Date else { return }
             selection = .timeline
             timeline.seek(to: date)
+        }
+        // Memories 停在哪就记在哪。**两个都要监听** —— 只记 scope 的话,
+        // 用户在 Events 上切到图谱视图,下次回来又是文字视图。
+        // ConfigStore 的写盘本来就是 debounce 的,切标签的频率不用担心。
+        .onChange(of: memoryScope) { _, s in
+            MemoryLanding.persist(scope: s, mode: memoryViewMode)
+        }
+        .onChange(of: memoryViewMode) { _, m in
+            MemoryLanding.persist(scope: memoryScope, mode: m)
         }
     }
 

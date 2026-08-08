@@ -464,6 +464,12 @@ struct DisplayConfig: Codable, Equatable {
     /// 极简观感(07-11 用户):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
     /// 级联,球仍按原时序逐个亮起(连锁激活保留),只是传播过程不可见。
     var graphHideLinks:          Bool = false
+    /// Memories 上次停在哪个 scope / 视图形态 —— 每次切换写回,下次进来直接
+    /// 恢复到这儿,不再固定落在 Events。值分别取 `MemoryScope.id` 和
+    /// `MemoryViewMode.rawValue`;认不出的值(比如 portrait 分类被删了)
+    /// 由读取方回落到默认,不做校验。
+    var memoryLastScope:         String = ""
+    var memoryLastViewMode:      String = ""
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -478,6 +484,8 @@ struct DisplayConfig: Codable, Equatable {
         case graphAnimationSpeed      = "graph_animation_speed"
         case graphPulseSpeed          = "graph_pulse_speed"
         case graphHideLinks           = "graph_hide_links"
+        case memoryLastScope          = "memory_last_scope"
+        case memoryLastViewMode       = "memory_last_view_mode"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -493,6 +501,8 @@ struct DisplayConfig: Codable, Equatable {
         graphAnimationSpeed     = c.dflt(SpeedLevel.self, .graphAnimationSpeed, graphAnimationSpeed)
         graphPulseSpeed         = c.dflt(SpeedLevel.self, .graphPulseSpeed, graphPulseSpeed)
         graphHideLinks          = c.dflt(Bool.self, .graphHideLinks, graphHideLinks)
+        memoryLastScope         = c.dflt(String.self, .memoryLastScope, memoryLastScope)
+        memoryLastViewMode      = c.dflt(String.self, .memoryLastViewMode, memoryLastViewMode)
     }
 }
 

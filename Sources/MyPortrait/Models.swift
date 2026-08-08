@@ -26,6 +26,24 @@ enum MemoryScope: Hashable, Identifiable {
         case .neuralGraphSettings: return "__neural_graph_settings__"
         }
     }
+    /// `id` 的反函数 —— 存进 config 再读回来(Memories 记住上次停在哪)。
+    /// 认不出就 nil(比如 portrait 分类被删了),调用方回落默认 scope。
+    init?(id: String) {
+        switch id {
+        case "__personal_info__":         self = .personalInfo
+        case "__events__":                self = .events
+        case "__input__":                 self = .input
+        case "__text_settings__":         self = .textSettings
+        case "__neural_graph_settings__": self = .neuralGraphSettings
+        default:
+            let prefix = "portrait:"
+            guard id.hasPrefix(prefix) else { return nil }
+            let category = String(id.dropFirst(prefix.count))
+            guard !category.isEmpty else { return nil }
+            self = .portrait(category: category)
+        }
+    }
+
     var displayName: String {
         switch self {
         case .personalInfo:        return "Personal Info"
