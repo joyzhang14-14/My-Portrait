@@ -120,11 +120,10 @@ struct TimelineSidebar: View {
             HStack(spacing: Theme.Space.xs) {
                 ForEach([SidebarSection.timeline, .home, .memories, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
-                        // 每次点开 Memory 都落到 Neural Graph 的 Events。
-                        if item == .memories {
-                            memoryViewMode = .neuralGraph
-                            memoryScope = .events
-                        }
+                        // ⚠️ 这里曾经每次点开 Memory 都强制回 Neural Graph +
+                        // Events。**别加回来** —— Memories 现在记住你上次停在
+                        // 哪(MemoryLanding,冷启动从 config 恢复,同一次运行
+                        // 里 @State 本来就带着),再覆盖就等于那套白做。
                         selection = item
                     }
                 }
