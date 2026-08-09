@@ -67,33 +67,6 @@ struct GeneralSettingsView: View {
 
             permissionsCard
 
-            // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
-             // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
-             // 只是临时显示一次 sheet。
-             //
-             // 08-09:只在 dev mode 下露出 —— 普通用户走完一次就不该再见到它。
-             // 少给的那条补救路径(漏授权 / 换供应商)上面 Permissions 卡里
-             // 每一项都有自己的授权按钮,不靠重走 onboarding。
-            if DevMode.isOn {
-                SettingsCard(title: "Onboarding") {
-                    SettingsRow("Replay onboarding",
-                                info: "Opens the setup steps again.",
-                                icon: "sparkles") {
-                        Button("Show") {
-                            // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
-                            // sheet 模式两个 bug:① attached sheet 主窗口在背后能看到
-                            // ② dismiss 后 NSHostingView 重算 intrinsic size 收缩窗口。
-                            // 把 onboardingCompleted 设 false → ContentView 立刻把
-                            // mainContent 换成 OnboardingView 填满整个窗口;onboarding
-                            // finish callback 把 flag 设回 true → 切回 mainContent。
-                            configStoreGen.mutate { $0.general.onboardingCompleted = false }
-                            configStoreGen.saveNow()
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                    }
-                }
-            }
-
             if DevMode.isAvailable { devModeCard }
         }
     }
@@ -118,6 +91,30 @@ struct GeneralSettingsView: View {
                     switchMode(to: !DevMode.isOn)
                 }
                 .font(.system(size: 12, weight: .medium))
+            }
+
+            // Onboarding 在 ContentView 首启自动弹(没走完就反复弹),这里是
+            // 「已走完」之后再看一次的入口 —— 只对 dev 有意义(调新用户首屏),
+            // 所以并进这张卡,不单开一张。普通用户走完一次就不该再见到它;
+            // 漏授权 / 换供应商的补救在 Permissions 卡和 Connections 页,
+            // 不靠重走 onboarding。
+            if DevMode.isOn {
+                SettingsDivider()
+                SettingsRow("Replay onboarding",
+                            info: "Opens the setup steps again.",
+                            icon: "sparkles") {
+                    Button("Show") {
+                        // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
+                        // sheet 模式两个 bug:① attached sheet 主窗口在背后能看到
+                        // ② dismiss 后 NSHostingView 重算 intrinsic size 收缩窗口。
+                        // 把 onboardingCompleted 设 false → ContentView 立刻把
+                        // mainContent 换成 OnboardingView 填满整个窗口;onboarding
+                        // finish callback 把 flag 设回 true → 切回 mainContent。
+                        configStoreGen.mutate { $0.general.onboardingCompleted = false }
+                        configStoreGen.saveNow()
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                }
             }
         }
     }
