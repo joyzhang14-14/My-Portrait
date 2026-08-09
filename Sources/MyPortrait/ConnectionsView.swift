@@ -201,6 +201,18 @@ struct ConnectionsView: View {
                     // 像连接状态有强弱之分 —— 其实"哪个 AI 在用"是另一件事,
                     // 有 provider picker 管,不该混进连接状态里。
                     StatusPill(text: "CONNECTED", color: .green)
+                    // 连上之后说明文字就过期了 —— 那段讲的是"要不要连、怎么连",
+                    // 已经连上的人再读一遍没有意义,还把 Disconnect 挤到下面去。
+                    // 收进 ⓘ:想回头查"这玩意到底干嘛的"仍然点得到。
+                    SettingsInfoPopover {
+                        Text(markdown(descriptionFor(integration)))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 300, alignment: .leading)
+                            .padding(12)
+                    }
                 }
                 Spacer()
                 Button { selectedId = nil } label: {
@@ -212,11 +224,13 @@ struct ConnectionsView: View {
 
             Divider().background(Color.primary.opacity(0.08))
 
-            Text(markdown(descriptionFor(integration)))
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textPrimary.opacity(0.7))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+            if !appState.isConnected(integration.id) {
+                Text(markdown(descriptionFor(integration)))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.7))
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let loginError, selectedId == integration.id {
                 Text(loginError)
@@ -725,25 +739,25 @@ struct ConnectionsView: View {
 
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {
-        case "chatgpt":     return "Sign in with your **ChatGPT Plus / Pro** account, via the Codex OAuth flow."
-        case "openai-byok": return "Paste a raw OpenAI API key (sk-…). **Pay-per-token**, no subscription needed."
+        case "chatgpt":     return "Use the **ChatGPT Plus / Pro** subscription you already pay for. Just sign in below."
+        case "openai-byok": return "Pay OpenAI **per use** instead of monthly. Paste a key from your OpenAI account."
         // 钥匙串那段是给用户看的"为什么弹密码框"。macOS 的授权对话框只说
         // "My Portrait 想要使用您在钥匙串中存储的机密信息",不说读来干嘛 ——
         // 不在这儿解释,用户只会看到一个凭空要密码的弹窗,还每次都弹。
         case "claude-code": return """
-            Use your **Claude Code CLI** subscription quota (Pro/Max). Requires **claude login** in Terminal first.
+            Use the **Claude Pro / Max** subscription you already pay for. Sign in once by running **claude login** in Terminal, then press the button below.
 
-            **Detect login status** also reads the expiry date from your Keychain, so you get warned **before** the login runs out — instead of an overnight pipeline failing silently. macOS asks for your Mac password the first time: enter it and click **Always Allow**, and it won't ask again. Only the expiry date is read; **the token never leaves this Mac**.
+            That button also checks **when your login expires**, so My Portrait can warn you a few days ahead instead of quietly stopping in the middle of the night. Your Mac will ask for your password — type it and click **Always Allow** so it stops asking. Only the expiry date is read, and **nothing ever leaves this Mac**.
             """
-        case "anthropic-api": return "Your Anthropic API key. **Pay-per-token**, lowest latency."
-        case "gemini":      return "Google AI Studio API key. **Free tier** available."
-        case "perplexity":  return "Perplexity API — **web-grounded** answers."
-        case "deepseek":    return "DeepSeek API key. OpenAI-compatible, **cheap pay-per-token**."
-        case "ollama":      return "Run **open-source models** on this Mac. Detects your local Ollama install."
-        case "obsidian":    return "**Read & write** your Obsidian vault as memory."
-        case "notion":      return "Create an **Internal Integration Token** at notion.so/profile/integrations and paste it below. Only pages you **share with the integration** are visible."
-        case "email-smtp":  return "Let cronJobs send email via your SMTP server. Credentials stay **encrypted on this Mac**."
-        case "apple-calendar":      return "Read your local **Calendar.app** events."
+        case "anthropic-api": return "Pay Anthropic **per use** instead of monthly. Paste a key from your Anthropic account."
+        case "gemini":      return "Google's models. The key from Google AI Studio is **free** to start."
+        case "perplexity":  return "Answers that **search the web** first. Needs a Perplexity key."
+        case "deepseek":    return "The **cheapest** pay-per-use option. Paste a key from your DeepSeek account."
+        case "ollama":      return "Run models **on this Mac** — free, and nothing goes online. Needs the Ollama app installed."
+        case "obsidian":    return "Let your memory **read and write** notes in your Obsidian vault."
+        case "notion":      return "Let your memory read your Notion pages. Create a token at notion.so/profile/integrations and paste it below — **only the pages you share with it** are visible."
+        case "email-smtp":  return "Let Cron Jobs **email you**. Your password stays **encrypted on this Mac**."
+        case "apple-calendar":      return "Let your memory see **what's on your calendar**."
         default: return "Connect this integration to your AI."
         }
     }
