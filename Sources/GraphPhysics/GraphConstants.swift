@@ -262,7 +262,9 @@ public enum GraphConstants {
     /// 不断喂扰动,而中点弛豫不约束整体绝对角度 —— 合力矩残余养出
     /// 无阻尼公转,整圈 hub 疯转(621c65f6 全量生效版的翻车根因)。
     /// 多 hub 场景本来也不需要它:球多了碰撞自然摊满一圈。
-    public static let hubAngularMaxHubs: Int = 4
+    /// 4→5(08-09 实测):4 folder + 灰球 = 5 hub 正好压过 4 的门,
+    /// 只靠等角出生不够匀 —— 放进力的辖区。真实数据 12 hub 仍在门外。
+    public static let hubAngularMaxHubs: Int = 5
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     public static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)
