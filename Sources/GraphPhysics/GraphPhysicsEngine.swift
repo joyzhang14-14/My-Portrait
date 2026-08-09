@@ -497,6 +497,50 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         wake()
     }
 
+    /// hub 绕主球的角向均布 —— **只在 hub ≤ hubAngularMaxHubs(4)时生效**。
+    ///
+    /// 08-09 分情况定稿:全量生效版(621c65f6)在用户真实数据(12 hub)上
+    /// 疯转已回滚 —— 中点弛豫不约束整体绝对角度,多 hub 时陨石环 + 气泡
+    /// 碰撞不断喂扰动,合力矩残余养出无阻尼公转。少 hub 时扰动源少、
+    /// 间隙相等后力归零,实测(3 hub)收敛稳;多 hub 本来也不需要它 ——
+    /// 球多了碰撞自然摊满一圈。等角环出生(seedHubAngles)两种情况都在。
+    ///
+    /// 机制同 familySpreadPass 的「向左右邻居角向中点回正」,圆心换成
+    /// 原点(主球)、成员换成 hub。**只动切向速度**:半径由 hub→主球
+    /// 弹簧管,两者互不干扰。
+    private func hubAngularPass() {
+        let count = hubIndices.count
+        guard count >= 2, count <= GraphConstants.hubAngularMaxHubs else { return }
+        let k = GraphConstants.hubAngularStrength
+        var items: [(t: Float, hub: Int32)] = []
+        items.reserveCapacity(count)
+        for h in hubIndices {
+            let p = pos[Int(h)]
+            items.append((atan2(p.y, p.x), h))
+        }
+        items.sort { $0.t < $1.t }
+        for i in 0..<count {
+            let tL = items[(i + count - 1) % count].t
+            let tC = items[i].t
+            let tR = items[(i + 1) % count].t
+            var gapL = tC - tL
+            if gapL < 0 { gapL += 2 * .pi }
+            var gapR = tR - tC
+            if gapR < 0 { gapR += 2 * .pi }
+            // count == 2 时左右邻居是同一个 hub,gapL + gapR = 2π,
+            // delta 把它们推向 180° —— 正是想要的,不用特判。
+            let delta = (gapR - gapL) * 0.5
+            let hub = Int(items[i].hub)
+            let p = pos[hub]
+            let r = simd_length(p)
+            guard r > 1 else { continue }
+            let tangent = SIMD2<Float>(-p.y, p.x) / r
+            // 限速 ±0.1 rad:hub 拖着整个气泡,爆冲会甩过头来回荡。
+            let push = max(min(delta, 0.1), -0.1)
+            vel[hub] += tangent * (push * r * k)
+        }
+    }
+
     /// hub 出生角 = 绕主球等角环(08-09 用户:"folder 球全偏向主球一边")。
     ///
     /// hub 的夹角在物理里**只由气泡碰撞涌现** —— 气泡一旦互不重叠就没有
@@ -838,6 +882,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltPass()
         bubblePass()
         if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
+        if heavy { hubAngularPass() }     // 同上;≤4 hub 才生效,门槛见常量注释
         // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
         // tick 的树(位置只差一步,剪枝留了 pad 余量),省掉建树大头。
         collidePass()

@@ -253,6 +253,16 @@ public enum GraphConstants {
     /// 且限 40 叶,大家云团仍偏半边:质心偏移实测 34%)。
     /// 0.15:不乘 alpha 后恒定生效,0.3 会过冲抖动
     public static let familySpreadStrength: Float = 0.2
+    /// hub 绕主球的角向均布力(08-09:"folder 球全偏向主球一边")。
+    /// 同 familySpread 的邻居中点弛豫,圆心换成原点、成员换成 hub。
+    /// 比家内那个小一档:hub 拖着整个气泡,惯性大,推猛了会甩过头。
+    public static let hubAngularStrength: Float = 0.08
+    /// 角向力只在 hub 数 ≤ 此值时生效(08-09 用户实测定的分界):
+    /// 少 hub 时收敛快、没出过事;多 hub(实测 12)时陨石环 + 气泡碰撞
+    /// 不断喂扰动,而中点弛豫不约束整体绝对角度 —— 合力矩残余养出
+    /// 无阻尼公转,整圈 hub 疯转(621c65f6 全量生效版的翻车根因)。
+    /// 多 hub 场景本来也不需要它:球多了碰撞自然摊满一圈。
+    public static let hubAngularMaxHubs: Int = 4
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
     public static let bhTheta2: Float = 0.81
     /// 斥力最小距离²(防重叠点无穷大力)
