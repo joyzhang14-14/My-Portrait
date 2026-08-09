@@ -206,29 +206,28 @@ struct ContentView: View {
     /// 主 view 本体 —— 用户完成 onboarding 后渲染。封成 computed property
     /// 让 body 的 if/else 干净。
     private var mainContent: some View {
-        VStack(spacing: 0) {
-            // dev mode 常驻提示条 —— 界面读的是 ~/.portrait-dev 的编造数据,
-            // 且采集/隐私/存储/调度/记忆那几页是只读的。没有它很容易忘了自己
-            // 在 dev 里,对着假数据排查真问题。
-            if DevMode.isOn {
-                // ⚠️ 顺序是 frame → padding → background:橙色铺满整行的通条。
-                // 换成 background 在前会只包住文字,变成一枚小签(08-09 试过,
-                // 用户要的是通条,只是压矮)。
-                //
-                // ⚠️ **ignoresSafeAreaEdges: [] 是这条真正矮下来的关键**:
-                // .background(Color) 默认把颜色扩散进安全区,这条挂在窗口顶端,
-                // 上方的安全区就是整个标题栏 —— 橙色会一路漫到红绿灯后面,
-                // 视觉上 ~70pt 高(08-09 用户截图)。禁掉扩散只剩文字那 ~13pt。
-                Text("DEV MODE · read only")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.black.opacity(0.8))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 1)
-                    .background(Color.orange.opacity(0.85), ignoresSafeAreaEdges: [])
+        // dev mode 常驻提示条 —— 界面读的是 ~/.portrait-dev 的编造数据,
+        // 且采集/隐私/存储/调度/记忆那几页是只读的。没有它很容易忘了自己
+        // 在 dev 里,对着假数据排查真问题。
+        //
+        // ⚠️ 用 **overlay 浮条**,不进 VStack(08-09 三稿定):
+        //   - VStack 会把 mainSplit 整体往下推,标题栏区域露出窗口的纯黑底,
+        //     跟普通模式"内容延伸进标题栏"的背景对不上(用户截图);
+        //   - overlay 不改任何布局 —— 背景与普通模式完全一致,橙条只是原图层
+        //     上浮着的一条,~13pt,贴在标题栏下沿。
+        mainSplit
+            .overlay(alignment: .top) {
+                if DevMode.isOn {
+                    Text("DEV MODE · read only")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.black.opacity(0.8))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.85))
+                        .allowsHitTesting(false)   // 纯标识,别挡下面内容的点击
+                }
             }
-            mainSplit
-        }
-        .frame(minWidth: 1200, minHeight: 835)
+            .frame(minWidth: 1200, minHeight: 835)
     }
 
     private var mainSplit: some View {
