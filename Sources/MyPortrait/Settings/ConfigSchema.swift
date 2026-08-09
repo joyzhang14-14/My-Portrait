@@ -909,6 +909,12 @@ struct PrivacyConfig: Codable, Equatable {
     /// 与 TypingPrivacyFilter 的 hardcoded 默认黑名单取并集。
     var typingBlacklistApps: [String] = []
     var typingBlacklistUrls: [String] = []
+    /// 类别级黑名单 —— 值是完整的 `LSApplicationCategoryType`(同音频
+    /// 「暂停名单」那套,见 `AppCategoryResolver`)。选 Finance 就等于把所有
+    /// 自报为财务类的 app 一次性加进名单,不用一个个点。
+    /// screen 侧命中 → 那个窗口从帧里抠掉;typing 侧命中 → 不记这个 app 的输入。
+    var ignoredCategories:          [String] = []
+    var typingBlacklistCategories:  [String] = []
     /// DEPRECATED —— 老的 (bundle_id, url_prefix) 成对模型(URL 只能绑在某个
     /// app 下、且是 case-sensitive 前缀)。只为解码老 config 保留:decode 时
     /// 拆进上面两张名单后清空。
@@ -924,6 +930,8 @@ struct PrivacyConfig: Codable, Equatable {
         case typingBlacklistApps      = "typing_blacklist_apps"
         case typingBlacklistUrls      = "typing_blacklist_urls"
         case typingBlacklistEntries   = "typing_blacklist_entries"
+        case ignoredCategories         = "ignored_categories"
+        case typingBlacklistCategories = "typing_blacklist_categories"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -941,6 +949,8 @@ struct PrivacyConfig: Codable, Equatable {
         pauseForProtectedVideo = c.dflt(Bool.self,     .pauseForProtectedVideo, pauseForProtectedVideo)
         typingBlacklistApps      = c.dflt([String].self, .typingBlacklistApps, typingBlacklistApps)
         typingBlacklistUrls      = c.dflt([String].self, .typingBlacklistUrls, typingBlacklistUrls)
+        ignoredCategories         = c.dflt([String].self, .ignoredCategories, ignoredCategories)
+        typingBlacklistCategories = c.dflt([String].self, .typingBlacklistCategories, typingBlacklistCategories)
         // DEPRECATED 迁移:老 entries 拆成两张名单 —— urlPrefix 空的是整 app
         // 屏蔽进 apps,非空的把前缀当子串进 urls。拆完清空,字段废弃。
         typingBlacklistEntries   = c.dflt([TypingBlacklistEntry].self, .typingBlacklistEntries, [])

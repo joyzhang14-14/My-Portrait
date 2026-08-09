@@ -97,6 +97,7 @@ final class ScreenCaptureService {
                     excluded = windows.filter {
                         ignore.shouldMaskWindow(
                             appName: $0.owningApplication?.applicationName ?? "",
+                            bundleId: $0.owningApplication?.bundleIdentifier,
                             title: $0.title
                         )
                     }

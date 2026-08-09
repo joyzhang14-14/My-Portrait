@@ -54,12 +54,10 @@ actor MusicAudioDetector {
         return category
     }
 
-    /// 命中判定：精确匹配,或 `games` 选中时匹配任意 `*-games` 子类。
+    /// 命中判定 —— 规则住在 `AppCategoryResolver`,屏幕 / 打字两条黑名单也用
+    /// 同一份。这里保留自己的 categoryCache(actor 隔离,不必上锁)。
     private static func categoryMatches(_ declared: String, selected: Set<String>) -> Bool {
-        guard !declared.isEmpty, !selected.isEmpty else { return false }
-        if selected.contains(declared) { return true }
-        if selected.contains("public.app-category.games"), declared.hasSuffix("-games") { return true }
-        return false
+        AppCategoryResolver.matches(declared: declared, selected: selected)
     }
 
     // MARK: - Core Audio 进程对象

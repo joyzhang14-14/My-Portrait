@@ -630,8 +630,8 @@ struct ScreenCaptureSettingsView: View {
         SettingsCard(
             // App 名单和 URL 名单行为完全一样(窗口抠掉、帧照拍),合成一张卡,
             // 中间用分割线分区。
-            title: "Ignored apps & URLs",
-            info: "The screenshot is still taken — the matching window is just cut out of it and comes out black. Everything else on screen is captured as usual.\n\nWhy not skip the whole frame? Frames are the timeline. Your recordings and typing history are lined up against them, so a missing frame is a missing stretch of your day, not just a missing picture.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com."
+            title: "Ignored apps, categories & URLs",
+            info: "The screenshot is still taken — the matching window is just cut out of it and comes out black. Everything else on screen is captured as usual.\n\nWhy not skip the whole frame? Frames are the timeline. Your recordings and typing history are lined up against them, so a missing frame is a missing stretch of your day, not just a missing picture.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Apps — pick from captured apps or the system / privacy list…")
@@ -639,6 +639,15 @@ struct ScreenCaptureSettingsView: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+            SettingsDivider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Categories — covers every app that declares itself one of these…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                CategoryChipPicker(categories: config.binding(\.privacy.ignoredCategories))
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
             SettingsDivider()
@@ -845,7 +854,7 @@ struct TypingCaptureSettingsView: View {
     private var blacklistSection: some View {
         SettingsCard(
             title: "Typing blacklist",
-            info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved.\n\nPassword managers and terminals are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
+            info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet.\n\nPassword managers and terminals are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Apps — pick from apps you've typed in…")
@@ -858,6 +867,15 @@ struct TypingCaptureSettingsView: View {
                     locked: TypingPrivacyFilter.defaultBlacklist
                 )
                 .padding(.horizontal, 14).padding(.bottom, 12)
+            }
+            SettingsDivider()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Categories — covers every app that declares itself one of these…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
+                CategoryChipPicker(categories: config.binding(\.privacy.typingBlacklistCategories))
+                    .padding(.horizontal, 14).padding(.bottom, 12)
             }
             SettingsDivider()
             VStack(alignment: .leading, spacing: 0) {

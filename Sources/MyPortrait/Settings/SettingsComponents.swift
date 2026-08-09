@@ -822,6 +822,79 @@ struct PauseAudioListPicker: View {
 }
 
 
+// MARK: - CategoryChipPicker —— 类别名单(屏幕 / 打字黑名单共用)
+
+/// Category 下拉 + 已选 chip。**只管类别**,app / URL 各有自己的编辑器。
+///
+/// 跟 `PauseAudioListPicker` 的类别那一半是同一套语义(值都是完整的
+/// `LSApplicationCategoryType`,判定都走 `AppCategoryResolver`),只是那边
+/// 要跟 app chip 混排,形态不同,没法直接复用。
+struct CategoryChipPicker: View {
+    @Binding var categories: [String]
+
+    private var boxBackground: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Color.white.opacity(0.04))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Menu {
+                ForEach(AppCategory.all, id: \.id) { cat in
+                    Button { toggle(cat.id) } label: {
+                        if categories.contains(cat.id) {
+                            Label(cat.label, systemImage: "checkmark")
+                        } else { Text(cat.label) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.grid.2x2").font(.system(size: 11))
+                    Text("Category").font(.system(size: 12))
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(boxBackground)
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+
+            if !categories.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(categories, id: \.self) { c in
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.grid.2x2.fill")
+                                .font(.system(size: 8))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.5))
+                            Text(AppCategory.label(c))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                            Button { categories.removeAll { $0 == c } } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                            }
+                            .buttonStyle(.bouncyIcon)
+                        }
+                        .padding(.horizontal, 7).padding(.vertical, 3.5)
+                        .help(c)
+                        .background(
+                            Capsule().fill(.ultraThinMaterial)
+                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+                        )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if let i = categories.firstIndex(of: id) { categories.remove(at: i) }
+        else { categories.append(id) }
+    }
+}
+
 // MARK: - PauseCaptureAppPicker —— 屏幕采集「暂停名单」的 app 选择器
 
 /// 从**已安装** app 里选,按 **app 名字** 存(DRMGate 匹配 focus.appName 子串)。

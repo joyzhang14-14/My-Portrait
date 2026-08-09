@@ -25,6 +25,7 @@ final class IgnoreGate: @unchecked Sendable {
     private struct State {
         var appsLower: Set<String> = []           // 小写,子串匹配（app 名 / 标题）
         var urlSubstrings: [String] = []          // 小写,URL / 标题子串(也收并进来的旧 ignoredWindowTitles)
+        var categories: Set<String> = []          // 完整 LSApplicationCategoryType
         var maskingEnabled: Bool = true
     }
 
@@ -54,6 +55,13 @@ final class IgnoreGate: @unchecked Sendable {
         state.withLock { $0.urlSubstrings = normalized }
     }
 
+    /// 类别名单(完整 `LSApplicationCategoryType`)。命中的窗口按它 owning app
+    /// 自报的类别遮 —— 见 `AppCategoryResolver`。
+    func setIgnoredCategories(_ cats: [String]) {
+        let normalized = Set(cats.filter { !$0.isEmpty })
+        state.withLock { $0.categories = normalized }
+    }
+
     func setMaskingEnabled(_ enabled: Bool) {
         state.withLock { $0.maskingEnabled = enabled }
     }
@@ -69,6 +77,7 @@ final class IgnoreGate: @unchecked Sendable {
         guard snap.maskingEnabled else { return false }
         return snap.appsLower.contains { !$0.isEmpty }
             || snap.urlSubstrings.contains { !$0.isEmpty }
+            || !snap.categories.isEmpty
     }
 
     /// 一个窗口是否应该从截图里抹掉(帧照拍,这块渲染成黑)：
@@ -77,12 +86,21 @@ final class IgnoreGate: @unchecked Sendable {
     ///   - ignoredApps 子串命中窗口 app 名**或**标题 → 抹
     ///     (壁纸窗口标题是 "Wallpaper-<UUID>","wallpaper" 子串即命中它本身)
     ///   - 窗口标题子串命中 ignoredUrls → 抹
-    func shouldMaskWindow(appName: String, title: String?) -> Bool {
+    ///   - owning app 自报的类别命中 ignoredCategories → 抹
+    ///     (bundleId 为 nil 时这条判不了,跳过 —— 系统窗口常没有 bundle)
+    func shouldMaskWindow(appName: String, bundleId: String?, title: String?) -> Bool {
         let app = appName.lowercased()
         if Self.builtinIgnored.contains(app) { return true }
 
         let snap = state.withLock { $0 }
         guard snap.maskingEnabled else { return false }
+
+        // 类别放在字符串匹配之前:命中就直接抹,省掉下面的逐条子串扫描。
+        // 结果有缓存(AppCategoryResolver),每帧逐窗口问不会读盘。
+        if !snap.categories.isEmpty, let bundleId, !bundleId.isEmpty,
+           AppCategoryResolver.shared.matches(bundleId: bundleId, selected: snap.categories) {
+            return true
+        }
 
         let t = (title ?? "").lowercased()
 

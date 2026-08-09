@@ -56,7 +56,11 @@ struct TypingPrivacyFilter {
     @MainActor
     static func isBlacklisted(bundleId: String) -> Bool {
         if hardcodedBlacklist.contains(bundleId) { return true }
-        return ConfigStore.shared.privacy.typingBlacklistApps.contains(bundleId)
+        let privacy = ConfigStore.shared.privacy
+        if privacy.typingBlacklistApps.contains(bundleId) { return true }
+        // 类别名单:选了 Finance 就等于把所有自报财务类的 app 加进名单。
+        return AppCategoryResolver.shared.matches(
+            bundleId: bundleId, selected: Set(privacy.typingBlacklistCategories))
     }
 
     /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 命中 URL 名单里的
@@ -76,9 +80,13 @@ struct TypingPrivacyFilter {
     /// `(bundle_id, url)`。nonisolated,可以脱离 MainActor 用。
     static func matches(
         apps: Set<String>, urls: [String], hardcoded: Set<String>,
+        categories: Set<String> = [],
         bundleId: String, url: String
     ) -> Bool {
         if hardcoded.contains(bundleId) || apps.contains(bundleId) { return true }
+        if AppCategoryResolver.shared.matches(bundleId: bundleId, selected: categories) {
+            return true
+        }
         let u = url.lowercased()
         guard !u.isEmpty else { return false }
         return urls.contains { !$0.isEmpty && u.contains($0.lowercased()) }
@@ -86,6 +94,25 @@ struct TypingPrivacyFilter {
 
     /// hardcoded 黑名单 snapshot —— `matches(...)` 用。
     static var hardcodedSnapshot: Set<String> { hardcodedBlacklist }
+
+    /// 把类别名单摊平成 bundle id 集合。
+    ///
+    /// 给**只能按 bundle_id 比对的写入路径**用 —— keystroke_log / mouse_log
+    /// 是 CGEventTap 全局 tap 写的,行级没有 app 上下文,只能靠一份预先算好的
+    /// id 集合过滤;不能每敲一下去查一次类别。
+    ///
+    /// ⚠️ **快照**:采集启动时算一次。之后新装的 app 落进选中类别,要重启
+    /// 采集才生效。AX 那条路(`isBlacklisted`)是实时查的,不受这个限制。
+    ///
+    /// 扫盘 + 读 Info.plist,**放后台调**。
+    nonisolated static func bundleIds(forCategories categories: [String]) -> Set<String> {
+        let selected = Set(categories.filter { !$0.isEmpty })
+        guard !selected.isEmpty else { return [] }
+        let resolver = AppCategoryResolver.shared
+        return Set(InstalledApps.scan()
+            .map(\.id)
+            .filter { resolver.matches(bundleId: $0, selected: selected) })
+    }
 
     /// role 是否为密码输入框。
     static func isSecureRole(_ role: String?) -> Bool {

@@ -117,6 +117,23 @@ final class TypingObserver {
                 mouseLogger.updateBlacklist(union)
                 ledger.mouseLogger = mouseLogger
             }
+
+            // 类别名单摊平成 bundle id 补进去。**扫盘 + 读 Info.plist,不能
+            // 卡在这里**(tap 要立刻活),所以后台算完再补一次 —— 这中间
+            // 几百毫秒的窗口只影响 keystroke_log/mouse_log,AX 那条路
+            // (isBlacklisted)一直是实时查类别的,不漏。
+            let categories = ConfigStore.shared.privacy.typingBlacklistCategories
+            if !categories.isEmpty {
+                Task { [weak self] in
+                    let expanded = await Task.detached(priority: .utility) {
+                        TypingPrivacyFilter.bundleIds(forCategories: categories)
+                    }.value
+                    guard !expanded.isEmpty, let self else { return }
+                    let full = union.union(expanded)
+                    self.keystrokeCharLogger?.updateBlacklist(full)
+                    self.mouseClickLogger?.updateBlacklist(full)
+                }
+            }
         }
 
         // 回车摇读:回车一按,延迟几 ms 抢读焦点字段现值喂回 writer —— 救 IME 末尾

@@ -93,6 +93,11 @@ actor CaptureCoordinator {
         ignore.setIgnoredUrlPatterns(patterns)
     }
 
+    /// Services 在 ConfigStore.privacy.ignoredCategories 变化时调。
+    nonisolated func setIgnoredCategories(_ cats: [String]) {
+        ignore.setIgnoredCategories(cats)
+    }
+
     // (07-21 删 setMaskingEnabled:遮挡永远开,IgnoreGate 默认 true 不再改。)
 
     /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。

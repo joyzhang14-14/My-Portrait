@@ -486,6 +486,7 @@ final class Services {
         let p = ConfigStore.shared.privacy
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
+        coordinator.setIgnoredCategories(p.ignoredCategories)
         // (07-21:masking 永远开、incognito 跳帧永久关,两条接线已删。)
         // 名单写死在 DRMGate,用户不可改;这里只按总开关决定推固定名单还是空。
         coordinator.setPauseCaptureList(
@@ -500,6 +501,7 @@ final class Services {
         withObservationTracking {
             _ = store.privacy.ignoredApps
             _ = store.privacy.ignoredUrls
+            _ = store.privacy.ignoredCategories
             _ = store.privacy.pauseForProtectedVideo
         } onChange: { [weak self] in
             Task { @MainActor in
