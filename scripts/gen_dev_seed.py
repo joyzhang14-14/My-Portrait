@@ -326,6 +326,29 @@ for _i, (_t, _s2, _tags) in enumerate(_MORE):
     _imp = round(min(4.0, 1.2 + _w * 0.7), 1)
     LOOSE.append((_day, _t, _s2, round(_w, 1), _imp, _tags))
 
+# ── 压测填充(08-09"再多,均匀给所有 folder,编号即可") ──────────────
+# 纯占位数据,不讲叙事;要撤掉删这一段重跑即可。
+_FILL_PER_FOLDER = 40
+_FILL_LOOSE = 120
+def _fill(i, n):
+    day = 1 + (i * 11 + n * 3) % 60          # 1..60 天,确定性
+    w = 0.5 + ((i * 17 + n * 5) % 40) / 10.0 # 0.5..4.4
+    return day, round(w, 1), round(min(4.5, 1.0 + w * 0.7), 1)
+
+for _fi, _f in enumerate(FOLDERS):
+    _slug = _f[0]
+    for _i in range(_FILL_PER_FOLDER):
+        _day, _w, _imp = _fill(_i, _fi)
+        _f[4].append((_day, f"Filler event {_slug}-{_i+1:02d}",
+                      f"Bulk seed entry {_i+1} for {_f[1]} — layout stress test only.",
+                      _w, _imp, ["filler"]))
+
+for _i in range(_FILL_LOOSE):
+    _day, _w, _imp = _fill(_i, 9)
+    LOOSE.append((_day, f"Filler loose event {_i+1:03d}",
+                  f"Bulk unclassified seed entry {_i+1} — layout stress test only.",
+                  _w, _imp, ["filler"]))
+
 # portrait/<category>/*.md —— 每类几条,画像层的"长期结论"
 PORTRAIT = {
     "personality": [
