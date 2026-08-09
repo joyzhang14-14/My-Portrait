@@ -212,7 +212,7 @@ struct ConnectionsView: View {
 
             Divider().background(Color.primary.opacity(0.08))
 
-            Text(descriptionFor(integration))
+            Text(markdown(descriptionFor(integration)))
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textPrimary.opacity(0.7))
                 .lineSpacing(2)
@@ -712,6 +712,16 @@ struct ConnectionsView: View {
         case .smtp: return "Save SMTP settings"
         }
     }
+    /// 描述文案按 markdown 渲染 —— `claude login` 这种反引号原样画出来很怪,
+    /// 加粗也需要它。`.inlineOnlyPreservingWhitespace` 保留段落间的空行
+    /// (完整 block 解析会把换行吃掉,多段文案挤成一坨)。解析失败退回纯文本。
+    private func markdown(_ s: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: s,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(s)
+    }
+
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {
         case "chatgpt":     return "Sign in with your ChatGPT Plus / Pro account (uses the Codex OAuth flow). No API key needed."
@@ -722,7 +732,7 @@ struct ConnectionsView: View {
         case "claude-code": return """
             Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first.
 
-            Detect login status also reads the expiry date from your Keychain, so My Portrait can warn you before the login runs out — instead of an overnight pipeline silently failing. macOS asks for your Mac password the first time: enter it and click Always Allow, and it won't ask again. Only the expiry date is read; the token itself never leaves this Mac.
+            **Detect login status** also reads the expiry date from your Keychain, so My Portrait can warn you **before** the login runs out — instead of an overnight pipeline silently failing. macOS asks for your Mac password the first time: enter it and click **Always Allow**, and it won't ask again. Only the expiry date is read; **the token itself never leaves this Mac**.
             """
         case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
         case "gemini":      return "Google AI Studio API key. Free tier available."
