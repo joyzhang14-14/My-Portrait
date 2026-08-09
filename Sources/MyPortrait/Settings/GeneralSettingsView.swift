@@ -70,21 +70,27 @@ struct GeneralSettingsView: View {
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。
-            SettingsCard(title: "Onboarding") {
-                SettingsRow("Replay onboarding",
-                            info: "Opens the setup steps again — handy for granting a permission you skipped or switching your AI provider.",
-                            icon: "sparkles") {
-                    Button("Show") {
-                        // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
-                        // sheet 模式两个 bug:① attached sheet 主窗口在背后能看到
-                        // ② dismiss 后 NSHostingView 重算 intrinsic size 收缩窗口。
-                        // 把 onboardingCompleted 设 false → ContentView 立刻把
-                        // mainContent 换成 OnboardingView 填满整个窗口;onboarding
-                        // finish callback 把 flag 设回 true → 切回 mainContent。
-                        configStoreGen.mutate { $0.general.onboardingCompleted = false }
-                        configStoreGen.saveNow()
+             //
+             // 08-09:只在 dev mode 下露出 —— 普通用户走完一次就不该再见到它。
+             // 少给的那条补救路径(漏授权 / 换供应商)上面 Permissions 卡里
+             // 每一项都有自己的授权按钮,不靠重走 onboarding。
+            if DevMode.isOn {
+                SettingsCard(title: "Onboarding") {
+                    SettingsRow("Replay onboarding",
+                                info: "Opens the setup steps again.",
+                                icon: "sparkles") {
+                        Button("Show") {
+                            // **走 ContentView 同款 if/else 全屏切换**,不用 sheet。
+                            // sheet 模式两个 bug:① attached sheet 主窗口在背后能看到
+                            // ② dismiss 后 NSHostingView 重算 intrinsic size 收缩窗口。
+                            // 把 onboardingCompleted 设 false → ContentView 立刻把
+                            // mainContent 换成 OnboardingView 填满整个窗口;onboarding
+                            // finish callback 把 flag 设回 true → 切回 mainContent。
+                            configStoreGen.mutate { $0.general.onboardingCompleted = false }
+                            configStoreGen.saveNow()
+                        }
+                        .font(.system(size: 12, weight: .medium))
                     }
-                    .font(.system(size: 12, weight: .medium))
                 }
             }
 
@@ -99,26 +105,33 @@ struct GeneralSettingsView: View {
     private var devModeCard: some View {
         SettingsCard(title: "Dev mode") {
             SettingsRow(
-                "Use demo data",
+                DevMode.isOn ? "Currently using demo data" : "Use demo data",
+                description: DevMode.isOn ? DevMode.rootURL.path : nil,
                 info: "Points the app's UI at ~/.portrait-dev — made-up events, portrait and chats for debugging a fresh install or recording a demo. Screen/audio/typing capture and the memory pipeline keep reading and writing your real ~/.portrait the whole time. Capture, privacy, storage, scheduler and memory settings stay on your real config and become read-only.",
                 icon: "hammer"
             ) {
-                Toggle("", isOn: Binding(
-                    get: { DevMode.desiredOn },
-                    set: { DevMode.setEnabledPendingRestart($0) }
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-            }
-            if DevMode.needsRestart {
-                SettingsDivider()
-                SettingsRow("Restart to apply",
-                            info: "Data paths are fixed for the life of the process — open databases and file watchers would otherwise end up split across two roots.",
-                            icon: "arrow.clockwise") {
-                    Button("Restart now") { AppRelaunch.run() }
-                        .font(.system(size: 12, weight: .medium))
+                // 一键切换:改标志 → 刷盘 → 立刻重启。
+                // **不做"开关 + 稍后重启"两步** —— 数据路径在进程内是冻结的
+                // (见 DevMode.isOn),拨完开关到重启之间那段时间界面说的和实际
+                // 用的根本不是一套,除了制造困惑没有任何用处。
+                Button(DevMode.isOn ? "Switch back to my data" : "Switch to demo data") {
+                    switchMode(to: !DevMode.isOn)
                 }
+                .font(.system(size: 12, weight: .medium))
             }
+        }
+    }
+
+    /// 切 dev mode 并重启。
+    ///
+    /// **必须 await saveNowAndWait**:`saveNow` 是 fire-and-forget Task,会被
+    /// 紧接着的 NSApp.terminate 杀掉,配置没真落盘 —— 跟 AppCustomizeCard 的
+    /// saveAndRestart 踩的是同一个坑。
+    private func switchMode(to on: Bool) {
+        DevMode.setEnabled(on)
+        Task { @MainActor in
+            await ConfigStore.shared.saveNowAndWait()
+            AppRelaunch.run()
         }
     }
 
