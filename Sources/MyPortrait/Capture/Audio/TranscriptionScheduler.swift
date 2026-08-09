@@ -128,8 +128,9 @@ actor TranscriptionScheduler {
             }
         }
 
-        // 健康度起点。StallDetector 用 uptime > 120s 跳 warmup 误报。
-        await AudioMetrics.shared.markStarted()
+        // ⚠️ 这里**不再** markStarted。转录调度器是随 app 起的,拿它当起点
+        // 等于"audio uptime = app 开机时长",音频采集关着也在涨。起点改由
+        // Services 订阅 audioCaptureEnabled 推(见 AudioMetrics.markStarted)。
         logger.info("TranscriptionScheduler started (event-driven via PowerWatcher + 60s fallback)")
 
         // 一次性清理跨通道去重上线前积累的历史双份(外放回录)。120s 冷启动

@@ -98,9 +98,16 @@ actor AudioMetrics {
     private(set) var chunksTranscribed: UInt64 = 0
     private(set) var startedAtMs: Int64 = 0
 
+    /// 起点 = **用户把 Audio Capture 打开的那一刻**(Services 里订阅
+    /// `audioCaptureEnabled` 推过来),不是 app 启动、也不是转录器 boot。
+    /// 关掉 → `markStopped()` 清零,Health 页显示 "—",再打开重新计时。
+    ///
+    /// StallDetector 也读 `startedAtMs`:>0 现在等于"用户开着音频采集",
+    /// 比原来的"转录调度器起来了"更贴它想要的语义(采集关着报音频卡死没意义)。
     func markStarted() {
         if startedAtMs == 0 { startedAtMs = VisionMetrics.nowMs() }
     }
+    func markStopped() { startedAtMs = 0 }
     func recordChunkProduced()    { chunksProduced &+= 1 }
     func recordChunkTranscribed() { chunksTranscribed &+= 1 }
 

@@ -122,7 +122,7 @@ struct CaptureHealthView: View {
     private var diagnosticCard: some View {
         SettingsCard(title: "Bug report") {
             SettingsRow("Report on GitHub",
-                        description: "Best if you can describe the bug clearly and know how to trigger it. Opens GitHub so you can file a public issue yourself.",
+                        info: "Best if you can describe the bug clearly and know how to trigger it. Opens GitHub so you can file a public issue yourself.",
                         icon: "ladybug") {
                 Button("Open") {
                     if let issue = URL(string: "https://github.com/joyzhang14-14/My-Portrait/issues/new?template=bug_report.yml") {
@@ -133,7 +133,7 @@ struct CaptureHealthView: View {
             }
             SettingsDivider()
             SettingsRow("Send data to developer privately",
-                        description: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and helps you email them to the developer.",
+                        info: "Not sure what caused the bug, or don't feel like writing it up? This packs detailed logs and helps you email them to the developer.",
                         icon: "lock.shield") {
                 Button(diagBundleBusy ? "Working…" : "Send") {
                     runDiagnosticExport(mode: .privateSupport)
@@ -199,21 +199,25 @@ struct CaptureHealthView: View {
 
     private var statusCard: some View {
         let active = !recent.isEmpty && Self.activeWithinSec(recent.last!, sec: 300)
+        // 灰字说明这一页全收进 ⓘ,但这一行的副文是**当前状态本身**,不是解释 ——
+        // 塞进 ⓘ 等于把唯一有用的信息藏起来。改放右侧值位(跟下面各卡的
+        // 数值行同一个位置),灰字没了,信息还在。
         return SettingsCard(title: "Status") {
             SettingsRow(
                 active ? "Stall(s) recently active" : "Healthy",
-                description: active
-                    ? "Last verdict: \(recent.last?.kind.rawValue ?? "?") at \(Self.shortTime(recent.last!.detectedAt))"
-                    : "No stalls in the last 5 minutes.",
                 icon: active ? "exclamationmark.triangle.fill" : "checkmark.seal.fill"
             ) {
-                EmptyView()
+                Text(active
+                     ? "\(recent.last?.kind.rawValue ?? "?") at \(Self.shortTime(recent.last!.detectedAt))"
+                     : "None in the last 5 min")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
             }
         }
     }
 
     private var visionCard: some View {
-        SettingsCard(title: "Vision", footnote: "If \"Silent loss\" keeps rising, some screenshots aren't being saved.") {
+        SettingsCard(title: "Vision", info: "If \"Silent loss\" keeps rising, some screenshots aren't being saved.") {
             kv("Uptime",         Self.uptimeStr(vision.uptimeSec))
             SettingsDivider()
             kv("Capture attempts", "\(vision.captureAttempts)")
@@ -246,7 +250,7 @@ struct CaptureHealthView: View {
 
     private var pauseCard: some View {
         SettingsCard(title: "Why capture is paused",
-                     footnote: "When any of these is on, capture pauses on purpose — this isn't a problem.") {
+                     info: "When any of these is on, capture pauses on purpose — this isn't a problem.") {
             kv("DRM active",                pauseState.drmActive ? "ON" : "off")
             SettingsDivider()
             kv("Screen asleep",             pauseState.screenAsleep ? "ON" : "off")
@@ -266,14 +270,18 @@ struct CaptureHealthView: View {
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
+                // 同 statusCard:时间是数据,放右侧值位;cause 是"为什么"的解释,
+                // 进 ⓘ(没 cause 时 info 为 nil,ⓘ 自动不出现)。
                 ForEach(Array(recent.reversed().prefix(10))) { v in
                     SettingsRow(
                         v.kind.rawValue,
-                        description: [Self.shortTime(v.detectedAt), v.cause]
-                            .compactMap { $0 }
-                            .joined(separator: " — "),
+                        info: v.cause,
                         icon: "exclamationmark.triangle"
-                    ) { EmptyView() }
+                    ) {
+                        Text(Self.shortTime(v.detectedAt))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                    }
                     if v.id != recent.reversed().prefix(10).last?.id {
                         SettingsDivider()
                     }

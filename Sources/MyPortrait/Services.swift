@@ -358,6 +358,21 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
+        // Health 页 Audio ▸ Uptime 的起点。
+        //
+        // 钉在**用户的开关**上,不是上面那条 `effective` —— effective 还会被
+        // 音乐暂停、锁屏暂停掐断,拿它当起点的话放首歌 uptime 就归零,读起来
+        // 像采集崩了。用户问的是"音频采集开了多久",答案就该是开关开了多久。
+        settings.$audioCaptureEnabled
+            .removeDuplicates()
+            .sink { enabled in
+                Task {
+                    if enabled { await AudioMetrics.shared.markStarted() }
+                    else       { await AudioMetrics.shared.markStopped() }
+                }
+            }
+            .store(in: &settingsCancellables)
+
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
         Publishers.CombineLatest(
             Publishers.CombineLatest4(
