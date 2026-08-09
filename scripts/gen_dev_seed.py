@@ -497,10 +497,12 @@ def main():
     print(f"写到 {ROOT}")
     loose = len(LOOSE) + n_loose_from_dropped
     print(f"  events    {n_events} 条 / {n_folders} 个 folder + {loose} 条未分类")
-    if n_folders >= 3:
-        print(f"  → folder >= 3:未分类会收成灰色 Unclassified 分区球")
+    # 图谱口径(08-09 二稿):有 folder 就立分区球,0 个才直连主球。
+    # Text 列表仍是三档(0 平铺 / 1-2 粗线 / >=3 收成组),两边有意不同。
+    if n_folders >= 1:
+        print(f"  → 图谱:有 folder → {loose} 条未分类收成灰色 Unclassified 分区球")
     else:
-        print(f"  → folder < 3:{loose} 条未分类**直连主球**,不立分区球")
+        print(f"  → 图谱:0 个 folder → {loose} 条未分类**直连主球**")
     print(f"  portrait  {n_portrait} 条 / {len(PORTRAIT)} 个类别")
     print(f"  chat      {len(CHATS)} 段对话")
     print("config.toml 不在这里生成 —— app 首次进 dev mode 时自己从真实 config 拷一份。")
