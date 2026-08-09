@@ -432,8 +432,16 @@ def write_chat_db():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true",
-                    help="先删掉现有 ~/.portrait-dev/{events,portrait,cron_jobs} 再生成")
+                    help="先删掉现有 ~/.portrait-dev/{events,portrait} 再生成")
+    ap.add_argument("--folders", type=int, default=len(FOLDERS),
+                    metavar="N",
+                    help="只保留前 N 个 folder(0…%d,默认全部)。事件全都照写,"
+                         "第 N 个之后那些 folder 的 json 不生成 —— 它们的事件就成了"
+                         "未分类。用来试 GraphConstants.unclassifiedFolderMin(=3)那条"
+                         "规则:N<3 时未分类事件直连主球、不立 Unclassified 分区球;"
+                         "N>=3 才立。" % len(FOLDERS))
     args = ap.parse_args()
+    keep = max(0, min(args.folders, len(FOLDERS)))
 
     assert ROOT.endswith(".portrait-dev"), "安全阀:只允许写 ~/.portrait-dev"
     if args.force:
@@ -444,7 +452,9 @@ def main():
     frame = 1000
     n_events = 0
 
-    for slug, name, color, desc, items in FOLDERS:
+    n_folders = 0
+    n_loose_from_dropped = 0
+    for idx, (slug, name, color, desc, items) in enumerate(FOLDERS):
         rels = []
         core = 0
         for days_ago, title, summary, weight, impact, tags in items:
@@ -454,6 +464,12 @@ def main():
                 core += 1
             n_events += 1
         assert core >= CORE_MIN, f"{slug} 只有 {core} 个核心事件,folder 会散架"
+        # 超出 --folders N 的:事件已经写进磁盘了,只是不给它建 _folders json,
+        # 于是这些事件在 app 眼里就是「没归任何 folder」。
+        if idx >= keep:
+            n_loose_from_dropped += len(rels)
+            continue
+        n_folders += 1
         fdir = os.path.join(ROOT, "events", "_folders")
         os.makedirs(fdir, exist_ok=True)
         created_ms = int(datetime.combine(d(90), datetime.min.time()).timestamp() * 1000)
@@ -479,7 +495,12 @@ def main():
     write_chat_db()
 
     print(f"写到 {ROOT}")
-    print(f"  events    {n_events} 条 / {len(FOLDERS)} 个 folder + {len(LOOSE)} 条未分类")
+    loose = len(LOOSE) + n_loose_from_dropped
+    print(f"  events    {n_events} 条 / {n_folders} 个 folder + {loose} 条未分类")
+    if n_folders >= 3:
+        print(f"  → folder >= 3:未分类会收成灰色 Unclassified 分区球")
+    else:
+        print(f"  → folder < 3:{loose} 条未分类**直连主球**,不立分区球")
     print(f"  portrait  {n_portrait} 条 / {len(PORTRAIT)} 个类别")
     print(f"  chat      {len(CHATS)} 段对话")
     print("config.toml 不在这里生成 —— app 首次进 dev mode 时自己从真实 config 拷一份。")
