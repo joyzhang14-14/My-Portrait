@@ -53,6 +53,8 @@ struct ImportSettingsView: View {
     @State private var codexProgress: CLIImportProgress? = nil
 
     var body: some View {
+        // dev mode 整页只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
+        // 演示模式下点它没有任何合理用途,只会污染你本人的采集库。
         SettingsPage("Import") {
             SettingsCard(
                 title: "Import from screenpipe",
@@ -119,6 +121,7 @@ struct ImportSettingsView: View {
                 )
             }
         }
+        .disabled(DevMode.isOn)
         // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
         // 「未扫描」+ Scan 按钮,用户点了才扫(原 auto-scan 开关已删)。
     }

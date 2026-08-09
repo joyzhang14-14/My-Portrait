@@ -222,15 +222,19 @@ struct ContentView: View {
         mainSplit
             .overlay(alignment: .top) {
                 if DevMode.isOn {
+                    let live = paneTouchesRealData
                     Color.clear
                         .frame(maxWidth: .infinity)
                         .frame(height: 0)
                         .background {
                             ZStack {
-                                Rectangle().fill(Color.orange.opacity(0.85))
-                                Text("DEV MODE · read only")
+                                Rectangle().fill(live ? Color.red.opacity(0.80)
+                                                      : Color.orange.opacity(0.85))
+                                Text(live ? "DEV MODE · THIS PAGE WRITES YOUR REAL DATA"
+                                          : "DEV MODE · read only")
                                     .font(.system(size: 15, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(.black.opacity(0.8))
+                                    .foregroundStyle(live ? .white.opacity(0.95)
+                                                          : .black.opacity(0.8))
                             }
                             .ignoresSafeArea(edges: .top)
                         }
@@ -238,6 +242,31 @@ struct ContentView: View {
                 }
             }
             .frame(minWidth: 1200, minHeight: 835)
+    }
+
+    /// 当前这一屏**能不能动到真实数据** —— dev mode 顶条据此变红。
+    ///
+    /// dev mode 保护的是"存在 config.toml 里的设置"和"events / portrait /
+    /// chat 三份数据",这几处不在保护范围内、且是有意为之:
+    ///   - Connections / Downloads → 凭据在 `secrets.sqlite`,**永远是真实那份**
+    ///     (这正是"切过去不用重新绑定供应商"的前提)
+    ///   - Cron Jobs / Notifications → `cron_jobs/` 跟真实配置跑(08-09 用户定),
+    ///     dev mode 期间你本人的定时任务照常出结果
+    /// 灰不掉也不该灰,所以改成把风险写在脸上。
+    private var paneTouchesRealData: Bool {
+        switch selection ?? .home {
+        case .cronJobs:
+            return true
+        case .settings:
+            switch settingsSubsection ?? .app(.general) {
+            case .app(.connections), .app(.downloads), .app(.notifications):
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
+        }
     }
 
     private var mainSplit: some View {
