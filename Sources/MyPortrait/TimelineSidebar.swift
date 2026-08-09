@@ -113,11 +113,16 @@ struct TimelineSidebar: View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             // App customize:跟 mainWindow.title 走同一份 config.display.appName,
             // 空串 → fallback "My Portrait"。改名 + 重启后这里跟着变。
-            // design: .rounded = SF Pro Rounded(苹果自家那套圆体,提醒事项 /
-            // 健身 / 家庭的标题用的就是它)。默认 .system 是 SF Pro,跟系统里
-            // 所有普通文字一个样,当 app 名字没有辨识度。
+            // Snell Roundhand Bold —— macOS 自带的花体(/System/Library/Fonts/
+            // Supplemental/SnellRoundhand.ttc,每台 Mac 都有,不用打包字体)。
+            //
+            // ⚠️ 花体只有拉丁字形。用户把 appName 改成中文的话,系统会自动
+            // 回落到默认字体 —— 不会缺字,只是花体白设。这是可接受的降级。
+            //
+            // 字号 34 比 SF 的 26 大不少:花体 x-height(小写字母主体高度)
+            // 天生矮,同号数看着小一圈,不加上去撑不起标题。
             Text(Self.effectiveAppName())
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .font(.custom("SnellRoundhand-Bold", size: 34))
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
