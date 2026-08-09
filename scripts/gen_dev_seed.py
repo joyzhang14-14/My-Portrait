@@ -328,8 +328,8 @@ for _i, (_t, _s2, _tags) in enumerate(_MORE):
 
 # ── 压测填充(08-09"再多,均匀给所有 folder,编号即可") ──────────────
 # 纯占位数据,不讲叙事;要撤掉删这一段重跑即可。
-_FILL_PER_FOLDER = 200
-_FILL_LOOSE = 800
+_FILL_PER_FOLDER = 40
+_FILL_LOOSE = 120
 def _fill(i, n):
     day = 1 + (i * 11 + n * 3) % 60          # 1..60 天,确定性
     w = 0.5 + ((i * 17 + n * 5) % 40) / 10.0 # 0.5..4.4
