@@ -359,6 +359,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         parkEvents = AsyncStream { continuation = $0 }
         parkContinuation = continuation
         allocateTree()   // 必须在全部存储属性就位后(方法调用要求 self 完整)
+        seedHubAngles()   // 先落 hub:叶/陨石出生位读 pos[hub]
         seedLeafAngles()
         snapshot = pos
 
@@ -463,6 +464,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         pos = Self.explosionPositions(n: n, rng: &rng)
         seedPhase = Float.random(in: 0..<(2 * .pi), using: &rng)
         vel = .init(repeating: .zero, count: n)
+        seedHubAngles()   // 先落 hub:叶/陨石出生位读 pos[hub]
         seedLeafAngles()
         // 重新生成 → 陨石回生成态(帧携带成型,首次拖球后转实时槽位),
         // 影子按新种子重建预演终局;环半径/环心一并重算(一次算死)
@@ -493,6 +495,26 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         publishSnapshot()
         simLock.unlock()
         wake()
+    }
+
+    /// hub 出生角 = 绕主球等角环(08-09 用户:"folder 球全偏向主球一边")。
+    ///
+    /// hub 的夹角在物理里**只由气泡碰撞涌现** —— 气泡一旦互不重叠就没有
+    /// 任何力再管角度,炸开时随机糊在一侧就永远留在一侧。上一版试过加
+    /// 恒定角向力(621c65f6),邻居中点弛豫不约束整体绝对角度,合力矩
+    /// 残余让整圈 hub 公转且无阻尼 → 疯狂旋转,已回滚。
+    ///
+    /// 这版沿用 seedLeafAngles 的思路:**出生即均匀,物理只需保持** ——
+    /// 只改初始位置,零新增力,不可能引入旋转。散开过程中气泡碰撞保持
+    /// 相对顺序,等角大体守住。seedPhase 给整环一个随机朝向(确定性:
+    /// 同种子同布局)。半径 = 炸开半径,方向定了由弹簧径向推出去。
+    private func seedHubAngles() {
+        guard hubIndices.count >= 2 else { return }
+        let r = GraphConstants.explosionRadius
+        for (k, h) in hubIndices.enumerated() {
+            let a = seedPhase + 2 * .pi * Float(k) / Float(hubIndices.count)
+            pos[Int(h)] = SIMD2<Float>(cos(a), sin(a)) * r
+        }
     }
 
     /// 叶子出生角 = 黄金角均匀绕自家 hub(d3 phyllotaxis 同思路)。
