@@ -183,6 +183,58 @@ LOOSE = [
      "and it shifts cleanly again.", 1.1, 1.6, ["bike", "repair"]),
     (58, "Set up a weekly review habit", "Half an hour every Sunday to look at the week. "
      "Kept it up for six weeks now.", 0.9, 1.5, ["habits", "process"]),
+    (3,  "Sorted out a stuck package delivery", "Tracked down a parcel that sat in customs "
+     "for a week. One phone call and a form nobody mentions on the website.", 2.3, 2.4, ["admin"]),
+    (5,  "Tried three ramen places in one week", "An accidental theme week. The one with the "
+     "handmade noodles wins by a distance.", 2.1, 2.2, ["food"]),
+    (7,  "Fixed a leaking kitchen tap", "New cartridge, twenty minutes, one trip to the "
+     "hardware store. Should have done it months ago.", 2.7, 2.6, ["home", "repair"]),
+    (8,  "Read a long piece on urban planning", "About why some streets feel good to walk "
+     "and others don't. Sent it to three people.", 1.8, 2.0, ["reading"]),
+    (10, "Helped a friend move apartments", "Six hours, two flights of stairs, one sofa "
+     "that absolutely did not fit through the door until it did.", 3.2, 3.0, ["social", "friends"]),
+    (11, "Cleared 4,000 unread emails", "Declared inbox bankruptcy on two old accounts. "
+     "Unsubscribed from forty lists on the way out.", 2.5, 2.5, ["admin", "email"]),
+    (13, "Watched the Perseids from the roof", "Clear night, a dozen good ones in an hour. "
+     "Neck ache entirely worth it.", 2.9, 2.7, ["outdoors"]),
+    (14, "Rebuilt the spice drawer", "Alphabetical, labelled, half of it thrown out after "
+     "checking the dates. Cooking got faster immediately.", 1.6, 1.9, ["home", "cooking"]),
+    (15, "Donated four bags of clothes", "Everything unworn for two years went. The closet "
+     "finally closes.", 2.0, 2.1, ["home"]),
+    (17, "Got a library card again", "First one in a decade. Walked out with three books "
+     "and a smug feeling.", 2.4, 2.3, ["books", "admin"]),
+    (19, "Patched the bike inner tube twice", "Same glass shard, missed it the first time. "
+     "Lesson: check the tyre, not just the tube.", 1.5, 1.8, ["bike", "repair"]),
+    (20, "Made stock from scratch", "Four hours of simmering for six jars in the freezer. "
+     "The apartment smelled incredible all day.", 1.9, 2.0, ["cooking"]),
+    (21, "Sat in on a city council meeting", "Two hours about a bike lane. Democracy is "
+     "slow and oddly gripping.", 2.2, 2.3, ["community"]),
+    (24, "Taught Mom to video call", "Forty-five minutes of patience, one written cheat "
+     "sheet. Worth it the first time she called unprompted.", 3.0, 2.9, ["family"]),
+    (25, "Found a $20 bill in an old coat", "Autumn jacket, first cold day. Instantly spent "
+     "on ramen.", 1.2, 1.5, ["misc"]),
+    (28, "Replaced every dead lightbulb at once", "All five in one go instead of living in "
+     "the dark room by room. Bought spares this time.", 1.4, 1.7, ["home"]),
+    (29, "Went to a friend's gallery opening", "Small show, good crowd. Bought the tiny "
+     "print by the door.", 2.6, 2.5, ["social", "art"]),
+    (31, "Finally learned to whistle loudly", "Two-finger technique off a video. The "
+     "neighbours know.", 1.1, 1.4, ["misc"]),
+    (36, "Spent a rainy Sunday on jigsaw puzzles", "A 1,000-piece lighthouse. The sky took "
+     "three hours; the rocks took twenty minutes.", 1.7, 1.9, ["hobbies"]),
+    (38, "Volunteered at the food bank", "Four hours sorting produce. Signing up for a "
+     "monthly slot.", 3.1, 3.0, ["community", "volunteering"]),
+    (40, "Deep-cleaned the coffee gear", "Descaled the machine, re-seasoned the grinder. "
+     "The first cup after tasted like a different machine.", 1.3, 1.6, ["coffee", "home"]),
+    (43, "Tried bouldering for the first time", "Forearms gone in forty minutes. Booked a "
+     "second session anyway.", 2.8, 2.7, ["fitness", "hobbies"]),
+    (45, "Mapped the neighborhood's best trees", "A private map of the ten best trees within "
+     "walking distance. The gingko wins in November.", 1.6, 1.8, ["outdoors", "walking"]),
+    (50, "Archived two years of screenshots", "Twelve gigabytes of 'I'll need this later'. "
+     "Kept maybe thirty of them.", 1.8, 2.0, ["admin", "photos"]),
+    (54, "Hosted a soup night", "Six people, three soups, no phones on the table. Doing it "
+     "monthly now.", 2.9, 2.8, ["social", "cooking"]),
+    (57, "Learned to read a knitting pattern", "Half a scarf in, dropped stitches and all. "
+     "The chart notation finally clicked.", 1.9, 2.1, ["hobbies", "learning"]),
 ]
 
 # portrait/<category>/*.md —— 每类几条,画像层的"长期结论"
