@@ -214,12 +214,17 @@ struct ContentView: View {
                 // ⚠️ 顺序是 frame → padding → background:橙色铺满整行的通条。
                 // 换成 background 在前会只包住文字,变成一枚小签(08-09 试过,
                 // 用户要的是通条,只是压矮)。
+                //
+                // ⚠️ **ignoresSafeAreaEdges: [] 是这条真正矮下来的关键**:
+                // .background(Color) 默认把颜色扩散进安全区,这条挂在窗口顶端,
+                // 上方的安全区就是整个标题栏 —— 橙色会一路漫到红绿灯后面,
+                // 视觉上 ~70pt 高(08-09 用户截图)。禁掉扩散只剩文字那 ~13pt。
                 Text("DEV MODE · read only")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.black.opacity(0.8))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 1)
-                    .background(Color.orange.opacity(0.85))
+                    .background(Color.orange.opacity(0.85), ignoresSafeAreaEdges: [])
             }
             mainSplit
         }
