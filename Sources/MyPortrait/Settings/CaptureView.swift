@@ -212,9 +212,12 @@ struct AudioCaptureSettingsView: View {
     }
 
     var body: some View {
+        // dev mode:capture / privacy 属于后台 section,永远读真实 config,
+        // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
         SettingsPage("Audio Capture & Transcript",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
+                .disabled(DevMode.isOn)
         }
     }
 
@@ -624,6 +627,8 @@ struct ScreenCaptureSettingsView: View {
     @State private var discoveredApps: [String] = []
 
     var body: some View {
+        // dev mode:capture / privacy 属于后台 section,永远读真实 config,
+        // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
         SettingsPage("Screen Capture",
                      onResetCurrentPage: {
                          config.mutate {
@@ -632,9 +637,12 @@ struct ScreenCaptureSettingsView: View {
                          }
                      }) {
             // 总开关那张卡排最上面(2026-08-05 从 "Capture setting" 里剥出来单列)。
-            screenToggleCard
-            screenSection
-            privacySection
+            Group {
+                screenToggleCard
+                screenSection
+                privacySection
+            }
+            .disabled(DevMode.isOn)
         }
         .task {
             discoveredApps = await Self.loadDiscoveredApps()
@@ -834,6 +842,8 @@ struct TypingCaptureSettingsView: View {
     @State private var discovered: [String] = []
 
     var body: some View {
+        // dev mode:capture / privacy 属于后台 section,永远读真实 config,
+        // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
         SettingsPage("Typing Capture & Rebuild",
                      onResetCurrentPage: {
                          config.mutate {
@@ -847,14 +857,17 @@ struct TypingCaptureSettingsView: View {
                              $0.capture.typingRecordPasteEvents      = def.typingRecordPasteEvents
                          }
                      }) {
-            typingSection
-            blacklistSection
-            // Writing capture —— 数据源是 typing capture。07-30 起这条 pipeline
-            // 停用重写,这里只剩 Pending review(处理旧 staged 记录)。
-            // (writing style 是 portrait 侧 pipeline,留在 Memory 页。)
-            WritingPipelineSection()
-            // 07-30:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
-            // 模型,没有 provider / model 可选。config 里那三个键也一并摘了。
+            Group {
+                typingSection
+                blacklistSection
+                // Writing capture —— 数据源是 typing capture。07-30 起这条 pipeline
+                // 停用重写,这里只剩 Pending review(处理旧 staged 记录)。
+                // (writing style 是 portrait 侧 pipeline,留在 Memory 页。)
+                WritingPipelineSection()
+                // 07-30:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
+                // 模型,没有 provider / model 可选。config 里那三个键也一并摘了。
+            }
+            .disabled(DevMode.isOn)
         }
         .task {
             discovered = await Self.loadDiscovered(services?.typingStore)

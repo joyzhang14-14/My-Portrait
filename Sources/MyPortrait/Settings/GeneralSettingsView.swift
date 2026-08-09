@@ -87,6 +87,38 @@ struct GeneralSettingsView: View {
                     .font(.system(size: 12, weight: .medium))
                 }
             }
+
+            if DevMode.isAvailable { devModeCard }
+        }
+    }
+
+    // MARK: - Dev mode
+
+    /// 只在 `~/.portrait-dev` 存在时渲染 —— 别人装的 app 里这张卡不存在。
+    /// 判据故意用目录而不是密钥,理由见 `DevMode` 顶部。
+    private var devModeCard: some View {
+        SettingsCard(title: "Dev mode") {
+            SettingsRow(
+                "Use demo data",
+                info: "Points the app's UI at ~/.portrait-dev — made-up events, portrait and chats for debugging a fresh install or recording a demo. Screen/audio/typing capture and the memory pipeline keep reading and writing your real ~/.portrait the whole time. Capture, privacy, storage, scheduler and memory settings stay on your real config and become read-only.",
+                icon: "hammer"
+            ) {
+                Toggle("", isOn: Binding(
+                    get: { DevMode.desiredOn },
+                    set: { DevMode.setEnabledPendingRestart($0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+            if DevMode.needsRestart {
+                SettingsDivider()
+                SettingsRow("Restart to apply",
+                            info: "Data paths are fixed for the life of the process — open databases and file watchers would otherwise end up split across two roots.",
+                            icon: "arrow.clockwise") {
+                    Button("Restart now") { AppRelaunch.run() }
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
         }
     }
 

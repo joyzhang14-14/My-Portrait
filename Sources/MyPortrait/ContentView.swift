@@ -206,6 +206,24 @@ struct ContentView: View {
     /// 主 view 本体 —— 用户完成 onboarding 后渲染。封成 computed property
     /// 让 body 的 if/else 干净。
     private var mainContent: some View {
+        VStack(spacing: 0) {
+            // dev mode 常驻提示条 —— 界面读的是 ~/.portrait-dev 的编造数据,
+            // 且采集/隐私/存储/调度/记忆那几页是只读的。没有它很容易忘了自己
+            // 在 dev 里,对着假数据排查真问题。
+            if DevMode.isOn {
+                Text("DEV MODE · read only")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.black.opacity(0.75))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+                    .background(Color.orange.opacity(0.85))
+            }
+            mainSplit
+        }
+        .frame(minWidth: 1200, minHeight: 835)
+    }
+
+    private var mainSplit: some View {
         HStack(spacing: 0) {
             TimelineSidebar(state: timeline,
                             selection: $selection,
@@ -233,12 +251,9 @@ struct ContentView: View {
                 // 拖到输入框 / 消息上也 OK(allowsHitTesting=false 不挡)。
                 .chatDropZone(enabled: (selection ?? .home) == .home)
         }
-        // 强制 mainContent intrinsic 不小于启动默认 size。否则首启 / Replay
-        // onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
+        // 最小尺寸约束在外层 mainContent 上(dev 提示条也算进去)。否则首启 /
+        // Replay onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
         // intrinsic(Home / Settings 等较小),触发 window 缩小一瞬。
-        // Timeline 自带很大 intrinsic 所以切到它能立刻恢复 —— 但用户进任何
-        // 其他 pane 时窗口都该一开始就完整。
-        .frame(minWidth: 1200, minHeight: 835)
     }
 
     @ViewBuilder

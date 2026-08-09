@@ -179,21 +179,25 @@ private struct AppCustomizeCard: View {
         }
         Task { @MainActor in
             await config.saveNowAndWait()
-            Self.relaunch()
+            AppRelaunch.run()
         }
     }
 
-    /// 重启 app:先 spawn 一个 detached 进程预定好新 instance 启动,
-    /// 再退当前进程。
-    ///
-    /// **不用 `open <path>`** —— 它走 LaunchServices,dev build 的 .app
-    /// 在 DerivedData 下经常没在 LS 注册,抛 -600 procNotFound,结果
-    /// app 退了但没自启。
-    ///
-    /// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,
-    /// 绕开 LaunchServices。父进程 sh 立即 exit,子进程在 sleep 1 后
-    /// fork+exec binary,这时原 app 已经 NSApp.terminate 退完了。
-    private static func relaunch() {
+}
+
+/// 重启 app:先 spawn 一个 detached 进程预定好新 instance 启动,再退当前进程。
+///
+/// **不用 `open <path>`** —— 它走 LaunchServices,dev build 的 .app 在
+/// DerivedData 下经常没在 LS 注册,抛 -600 procNotFound,结果 app 退了但没自启。
+///
+/// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,绕开
+/// LaunchServices。父进程 sh 立即 exit,子进程在 sleep 1 后 fork+exec binary,
+/// 这时原 app 已经 NSApp.terminate 退完了。
+///
+/// 原本是 AppCustomizeCard 的私有方法。dev mode 切换也要重启,提到文件级共用 ——
+/// 上面这些坑不值得为第二个调用方再踩一遍。
+enum AppRelaunch {
+    static func run() {
         guard let exec = Bundle.main.executablePath else {
             NSApp.terminate(nil); return
         }

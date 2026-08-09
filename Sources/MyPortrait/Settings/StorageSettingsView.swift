@@ -34,10 +34,27 @@ struct StorageSettingsView: View {
                         Button("Open") { config.openPortraitDir() }
                             .font(.system(size: 12, weight: .medium))
                             .help("Open the data folder in Finder")
-                        if !config.current.storage.dataDirectory.isEmpty {
+                        // dev mode 下 storage 是只读 section,Reset 点了也会被
+                        // ConfigStore 丢弃 —— 直接不显示,省得点了没反应。
+                        if !config.current.storage.dataDirectory.isEmpty, !DevMode.isOn {
                             Button("Reset") { config.mutate { $0.storage.dataDirectory = "" } }
                                 .font(.system(size: 11))
                         }
+                    }
+                }
+                // dev mode 开着时把演示目录也列出来 —— 上面那行报的是真实
+                // 目录(采集和 pipeline 一直在写它),界面读的却是这一个,
+                // 不并排列出来会让人以为界面里的数据在上面那个路径里。
+                if DevMode.isOn {
+                    SettingsDivider()
+                    SettingsRow(
+                        "Dev mode data directory",
+                        description: DevMode.rootURL.path,
+                        icon: "hammer"
+                    ) {
+                        Button("Open") { NSWorkspace.shared.open(DevMode.rootURL) }
+                            .font(.system(size: 12, weight: .medium))
+                            .help("Open the demo data folder in Finder")
                     }
                 }
             }
@@ -92,25 +109,35 @@ struct StorageSettingsView: View {
                 breakdownRows(stats.appRows)
             }
 
-            autoDeleteCard
+            // dev mode 下这三张卡只读 —— storage 属于后台 section,保留期 /
+            // 删除策略 / 手动删除动的都是你本人 ~/.portrait 里的真实数据,
+            // 不能因为在录演示就被点到。
+            Group {
+                autoDeleteCard
 
-            waitForTranscriptionCard
+                waitForTranscriptionCard
 
-            SettingsCard(
-                title: "Delete recent data",
-                footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
-            ) {
-                HStack(spacing: 8) {
-                    DeleteButton(label: "Last 15 min") { purge(seconds: 15 * 60) }
-                    DeleteButton(label: "Last 30 min") { purge(seconds: 30 * 60) }
-                    DeleteButton(label: "Last hour")   { purge(seconds: 60 * 60) }
-                    Spacer()
-                }
-                .padding(.horizontal, 14).padding(.vertical, 12)
+                deleteRecentCard
             }
+            .disabled(DevMode.isOn)
         }
         .task {
             if lastScannedAt == nil { await refresh() }
+        }
+    }
+
+    private var deleteRecentCard: some View {
+        SettingsCard(
+            title: "Delete recent data",
+            footnote: "Permanently deletes everything captured in the chosen time range. This can't be undone."
+        ) {
+            HStack(spacing: 8) {
+                DeleteButton(label: "Last 15 min") { purge(seconds: 15 * 60) }
+                DeleteButton(label: "Last 30 min") { purge(seconds: 30 * 60) }
+                DeleteButton(label: "Last hour")   { purge(seconds: 60 * 60) }
+                Spacer()
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
         }
     }
 

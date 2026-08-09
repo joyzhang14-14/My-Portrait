@@ -115,7 +115,11 @@ struct MemorySettingsView: View {
     let tab: Tab
 
     var body: some View {
+        // dev mode 整页只读 —— 这页写的是 memory / scheduler 两个后台 section,
+        // 而且"Run now"跑的是真实 pipeline(读写 ~/.portrait)。在演示界面里
+        // 点它既看不到效果,又会真的动到你本人的记忆。
         writingStyleModals(pageBody)
+            .disabled(DevMode.isOn)
     }
 
     private var pageBody: some View {
