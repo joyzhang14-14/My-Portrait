@@ -102,7 +102,11 @@ struct PersonalInfoView: View {
     @ViewBuilder
     private var languagesEditor: some View {
         let langs = config.current.personalInfo.languages
-        VStack(alignment: .leading, spacing: 8) {
+        // spacing **必须是 0** —— SettingsCard 的内容槽本身是 VStack(spacing: 0),
+        // Name / Identity 那两张卡的行和分隔线因此是贴死的。这里原来写了 8,
+        // 等于每行之间多塞 8pt,分隔线悬在空档中间而不是紧贴上下行,
+        // 整张 Languages 卡的行距就跟别的卡对不上。
+        VStack(alignment: .leading, spacing: 0) {
             if langs.isEmpty {
                 Text("No languages added.")
                     .font(.system(size: 11))
