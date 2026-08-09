@@ -133,12 +133,22 @@ public enum GraphConstants {
     ///   2. Text 列表   —— MemoriesView.makeFolderSplit(不成组)
     ///   3. 生产 pipeline —— EventClassifier(不创建新 folder)
     public static let folderMinCoreEvents: Int = 5
-    /// Unclassified 成区门(08-09 用户):存活 folder 少于此数时,没分类的
-    /// event **不**收进 Unclassified 分区 —— 图谱里直接连主球、Text 列表里
-    /// 直接平铺。folder 还没成气候的时候多一个灰分区只是徒增一层。
+    /// Unclassified 成区门 —— **Text 列表专用**(08-09 用户定的三档):
+    /// 0 个 folder 纯平铺 / 1–2 个粗灰线隔开 / ≥3 个收成灰色 Unclassified 组。
     ///
-    /// ⚠️ 两处共用:GraphSceneBuilder.buildEvents / MemoriesView.foldersGroupedList
+    /// ⚠️ 图谱**不用**这个门:实测 2 个 folder + 33 颗球直连主球很难看,
+    /// 改成「只要有 folder 就立灰分区球,一个 folder 都没有才直连主球」,
+    /// 判据就是 specs 非空,见 GraphSceneBuilder.buildEvents。
     public static let unclassifiedFolderMin: Int = 3
+
+    /// 0 个 folder 时全部事件直连主球 —— 这一族的专属线长参数。
+    ///
+    /// 主球周围只有它们、没有别的气泡竞争空间,沿用气泡内那套(rest floor
+    /// 0.25、气泡按内容面积涌现)会挤成一坨。气泡整体放大一截把线拉长,
+    /// floor 压到 0.10 把最近/最旧的长度差拉开(0.25→1.0 变成 0.10→1.0,
+    /// 可用行程从 3 倍拉到 10 倍)。
+    public static let rootBubbleScale: Double = 1.5
+    public static let rootRestFloor: Double = 0.10
     public static let beltTier1Max: Double = 1.0
     public static let beltTier2Max: Double = 0.5
     /// 环基准间隙(单环重构):环半径 = 罩住{主球 + 全部气泡}的最小

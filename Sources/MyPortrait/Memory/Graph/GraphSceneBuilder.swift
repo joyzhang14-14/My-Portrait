@@ -160,15 +160,18 @@ enum GraphSceneBuilder {
                 unclassifiedMembers.append(contentsOf: members)
             }
         }
-        // Unclassified 成区门(08-09 用户,与 Text 列表同一口径):存活 folder
-        // 少于 unclassifiedFolderMin 个时不立灰分区球 —— 这些 event 直接连主球。
-        // folder 还没成气候就先挂一个灰球,主球周围反而是"两个球"而不是内容。
+        // Unclassified 成区门(08-09 用户实测两版后定稿):**只要有一个 folder
+        // 就立灰分区球,一个都没有才直连主球**。
+        //
+        // 上一版跟 Text 列表共用「≥3 个 folder」这道门,实测 2 个 folder + 33 颗
+        // 球直接挂主球很难看 —— 主球那圈叶跟 folder 气泡抢空间,整张图失衡。
+        // 直连主球现在只服务"全新用户,一个 folder 都还没聚出来"这一种情况。
         var rootMembers: [ScannedFile] = []
         if !unclassifiedMembers.isEmpty {
             // 并入落选 folder 成员后重排:成员顺序进节点指纹,顺序不稳
             // 会话缓存永远 miss(同顶部 scanned 排序的理由)。
             unclassifiedMembers.sort { $0.relPath < $1.relPath }
-            if specs.count >= GraphConstants.unclassifiedFolderMin {
+            if !specs.isEmpty {
                 specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
                                      colorRGB: unclassifiedColor,
                                      members: unclassifiedMembers))
@@ -312,6 +315,9 @@ enum GraphSceneBuilder {
                                   + 2 * maxLeafR + 3
                                   + Double(coreMembers.count) * 6)
             }
+            // 主球那族(0 个 folder 时)整体放大一截 —— 线更长,球之间更松。
+            // 它没有别的气泡竞争空间,沿用气泡内那套尺度会挤成一坨。
+            if isRoot { bubbleR *= GraphConstants.rootBubbleScale }
             // rest 里含「最大叶径+pad」净空:圆的内缘叶不许被主球碰撞壳
             // 顶出圈(engine 的硬约束同款净空)—— 仍是不重叠的最小调整。
             let hubRest = rootBubbleR + bubbleR + maxLeafR
@@ -357,7 +363,11 @@ enum GraphSceneBuilder {
                 cum.append(c)
             }
             let cMax = max(cum.last ?? 0, 1e-9)
-            let floorFrac = GraphConstants.bubbleRestFloor
+            // 主球那族把 floor 压低 —— 0.25→1.0 的可用行程只有 3 倍,
+            // 0.10→1.0 是 10 倍,最近的和最旧的一眼分得开(用户:"weight
+            // 影响的长度范围可以大一些")。
+            let floorFrac = isRoot ? GraphConstants.rootRestFloor
+                                   : GraphConstants.bubbleRestFloor
             for (rank, mi) in ordered.enumerated() {
                 let m = coreMembers[mi]
                 let idx = nodes.count
