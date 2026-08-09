@@ -188,11 +188,15 @@ struct PersonalInfoView: View {
         TextField(placeholder, text: config.binding(kp))
             .textFieldStyle(.plain)
             .font(.system(size: 12))
-            .padding(.horizontal, 8).padding(.vertical, 5)
+            // 尺寸跟设置页其他输入框对齐:内边距 10/6、宽 220
+            //(CaptureView 的 Endpoint / API key、SettingsView 的搜索框都是这套)。
+            // 字体不跟 —— 那几处是 monospaced,因为填的是 URL / key;
+            // 这里填的是人名,等宽反而怪。
+            .padding(.horizontal, 10).padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.10), lineWidth: 1))
             )
-            .frame(width: 200)
+            .frame(width: 220)
     }
 }
