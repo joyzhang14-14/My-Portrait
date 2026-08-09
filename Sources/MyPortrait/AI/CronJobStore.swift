@@ -139,7 +139,7 @@ final class CronJobStore {
     /// UserDefaults JSON blob.
     private func load() {
         let fm = FileManager.default
-        let dir = Storage.uiCronJobsDir
+        let dir = Storage.cronJobsDir
 
         let subdirs = (try? fm.contentsOfDirectory(at: dir,
             includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]))?
@@ -190,7 +190,7 @@ final class CronJobStore {
     /// numeric suffix; directories for deleted cronJobs are removed.
     private func save() {
         let fm = FileManager.default
-        let root = Storage.uiCronJobsDir
+        let root = Storage.cronJobsDir
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
 
         // **跨进程竞态兜底**:mp-query cronjob add 是另一个进程直接写盘,靠

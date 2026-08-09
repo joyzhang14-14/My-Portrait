@@ -7,6 +7,8 @@
 人物是编的:Alex Rivera,产品设计师,在学 Rust、计划去日本、办读书会。
 刻意跟真实用户毫无关系 —— 演示视频里出现的每一个字都可以公开。
 
+cron_jobs 不生成 —— 定时 AI 任务永远跟真实配置跑(见 Storage.uiRootURL 注释)。
+
 ⚠️ 只写 ~/.portrait-dev,一个字节都不碰 ~/.portrait。
 """
 import argparse
@@ -310,16 +312,6 @@ CHATS = [
     ]),
 ]
 
-CRON_JOBS = [
-    ("weekly-review", "Weekly review",
-     "Every Sunday evening, summarise what happened this week from my events — what I "
-     "actually spent time on, what moved, and one thing worth doing differently.",
-     "0 19 * * 0"),
-    ("trip-countdown", "Japan trip countdown",
-     "Each Monday, list anything still open on the Japan trip — bookings not made, "
-     "documents not sorted — and how many weeks are left.",
-     "0 9 * * 1"),
-]
 
 
 # ── 写盘 ────────────────────────────────────────────────────────────────
@@ -437,23 +429,6 @@ def write_chat_db():
     con.close()
 
 
-def write_cron_jobs():
-    for slug, name, prompt, sched in CRON_JOBS:
-        dirp = os.path.join(ROOT, "cron_jobs", slug)
-        os.makedirs(dirp, exist_ok=True)
-        with open(os.path.join(dirp, "cron_job.md"), "w") as f:
-            f.write(
-                "---\n"
-                f'name: "{esc(name)}"\n'
-                f'schedule: "{sched}"\n'
-                "enabled: true\n"
-                "---\n"
-                f"{prompt}\n"
-            )
-        with open(os.path.join(dirp, "runs.json"), "w") as f:
-            json.dump([], f)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true",
@@ -462,7 +437,7 @@ def main():
 
     assert ROOT.endswith(".portrait-dev"), "安全阀:只允许写 ~/.portrait-dev"
     if args.force:
-        for sub in ["events", "portrait", "cron_jobs"]:
+        for sub in ["events", "portrait"]:
             shutil.rmtree(os.path.join(ROOT, sub), ignore_errors=True)
     os.makedirs(ROOT, exist_ok=True)
 
@@ -502,13 +477,11 @@ def main():
             n_portrait += 1
 
     write_chat_db()
-    write_cron_jobs()
 
     print(f"写到 {ROOT}")
     print(f"  events    {n_events} 条 / {len(FOLDERS)} 个 folder + {len(LOOSE)} 条未分类")
     print(f"  portrait  {n_portrait} 条 / {len(PORTRAIT)} 个类别")
     print(f"  chat      {len(CHATS)} 段对话")
-    print(f"  cron_jobs {len(CRON_JOBS)} 个")
     print("config.toml 不在这里生成 —— app 首次进 dev mode 时自己从真实 config 拷一份。")
 
 

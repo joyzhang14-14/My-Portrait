@@ -21,19 +21,22 @@ enum Storage {
     /// 采集线程自己在跑的"?后者一律 `rootURL`。
     static var uiRootURL: URL { DevMode.isOn ? DevMode.rootURL : rootURL }
 
-    /// events / portrait / cron_jobs 的界面版。AI chat 的 `chat.sqlite`、
-    /// `agent_sessions/` 在 `AIPaths` 里切。
-    /// `personality_daily/` **不切** —— 查过调用方,只有 pipeline 在写、UI 不读。
+    /// events / portrait 的界面版。AI chat 的 `chat.sqlite`、`agent_sessions/`
+    /// 在 `AIPaths` 里切。
+    ///
+    /// **不切**的两个:
+    ///   - `cron_jobs/` —— 定时 AI 任务跟真实配置跑(08-09 用户定)。切了的话
+    ///     dev mode 期间你本人的定时任务会停摆,而它们是真的要按时出结果的。
+    ///   - `personality_daily/` —— 查过调用方,只有 pipeline 在写、UI 不读。
     static var uiEventsDir: URL { uiRootURL.appendingPathComponent("events", isDirectory: true) }
     static var uiPortraitDir: URL { uiRootURL.appendingPathComponent("portrait", isDirectory: true) }
-    static var uiCronJobsDir: URL { uiRootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
 
     /// dev 根下的目录骨架。只在 dev mode 开着时调 —— 平时一个字节都不碰
     /// `~/.portrait-dev`(它不存在就等于这个功能不存在,见 `DevMode.isAvailable`)。
     static func ensureDevExists() throws {
         guard DevMode.isOn else { return }
         let fm = FileManager.default
-        for url in [DevMode.rootURL, uiEventsDir, uiPortraitDir, uiCronJobsDir] {
+        for url in [DevMode.rootURL, uiEventsDir, uiPortraitDir] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
