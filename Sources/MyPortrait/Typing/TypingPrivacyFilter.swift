@@ -20,6 +20,12 @@ struct TypingPrivacyFilter {
         "com.apple.keychainaccess",     // Keychain Access
         // 登录窗 / 锁屏 —— 这里打的字就是开机密码本身。
         "com.apple.loginwindow",        // Login Window
+        // 认证界面(08-09)。跟屏幕采集那边不同,**这三个上锁不可删** ——
+        // 屏幕侧记下的是"出现过一个授权框",打字侧记下的是你在框里敲的
+        // **那串密码本身**,没有任何让用户关掉它的理由。
+        "com.apple.SecurityAgent",                  // "xxx 想要进行更改"授权弹窗
+        "com.apple.LocalAuthentication.UIAgent",    // Touch ID / 本地认证弹窗
+        "com.apple.Passwords",                      // macOS 15「密码」app
         // 07-30 用户:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
         // capture 要采自己 app 里打的字。
     ]

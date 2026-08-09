@@ -19,22 +19,12 @@ import os
 /// 的 `WindowFilters::is_valid`：逐窗口判定,不通过的窗口排除出捕获。
 final class IgnoreGate: @unchecked Sendable {
 
-    /// 永远排除的系统进程。仿 screenpipe `BUILTIN_IGNORED`,但补齐了几个
-    /// **认证界面** —— 它们不是用户能在设置里想到要加的东西,而且弹出来时
-    /// 用户正在输密码:
-    ///   - loginwindow / logonui  锁屏、登录窗
-    ///   - securityagent          "xxx 想要进行更改,请输入密码"授权弹窗
-    ///   - coreautha              Touch ID / 本地认证弹窗
-    ///   - passwords              macOS 15 的「密码」app(列表页有站点名 + 账号)
+    /// 永远排除的系统进程（锁屏等）。仿 screenpipe `BUILTIN_IGNORED`。
     ///
-    /// 密码本身在这些界面上渲染成圆点、OCR 不出明文,但窗口里的**上下文**
-    /// (要授权给谁、哪个网站的哪个账号)照样会被记下来,一样是隐私。
-    ///
-    /// 匹配是**全名精确比对**(不是子串),所以 "passwords" 不会误伤
-    /// "1Password" 或标题里带 password 的普通网页。
-    private static let builtinIgnored: Set<String> = [
-        "loginwindow", "logonui", "securityagent", "coreautha", "passwords",
-    ]
+    /// ⚠️ **别往这里加认证界面**(SecurityAgent / Touch ID / 密码 app)——
+    /// 它们放在 `PrivacyConfig.ignoredApps` 的默认值里,用户在设置页看得见、
+    /// 也能自己叉掉。硬编码在这儿等于偷偷替用户做决定,他还查不出来。
+    private static let builtinIgnored: Set<String> = ["loginwindow", "logonui"]
 
     private struct State {
         var appsLower: Set<String> = []           // 小写,子串匹配（app 名 / 标题）

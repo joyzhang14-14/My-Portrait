@@ -15,7 +15,8 @@ import Foundation
 /// support `keyEncodingStrategy`). Missing keys are tolerated via custom
 /// `init(from:)` that falls back to default-init values.
 struct MyPortraitConfig: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    // 3(08-09):认证界面补进 privacy.ignored_apps —— 见 migrateSeedAuthApps。
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int   = currentSchemaVersion
     var display:       DisplayConfig       = .init()
@@ -59,6 +60,24 @@ struct MyPortraitConfig: Codable, Equatable {
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
+        migrateSeedAuthApps()
+    }
+
+    /// 一次性迁移(08-09):把认证界面补进 `privacy.ignored_apps`。
+    ///
+    /// 新装用户走 `PrivacyConfig.ignoredApps` 的默认值就有了;**老用户的
+    /// config 里已经存了这个数组**,默认值对他们不生效,所以这里补一次。
+    ///
+    /// 靠 `schemaVersion` 只补一次 —— 这是个用户可编辑的名单,每次启动都
+    /// 无脑加回去的话,用户主动叉掉的条目会自己长回来。
+    private mutating func migrateSeedAuthApps() {
+        guard schemaVersion < 3 else { return }
+        schemaVersion = Self.currentSchemaVersion
+        let existing = Set(privacy.ignoredApps.map { $0.lowercased() })
+        for app in PrivacyConfig.authAppDefaults
+        where !existing.contains(app.lowercased()) {
+            privacy.ignoredApps.append(app)
+        }
     }
 
     /// 一次性迁移(08-06):portrait / writing style 这两条 pipeline 全程只有
@@ -891,10 +910,19 @@ struct PrivacyConfig: Codable, Equatable {
     /// New users get these out-of-the-box;they can add / remove from
     /// Settings → Privacy → Ignored apps.
     /// 命中的窗口从帧里抠掉(渲染成黑),**帧照拍** —— 见 IgnoreGate 顶部注释。
+    ///
+    /// 08-09 补进三个**认证界面**:授权弹窗 / Touch ID 弹窗 / macOS 15 的
+    /// 「密码」app。密码本身在这些界面上是圆点、OCR 不出明文,但"要授权给谁"
+    /// "哪个站点的哪个账号"这些上下文照样会被记下。放默认名单而不是硬编码 ——
+    /// 用户在设置页看得见、也能自己叉掉(见 IgnoreGate.builtinIgnored 注释)。
     var ignoredApps:            [String] = [
         "1Password", "Bitwarden", "KeePassXC", "Keychain Access", "Authy",
         "My Portrait", "Wallpaper", "Trash",
-    ]
+    ] + PrivacyConfig.authAppDefaults
+
+    /// 认证界面的默认条目。老用户靠 `migrateSeedAuthApps` 补进去,所以单列
+    /// 一份 —— 两处引用同一个数组,不会漏加漏改。
+    static let authAppDefaults: [String] = ["SecurityAgent", "coreautha", "Passwords"]
     var ignoredUrls:            [String] = []
     /// DEPRECATED —— 与 ignoredUrls 在 IgnoreGate 里行为完全相同(都按窗口标题
     /// 子串遮挡)。只为解码老 config 保留:decode 时把条目并进 ignoredUrls 后清空。
