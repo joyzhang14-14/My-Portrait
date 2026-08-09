@@ -691,6 +691,10 @@ struct AudioConfig: Codable, Equatable {
     /// 匹配任意 *-games 子类）。
     var pauseAudioApps:          [String] = []
     var pauseAudioCategories:    [String] = []
+    /// URL 名单(小写子串)。前台浏览器当前页面命中 → 暂停音频采集。
+    /// ⚠️ 跟上面两条不同源:app / 类别是问"谁在出声"(Core Audio),URL 只能
+    /// 问"你现在看着哪一页" —— 后台标签页在放的声音匹配不到。
+    var pauseAudioUrls:          [String] = []
     /// DEPRECATED → 迁移到 pauseAudioCategories(music)。只为解码老 config 保留。
     var pauseOnMusicApp:         Bool     = false
     /// DEPRECATED → 迁移到 transcriptionPowerMode(true→pluggedIn / false→always)。
@@ -730,6 +734,7 @@ struct AudioConfig: Codable, Equatable {
         case filterMusic             = "filter_music"
         case pauseAudioApps          = "pause_audio_apps"
         case pauseAudioCategories    = "pause_audio_categories"
+        case pauseAudioUrls          = "pause_audio_urls"
         case pauseOnMusicApp         = "pause_on_music_app"
         case transcribeOnACOnly      = "transcribe_on_ac_only"       // 仅迁移用
         case transcriptionPowerMode  = "transcription_power_mode"
@@ -757,6 +762,7 @@ struct AudioConfig: Codable, Equatable {
         filterMusic            = c.dflt(Bool.self,     .filterMusic, filterMusic)
         pauseAudioApps         = c.dflt([String].self, .pauseAudioApps, pauseAudioApps)
         pauseAudioCategories   = c.dflt([String].self, .pauseAudioCategories, pauseAudioCategories)
+        pauseAudioUrls         = c.dflt([String].self, .pauseAudioUrls, pauseAudioUrls)
         pauseOnMusicApp        = c.dflt(Bool.self,     .pauseOnMusicApp, pauseOnMusicApp)
         // 老开关迁移:pauseOnMusicApp=true 且新名单为空 → 预填 music 类别,保住行为。
         if pauseOnMusicApp, pauseAudioApps.isEmpty, pauseAudioCategories.isEmpty {

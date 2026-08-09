@@ -439,6 +439,15 @@ struct AudioCaptureSettingsView: View {
                         categories: config.binding(\.capture.audio.pauseAudioCategories))
                         .padding(.horizontal, 14).padding(.bottom, 12)
                 }
+                SettingsDivider()
+                SettingsRow("Pause capture on these URLs",
+                            info: "Stops recording while the page you're looking at matches one of these. Substring match, case-insensitive — \"meet.google.com\" covers every call on it.\n\n⚠️ This one works differently from the list above. Apps and categories are matched by asking the system who's actually producing sound; a URL can only be matched against the page in front of you. Audio from a background tab won't be caught.",
+                            icon: "link") { EmptyView() }
+                VStack(alignment: .leading) {
+                    TagListEditor(tags: config.binding(\.capture.audio.pauseAudioUrls),
+                                  placeholder: "e.g. meet.google.com, zoom.us")
+                        .padding(.horizontal, 14).padding(.bottom, 12)
+                }
             }
 
             // Custom vocabulary 是转译器的 hint(prompt 给 Whisper/Qwen/
@@ -634,20 +643,13 @@ struct ScreenCaptureSettingsView: View {
             info: "The screenshot is still taken — the matching window is just cut out of it and comes out black. Everything else on screen is captured as usual.\n\nWhy not skip the whole frame? Frames are the timeline. Your recordings and typing history are lined up against them, so a missing frame is a missing stretch of your day, not just a missing picture.\n\nMatching ignores case. Apps match on the app name or window title; URLs match as substrings, so \"chase.com\" covers every page on chase.com. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Apps — pick from captured apps or the system / privacy list…")
+                Text("Apps & categories — pick from captured apps, the system / privacy list, or a whole category…")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps), discovered: discoveredApps)
-                    .padding(.horizontal, 14).padding(.bottom, 12)
-            }
-            SettingsDivider()
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Categories — covers every app that declares itself one of these…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                CategoryChipPicker(categories: config.binding(\.privacy.ignoredCategories))
+                IgnoredAppPicker(apps: config.binding(\.privacy.ignoredApps),
+                                 discovered: discoveredApps,
+                                 categories: config.binding(\.privacy.ignoredCategories))
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
             SettingsDivider()
@@ -857,25 +859,17 @@ struct TypingCaptureSettingsView: View {
             info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet.\n\nPassword managers and terminals are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Apps — pick from apps you've typed in…")
+                Text("Apps & categories — pick from apps you've typed in, or a whole category…")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TypingAppPicker(
                     apps: config.binding(\.privacy.typingBlacklistApps),
                     discovered: discovered,
-                    locked: TypingPrivacyFilter.defaultBlacklist
+                    locked: TypingPrivacyFilter.defaultBlacklist,
+                    categories: config.binding(\.privacy.typingBlacklistCategories)
                 )
                 .padding(.horizontal, 14).padding(.bottom, 12)
-            }
-            SettingsDivider()
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Categories — covers every app that declares itself one of these…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.50))
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                CategoryChipPicker(categories: config.binding(\.privacy.typingBlacklistCategories))
-                    .padding(.horizontal, 14).padding(.bottom, 12)
             }
             SettingsDivider()
             VStack(alignment: .leading, spacing: 0) {

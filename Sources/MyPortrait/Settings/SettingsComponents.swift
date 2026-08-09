@@ -417,6 +417,10 @@ struct FlowLayout: Layout {
 struct IgnoredAppPicker: View {
     @Binding var apps: [String]
     var discovered: [String] = []
+    /// 类别名单(完整 LSApplicationCategoryType)。传了就在 app 下拉旁边多一个
+    /// Category 下拉,选中的类别跟 app 混在同一片 chip 里 —— 跟音频「暂停名单」
+    /// 那张卡同款形态。nil = 这处不支持类别。
+    var categories: Binding<[String]>? = nil
 
     /// Curated system / privacy entries. These are never the "focused app"
     /// so they'd never appear in `discovered` — surfaced here so the user
@@ -443,9 +447,17 @@ struct IgnoredAppPicker: View {
                          options: discovered, emptyHint: "No captured apps yet")
                 dropdown(title: "System / privacy", icon: "macwindow",
                          options: Self.systemEntries, emptyHint: "")
+                if let categories { CategoryDropdown(categories: categories) }
             }
-            if !apps.isEmpty {
+            if !apps.isEmpty || !(categories?.wrappedValue.isEmpty ?? true) {
                 FlowLayout(spacing: 6) {
+                    if let categories {
+                        ForEach(categories.wrappedValue, id: \.self) { c in
+                            CategoryChip(id: c) {
+                                categories.wrappedValue.removeAll { $0 == c }
+                            }
+                        }
+                    }
                     ForEach(apps, id: \.self) { app in
                         HStack(spacing: 4) {
                             Text(app)
@@ -516,6 +528,9 @@ struct TypingAppPicker: View {
     var discovered: [String] = []          // 用户打过字的 app（bundle id）
     /// 永远生效、不可移除的条目（如硬编码黑名单）—— 灰显、带锁、无 × 。
     var locked: [String] = []
+    /// 类别名单。传了就在 app 下拉旁边多一个 Category 下拉,chip 混在同一片里
+    /// (同 IgnoredAppPicker / 音频「暂停名单」)。nil = 这处不支持类别。
+    var categories: Binding<[String]>? = nil
 
     /// bundle id 最后一段是无意义通用词的 app —— 直接给名字。
     /// (07-30:`com.bitwarden.desktop` 显示成 "desktop",在黑名单列表里
@@ -539,11 +554,22 @@ struct TypingAppPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            dropdown(title: "Select app", icon: "plus.circle.fill",
-                     options: discovered, emptyHint: "No typed-in apps yet")
-            if !locked.isEmpty || !apps.isEmpty {
+            HStack(spacing: 6) {
+                dropdown(title: "Select app", icon: "plus.circle.fill",
+                         options: discovered, emptyHint: "No typed-in apps yet")
+                if let categories { CategoryDropdown(categories: categories) }
+            }
+            if !locked.isEmpty || !apps.isEmpty
+                || !(categories?.wrappedValue.isEmpty ?? true) {
                 FlowLayout(spacing: 6) {
                     ForEach(locked, id: \.self) { lockedChip($0) }
+                    if let categories {
+                        ForEach(categories.wrappedValue, id: \.self) { c in
+                            CategoryChip(id: c) {
+                                categories.wrappedValue.removeAll { $0 == c }
+                            }
+                        }
+                    }
                     ForEach(apps, id: \.self) { editableChip($0) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -822,76 +848,71 @@ struct PauseAudioListPicker: View {
 }
 
 
-// MARK: - CategoryChipPicker —— 类别名单(屏幕 / 打字黑名单共用)
+// MARK: - 类别下拉 + 类别 chip(屏幕 / 打字黑名单共用)
 
-/// Category 下拉 + 已选 chip。**只管类别**,app / URL 各有自己的编辑器。
-///
-/// 跟 `PauseAudioListPicker` 的类别那一半是同一套语义(值都是完整的
-/// `LSApplicationCategoryType`,判定都走 `AppCategoryResolver`),只是那边
-/// 要跟 app chip 混排,形态不同,没法直接复用。
-struct CategoryChipPicker: View {
+/// Category 下拉。摆在 app 下拉旁边,跟音频「暂停名单」那张卡同一个形态 ——
+/// 类别和 app 是同一件事的两种粒度,不该分成上下两块。
+struct CategoryDropdown: View {
     @Binding var categories: [String]
 
-    private var boxBackground: some View {
-        RoundedRectangle(cornerRadius: 7)
-            .fill(Color.white.opacity(0.04))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Menu {
-                ForEach(AppCategory.all, id: \.id) { cat in
-                    Button { toggle(cat.id) } label: {
-                        if categories.contains(cat.id) {
-                            Label(cat.label, systemImage: "checkmark")
-                        } else { Text(cat.label) }
-                    }
+        Menu {
+            ForEach(AppCategory.all, id: \.id) { cat in
+                Button { toggle(cat.id) } label: {
+                    if categories.contains(cat.id) {
+                        Label(cat.label, systemImage: "checkmark")
+                    } else { Text(cat.label) }
                 }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "square.grid.2x2").font(.system(size: 11))
-                    Text("Category").font(.system(size: 12))
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                }
-                .padding(.horizontal, 10).padding(.vertical, 7)
-                .background(boxBackground)
             }
-            .menuStyle(.borderlessButton).fixedSize()
-
-            if !categories.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(categories, id: \.self) { c in
-                        HStack(spacing: 4) {
-                            Image(systemName: "square.grid.2x2.fill")
-                                .font(.system(size: 8))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.5))
-                            Text(AppCategory.label(c))
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                            Button { categories.removeAll { $0 == c } } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                            }
-                            .buttonStyle(.bouncyIcon)
-                        }
-                        .padding(.horizontal, 7).padding(.vertical, 3.5)
-                        .help(c)
-                        .background(
-                            Capsule().fill(.ultraThinMaterial)
-                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "square.grid.2x2").font(.system(size: 11))
+                Text("Category").font(.system(size: 12))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
             }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
+            )
         }
+        .menuStyle(.borderlessButton).fixedSize()
     }
 
     private func toggle(_ id: String) {
         if let i = categories.firstIndex(of: id) { categories.remove(at: i) }
         else { categories.append(id) }
+    }
+}
+
+/// 已选类别的 chip —— 带网格图标,跟 app chip 区分开(它们混在同一片里)。
+struct CategoryChip: View {
+    let id: String
+    let remove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(Theme.textPrimary.opacity(0.5))
+            Text(AppCategory.label(id))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+            Button(action: remove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .help(id)
+        .background(
+            Capsule().fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+        )
     }
 }
 

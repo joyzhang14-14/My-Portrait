@@ -143,8 +143,20 @@ final class MusicPlaybackMonitor {
         let audio = ConfigStore.shared.current.capture.audio
         let apps = Set(audio.pauseAudioApps)
         let cats = Set(audio.pauseAudioCategories)
-        guard !apps.isEmpty || !cats.isEmpty else {
+        let urls = audio.pauseAudioUrls.map { $0.lowercased() }.filter { !$0.isEmpty }
+        guard !apps.isEmpty || !cats.isEmpty || !urls.isEmpty else {
             logger.notice("tick: pause list empty → musicDetected forced false")
+            if musicDetected { musicDetected = false }
+            return
+        }
+        // URL 先判:命中就不必再去问 Core Audio 谁在出声。
+        if !urls.isEmpty, let page = await Self.frontmostBrowserURL()?.lowercased(),
+           urls.contains(where: { page.contains($0) }) {
+            logger.notice("tick: front page matches pause URL → pausing")
+            if !musicDetected { musicDetected = true }
+            return
+        }
+        guard !apps.isEmpty || !cats.isEmpty else {
             if musicDetected { musicDetected = false }
             return
         }
@@ -153,6 +165,32 @@ final class MusicPlaybackMonitor {
         if musicDetected != playing {
             musicDetected = playing
             logger.notice("pause-audio \(playing ? "started" : "stopped", privacy: .public) — capture \(playing ? "paused" : "resumed", privacy: .public)")
+        }
+    }
+
+    /// 前台浏览器当前页面的 URL。**窄读** —— 只取 URL,不做 FocusProbe 那种
+    /// AX 全树遍历(跟 CaptureLampState.refreshBrowserURL 同一套路)。
+    ///
+    /// AX 调用一律走 `AXSerialQueue`:AX 的 C API 并发调用会让框架内部状态
+    /// 打架,历史上炸出过主线程死锁。
+    /// 前台不是浏览器 / 没 AX 权限 / 读不到 → nil。
+    private static func frontmostBrowserURL() async -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let bid = app.bundleIdentifier,
+              FocusProbe.browserBundleIds.contains(bid)
+        else { return nil }
+        let pid = app.processIdentifier
+        return await withCheckedContinuation { cont in
+            AXSerialQueue.shared.async {
+                let appEl = AXUIElementCreateApplication(pid)
+                var winRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(
+                        appEl, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
+                      CFGetTypeID(winRef) == AXUIElementGetTypeID()
+                else { cont.resume(returning: nil); return }
+                cont.resume(returning:
+                    FocusProbe.extractBrowserURL(focusedWindow: winRef as! AXUIElement))
+            }
         }
     }
 }
