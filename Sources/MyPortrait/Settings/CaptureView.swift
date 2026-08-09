@@ -423,27 +423,37 @@ struct AudioCaptureSettingsView: View {
 
             // 「Filtering & pausing」常显示 —— 不 gate audioRec(跟 Speakers 一样,
             // 采集关着也能先配好过滤 / 暂停规则,等开采集即生效)。
-            SettingsCard(title: "Filtering & pausing") {
+            SettingsCard(title: "Filtering") {
                 SettingsRow("Filter music",
                             info: "Skips audio that's mostly music, so song lyrics don't end up in your transcripts.",
                             icon: "music.note.list") {
                     Toggle("", isOn: config.binding(\.capture.audio.filterMusic)).labelsHidden().toggleStyle(.switch)
                 }
-                SettingsDivider()
-                SettingsRow("Pause capture for these apps / categories",
-                            info: "Stops recording whenever an app on this list is playing audio. It's more thorough than filtering music and takes priority. Pick specific apps or categories, or leave it empty to never pause.",
-                            icon: "pause.circle") { EmptyView() }
-                VStack(alignment: .leading) {
+            }
+
+            // 版式跟 Screen / Typing 那两张黑名单卡完全一致:一段 caption +
+            // 「类别/app」选择器,分割线,一段 caption + URL 编辑器。三处
+            // 是同一件事的三个采集面,不该各长各的样子。
+            SettingsCard(
+                title: "Pause capture for apps, categories & URLs",
+                info: "Stops recording entirely while any of these is going. More thorough than filtering music, and it takes priority. Leave everything empty to never pause.\n\nApps and categories are matched by asking the system who's actually producing sound, so a background app still counts.\n\n⚠️ URLs work differently — they can only be matched against the page in front of you, so audio from a background tab won't be caught. URLs match as substrings, case-insensitive: \"meet.google.com\" covers every call on it."
+            ) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Apps & categories — pause while these are making sound…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                     PauseAudioListPicker(
                         apps: config.binding(\.capture.audio.pauseAudioApps),
                         categories: config.binding(\.capture.audio.pauseAudioCategories))
                         .padding(.horizontal, 14).padding(.bottom, 12)
                 }
                 SettingsDivider()
-                SettingsRow("Pause capture on these URLs",
-                            info: "Stops recording while the page you're looking at matches one of these. Substring match, case-insensitive — \"meet.google.com\" covers every call on it.\n\n⚠️ This one works differently from the list above. Apps and categories are matched by asking the system who's actually producing sound; a URL can only be matched against the page in front of you. Audio from a background tab won't be caught.",
-                            icon: "link") { EmptyView() }
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("URLs — pause while you're on these pages…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.50))
+                        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                     TagListEditor(tags: config.binding(\.capture.audio.pauseAudioUrls),
                                   placeholder: "e.g. meet.google.com, zoom.us")
                         .padding(.horizontal, 14).padding(.bottom, 12)
