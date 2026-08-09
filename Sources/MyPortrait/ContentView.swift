@@ -210,20 +210,22 @@ struct ContentView: View {
         // 且采集/隐私/存储/调度/记忆那几页是只读的。没有它很容易忘了自己
         // 在 dev 里,对着假数据排查真问题。
         //
-        // ⚠️ 用 **overlay 浮条**,不进 VStack(08-09 三稿定):
-        //   - VStack 会把 mainSplit 整体往下推,标题栏区域露出窗口的纯黑底,
-        //     跟普通模式"内容延伸进标题栏"的背景对不上(用户截图);
-        //   - overlay 不改任何布局 —— 背景与普通模式完全一致,橙条只是原图层
-        //     上浮着的一条,~13pt,贴在标题栏下沿。
+        // 形态(08-09 四稿定):**overlay 浮签,长度只承载文字本身**。
+        //   - overlay 不进布局 —— 背景与普通模式完全一致,签浮在原图层最上方;
+        //   - 背景用 Capsule **形状**而不是 .background(Color):后者是
+        //     ShapeStyle 版本,视图贴着窗口顶边时会把颜色自动漫进标题栏
+        //     安全区,整个标题栏变橙(两次翻车都是它);形状背景只包住视图
+        //     本身,从根上没有这个问题。
         mainSplit
             .overlay(alignment: .top) {
                 if DevMode.isOn {
                     Text("DEV MODE · read only")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.black.opacity(0.8))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.85))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.orange.opacity(0.85)))
+                        .padding(.top, 2)
                         .allowsHitTesting(false)   // 纯标识,别挡下面内容的点击
                 }
             }
