@@ -160,17 +160,28 @@ enum GraphSceneBuilder {
                 unclassifiedMembers.append(contentsOf: members)
             }
         }
+        // Unclassified 成区门(08-09 用户,与 Text 列表同一口径):存活 folder
+        // 少于 unclassifiedFolderMin 个时不立灰分区球 —— 这些 event 直接连主球。
+        // folder 还没成气候就先挂一个灰球,主球周围反而是"两个球"而不是内容。
+        var rootMembers: [ScannedFile] = []
         if !unclassifiedMembers.isEmpty {
             // 并入落选 folder 成员后重排:成员顺序进节点指纹,顺序不稳
             // 会话缓存永远 miss(同顶部 scanned 排序的理由)。
             unclassifiedMembers.sort { $0.relPath < $1.relPath }
-            specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
-                                 colorRGB: unclassifiedColor,
-                                 members: unclassifiedMembers))
+            if specs.count >= GraphConstants.unclassifiedFolderMin {
+                specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
+                                     colorRGB: unclassifiedColor,
+                                     members: unclassifiedMembers))
+            } else {
+                rootMembers = unclassifiedMembers
+            }
         }
         specs.sort { ($0.members.count, $1.slug) > ($1.members.count, $0.slug) }
 
         return assemble(userName: userName, specs: specs,
+                        rootSpec: rootMembers.isEmpty ? nil
+                            : HubSpec(slug: unclassifiedSlug, name: "Unclassified",
+                                      colorRGB: unclassifiedColor, members: rootMembers),
                         hubRadius: { spec in
                             min(GraphConstants.folderRadiusBase
                                     + GraphConstants.folderRadiusScale
@@ -229,8 +240,13 @@ enum GraphSceneBuilder {
 
     // MARK: - 组装(两画布共用:气泡半径 + 线长映射 + 建节点/边)
 
+    /// - Parameter rootSpec: 不立 hub 球、直接挂在主球上的一组叶(见
+    ///   `GraphConstants.unclassifiedFolderMin`)。主球借用 hub 的那套气泡 +
+    ///   日期映射逻辑,只是不新建 hub 节点、不连 hub→main 边、不出陨石带
+    ///   (陨石带的槽位是按 hub 编号分配的,主球没有槽位)。
     private static func assemble(userName: String,
                                  specs: [HubSpec],
+                                 rootSpec: HubSpec? = nil,
                                  hubRadius: (HubSpec) -> Double,
                                  hubKind: (HubSpec) -> GraphNodeKind,
                                  leafKind: (ScannedFile) -> GraphNodeKind,
@@ -258,13 +274,20 @@ enum GraphSceneBuilder {
         // 产参数:beltRadialOffset = 距环基准的偏移,beltAngle = 家内
         // 槽位角(相对自家 hub 绕环心的极角)。
         var globalTierBases: [Double]? = nil
-        for spec in specs {
-            let r = hubRadius(spec)
+        // 主球自带叶时,它也占一个气泡 —— 后面所有 hub 的 rest 要绕开这个
+        // 气泡而不只是主球球体,否则 folder 会压在主球的叶群上。
+        var rootBubbleR = GraphConstants.mainRadius
+        // 主球那组排在最前:rootBubbleR 得先算出来给后面的 hubRest 用。
+        let workList: [(spec: HubSpec, isRoot: Bool)] =
+            (rootSpec.map { [(spec: $0, isRoot: true)] } ?? []) + specs.map { (spec: $0, isRoot: false) }
+        for (spec, isRoot) in workList {
+            let r = isRoot ? GraphConstants.mainRadius : hubRadius(spec)
             // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
             // 移到气泡外侧背主球方向的弧带;hub 球径/连接强度仍按全员算。
-            let beltMembers = beltEnabled
+            // 主球组不分带 —— 用户要的是"都连接主球",低 weight 也照连。
+            let beltMembers = (beltEnabled && !isRoot)
                 ? spec.members.filter { $0.weight < GraphConstants.beltWeightMax } : []
-            let coreMembers = beltEnabled
+            let coreMembers = (beltEnabled && !isRoot)
                 ? spec.members.filter { $0.weight >= GraphConstants.beltWeightMax }
                 : spec.members
             let maxLeafR = coreMembers.map(leafRadius).max() ?? 0
@@ -289,24 +312,32 @@ enum GraphSceneBuilder {
                                   + 2 * maxLeafR + 3
                                   + Double(coreMembers.count) * 6)
             }
-            let hubIdx = nodes.count
-            var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
-                                    radius: r, colorRGB: spec.colorRGB,
-                                    fileURL: nil, hubIndex: 0)
-            hubNode.hubBubbleRadius = bubbleR
-            nodes.append(hubNode)
-            let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
             // rest 里含「最大叶径+pad」净空:圆的内缘叶不许被主球碰撞壳
             // 顶出圈(engine 的硬约束同款净空)—— 仍是不重叠的最小调整。
-            let hubRest = GraphConstants.mainRadius + bubbleR + maxLeafR
+            let hubRest = rootBubbleR + bubbleR + maxLeafR
                 + Double(GraphConstants.mainCollisionPadding)
                 + GraphConstants.bubbleGap
-            edges.append(GraphEdge(a: hubIdx, b: 0, strength: s,
-                                   restLength: hubRest,
-                                   halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
-                                   halfWidthB: GraphConstants.edgeEndWidth(
-                                       ballRadius: GraphConstants.mainRadius),
-                                   springStrength: GraphConstants.hubSpringStrength))
+            let hubIdx: Int
+            if isRoot {
+                // 主球自己当 hub:不新建节点、不连 hub→main 边(自己连自己)。
+                hubIdx = 0
+                nodes[0].hubBubbleRadius = bubbleR
+                rootBubbleR = bubbleR
+            } else {
+                hubIdx = nodes.count
+                var hubNode = GraphNode(id: hubIdx, kind: hubKind(spec), title: spec.name,
+                                        radius: r, colorRGB: spec.colorRGB,
+                                        fileURL: nil, hubIndex: 0)
+                hubNode.hubBubbleRadius = bubbleR
+                nodes.append(hubNode)
+                let s = GraphConstants.folderStrength(memberWeights: spec.members.map(\.weight))
+                edges.append(GraphEdge(a: hubIdx, b: 0, strength: s,
+                                       restLength: hubRest,
+                                       halfWidthA: GraphConstants.edgeEndWidth(ballRadius: r),
+                                       halfWidthB: GraphConstants.edgeEndWidth(
+                                           ballRadius: GraphConstants.mainRadius),
+                                       springStrength: GraphConstants.hubSpringStrength))
+            }
 
             // 线长 = 排名 + 日期间隔压缩映射(07-02 定稿,保留)× 气泡尺度:
             // 家内按 last_occurred 升序,相邻线长差 = 1 + ln(1+日期差) 槽

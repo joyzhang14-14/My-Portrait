@@ -42,6 +42,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 气泡对主球的净空(= 家内最大叶径 + pad):圆的内缘叶不许被主球
     /// 碰撞壳顶出圈外。
     private var hubMainClear: [Float] = []
+    /// 主球在陨石环包围计算里占的半径。folder 不够 3 个时 ungrouped 直连
+    /// 主球,主球自己有一圈叶 —— 环要罩住的是那个气泡,不是光秃秃的球。
+    private var mainEnclosureR: Float = 0
     /// 全部末端球下标 + 各自所属 hub(主球=0)+ 各自的圈内硬上限
     ///(= 自家气泡半径 − 叶半径 − 缝;叶子绝不出自家隐形圆)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
@@ -333,6 +336,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         snapshot = pos
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
+        mainEnclosureR = Float(max(scene.nodes.first?.hubBubbleRadius ?? 0,
+                                   scene.nodes.first?.radius ?? 0))
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
@@ -538,6 +543,8 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         nodeFamily = Self.familyIdArray(scene: scene)
         (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
         (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
+        mainEnclosureR = Float(max(scene.nodes.first?.hubBubbleRadius ?? 0,
+                                   scene.nodes.first?.radius ?? 0))
         (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
         (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
         (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
@@ -1382,7 +1389,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private func enclosureCircles(hubAt: (Int) -> SIMD2<Float>)
         -> ([SIMD2<Float>], [Float]) {
         var cs: [SIMD2<Float>] = [.zero]
-        var rs: [Float] = [nodeRadius[0]]
+        var rs: [Float] = [max(nodeRadius[0], mainEnclosureR)]
         for s in 0..<hubIndices.count {
             cs.append(hubAt(s))
             rs.append(hubBubbleR[s] > 0 ? hubBubbleR[s]
@@ -2322,9 +2329,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             restOf[Int32(e.a)] = Float(e.restLength)
         }
         var byHub: [Int32: [Int32]] = [:]
-        // 陨石不参与匀布(07-03):弧带槽位由 beltPass 弹簧管
+        // 陨石不参与匀布(07-03):弧带槽位由 beltPass 弹簧管。
+        // hubIndex == 0 = 直接挂主球的叶(folder 不够 3 个时的 ungrouped),
+        // 一样要匀布 —— 否则主球那圈叶会堆成一坨。
         for node in scene.nodes
-        where !node.kind.isHub && node.hubIndex > 0 && node.beltTier == nil {
+        where !node.kind.isHub && node.hubIndex >= 0 && node.beltTier == nil {
             byHub[Int32(node.hubIndex), default: []].append(Int32(node.id))
         }
         var leaf: [Int32] = []
@@ -2479,12 +2488,18 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             leafCount[node.hubIndex, default: 0] += 1
             maxLeafR[node.hubIndex] = max(maxLeafR[node.hubIndex] ?? 0, Float(node.radius))
         }
+        // 主球自己挂叶时(folder 不够 3 个,ungrouped 直连主球),它也有气泡。
+        // hub↔主球的硬约束只认 nodeRadius[0](球体),会让 folder 气泡压在主球
+        // 的叶群上 —— 把"气泡比球体多出来的那圈"折进每个 hub 的净空里。
+        let rootExtra = max(Float(scene.nodes.first?.hubBubbleRadius ?? 0)
+                            - Float(scene.nodes.first?.radius ?? 0), 0)
         var idx: [Int32] = [], bubble: [Float] = [], mass: [Float] = [], clear: [Float] = []
         for node in scene.nodes where node.kind.isHub && node.id != 0 {
             idx.append(Int32(node.id))
             bubble.append(node.hubBubbleRadius.map(Float.init) ?? -1)
             mass.append(Float(leafCount[node.id] ?? 0) + 1)
-            clear.append((maxLeafR[node.id] ?? 0) + GraphConstants.mainCollisionPadding)
+            clear.append((maxLeafR[node.id] ?? 0) + GraphConstants.mainCollisionPadding
+                         + rootExtra)
         }
         return (idx, bubble, mass, clear)
     }

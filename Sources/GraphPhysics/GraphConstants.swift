@@ -133,6 +133,12 @@ public enum GraphConstants {
     ///   2. Text 列表   —— MemoriesView.makeFolderSplit(不成组)
     ///   3. 生产 pipeline —— EventClassifier(不创建新 folder)
     public static let folderMinCoreEvents: Int = 5
+    /// Unclassified 成区门(08-09 用户):存活 folder 少于此数时,没分类的
+    /// event **不**收进 Unclassified 分区 —— 图谱里直接连主球、Text 列表里
+    /// 直接平铺。folder 还没成气候的时候多一个灰分区只是徒增一层。
+    ///
+    /// ⚠️ 两处共用:GraphSceneBuilder.buildEvents / MemoriesView.foldersGroupedList
+    public static let unclassifiedFolderMin: Int = 3
     public static let beltTier1Max: Double = 1.0
     public static let beltTier2Max: Double = 0.5
     /// 环基准间隙(单环重构):环半径 = 罩住{主球 + 全部气泡}的最小

@@ -305,7 +305,8 @@ struct MemoriesView: View {
         //   ≥3 个 folder → 列表已经是"folder 的列表"了,再挂一串裸事件在下面
         //                  就成了两种东西混排。这时把 ungrouped 也收成一个灰色
         //                  伪 folder(不可删/改名/改色),视觉上整列统一。
-        let usePseudoFolder = split.folders.count >= 3 && !split.ungrouped.isEmpty
+        let usePseudoFolder = split.folders.count >= GraphConstants.unclassifiedFolderMin
+            && !split.ungrouped.isEmpty
         // folders 先
         ForEach(Array(split.folders.enumerated()), id: \.element.id) { idx, g in
             FolderDisclosureRow(
