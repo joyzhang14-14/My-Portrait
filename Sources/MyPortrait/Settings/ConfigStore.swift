@@ -35,20 +35,62 @@ final class ConfigStore {
     private(set) var didCompleteInitialSeed = false
 
     // File path / write debounce / fs watcher
-    private let path: URL = {
+
+    /// **真实** config —— 永远 `~/.portrait/config.toml`。dev mode 下后台
+    /// section(capture / privacy / storage / scheduler / memory)从这里读。
+    private static let liveConfigURL: URL = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".portrait/config.toml")
     }()
+
+    /// 本进程实际**读写**的 config。dev mode 下是 `~/.portrait-dev/config.toml`。
+    /// `DevMode.isOn` 进程内冻结,所以这个值也是恒定的。
+    private var path: URL { Self.activeConfigURL }
+
+    static var activeConfigURL: URL {
+        DevMode.isOn ? DevMode.rootURL.appendingPathComponent("config.toml") : liveConfigURL
+    }
+
+    /// 后台 section:capture / privacy / storage / scheduler / memory。
+    /// dev mode 下把 `dst` 的这几段换成 `src` 的 —— 两个用途:
+    ///   - load 后:换成**真实** config 的值(采集/pipeline 读的就是 current)
+    ///   - mutate 时:换回**改动前**的值 = 丢弃改动(只读语义)
+    /// 不写成 KeyPath 数组是因为各 section 类型不同,拿不到统一的 KeyPath 类型。
+    private static func copyBackendSections(from src: MyPortraitConfig,
+                                            into dst: inout MyPortraitConfig) {
+        dst.capture   = src.capture
+        dst.privacy   = src.privacy
+        dst.storage   = src.storage
+        dst.scheduler = src.scheduler
+        dst.memory    = src.memory
+    }
     private var writeTask: Task<Void, Never>?
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFD: Int32 = -1
     private var suppressNextWatchEvent = false       // ignore our own writes
 
     private init() {
+        seedDevConfigIfNeeded()
         loadFromDisk()
         migrateIfNeeded()
         cleanupLegacyDefaults()
         startWatching()
+    }
+
+    /// dev config 第一次用时,整份拷贝真实 config —— 用户要求"新建时两个 app
+    /// 配置相同、模型供应商相同、不需要重新绑定"。
+    ///
+    /// 供应商能"不用重新绑定"是因为 TOML 里存的只是**引用名**,真正的密钥在
+    /// `secrets.sqlite`,而那个文件**永远留在 `~/.portrait`**(见 AIPaths)。
+    /// 所以拷一份 config 过来就直接能用,密钥一份都不用复制 —— 也避免了把
+    /// 密钥多存一份在演示目录里。
+    private func seedDevConfigIfNeeded() {
+        guard DevMode.isOn else { return }
+        let fm = FileManager.default
+        try? Storage.ensureDevExists()
+        guard !fm.fileExists(atPath: path.path),
+              fm.fileExists(atPath: Self.liveConfigURL.path) else { return }
+        try? fm.copyItem(at: Self.liveConfigURL, to: path)
     }
 
     /// One-shot: drop legacy UserDefaults keys whose single source moved to
@@ -72,6 +114,11 @@ final class ConfigStore {
     func mutate(_ block: (inout MyPortraitConfig) -> Void) {
         var next = current
         block(&next)
+        // dev mode:后台 section 只读 —— 改动直接丢弃。设置页里这些控件已经
+        // 灰掉,这里是**兜底**:菜单栏开关、快捷键、其它没灰的入口也一样挡住。
+        // 挡住的理由见 DevMode 顶部第 3 条:让 dev 的开关动到真实采集/保留期
+        // 就是在删你自己的数据。
+        if DevMode.isOn { Self.copyBackendSections(from: current, into: &next) }
         guard next != current else { return }
         current = next
         refreshSnapshot()
@@ -133,11 +180,7 @@ final class ConfigStore {
 
     /// Static for callers that want the on-disk URL without going through
     /// `.shared` first (e.g. footer of the Memory page).
-    static var path: URL {
-        FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent(".portrait/config.toml")
-    }
+    static var path: URL { activeConfigURL }
 
     /// Convenience two-way Binding for any value in the config tree.
     /// Usage:  Toggle("", isOn: ConfigStore.shared.binding(\.display.showInMenuBar))
@@ -249,7 +292,23 @@ final class ConfigStore {
             // Keep `current` as whatever it was (defaults on fresh launch).
             diskFileUnparsed = true
         }
+        overlayLiveBackendSections()
         refreshSnapshot()
+    }
+
+    /// dev mode:把刚从 dev config 读进来的后台 section 换成**真实** config 的值。
+    /// 采集线程和 pipeline 读的就是 `current`,让它们看见 dev 的值 = dev 的开关
+    /// 真的动到你本人的数据。真实文件读不出来就保持原样(默认值),不是致命路径。
+    ///
+    /// ⚠️ 真实 config 只在这里读一次(每次 loadFromDisk)。文件监听器挂的是
+    /// **正在写的那个文件**,所以 dev mode 期间外部改真实 config.toml 不会热重载。
+    /// dev mode 本来就是临时状态,重启即取最新,不为此再挂第二个 watcher。
+    private func overlayLiveBackendSections() {
+        guard DevMode.isOn,
+              let raw = try? String(contentsOf: Self.liveConfigURL, encoding: .utf8),
+              let live = try? TOMLDecoder().decode(MyPortraitConfig.self, from: raw)
+        else { return }
+        Self.copyBackendSections(from: live, into: &current)
     }
 
     /// Hook for future schema bumps. Today this is identity; once schema

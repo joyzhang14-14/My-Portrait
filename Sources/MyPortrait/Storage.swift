@@ -5,10 +5,40 @@ import Foundation
 /// Top level is a hidden folder under $HOME (`~/.portrait`) so it does
 /// not clutter the Finder sidebar but is still openable via `cmd+shift+G`.
 enum Storage {
-    /// `~/.portrait` — top-level hidden root.
+    /// `~/.portrait` — top-level hidden root. **真实数据**:采集写它、pipeline
+    /// 读写它、凭据(secrets.sqlite)存它。dev mode 也不换 —— 见 `uiRootURL`。
     static var rootURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".portrait", isDirectory: true)
+    }
+
+    // MARK: - 界面用的根(dev mode)
+
+    /// **界面展示 / 编辑**用的根。dev mode 开启后指向 `~/.portrait-dev`。
+    ///
+    /// ⚠️ 采集层与 pipeline **绝不能**用这一族路径,它们一律用 `rootURL`。
+    /// 判断标准很简单:这段代码是"给人看的 / 人点出来的",还是"定时器和
+    /// 采集线程自己在跑的"?后者一律 `rootURL`。
+    static var uiRootURL: URL { DevMode.isOn ? DevMode.rootURL : rootURL }
+
+    /// events / portrait / personality_daily / cron_jobs 的界面版。
+    /// AI chat 的 `chat.sqlite`、`agent_sessions/` 在 `AIPaths` 里切。
+    static var uiEventsDir: URL { uiRootURL.appendingPathComponent("events", isDirectory: true) }
+    static var uiPortraitDir: URL { uiRootURL.appendingPathComponent("portrait", isDirectory: true) }
+    static var uiPersonalityDailyDir: URL {
+        uiRootURL.appendingPathComponent("personality_daily", isDirectory: true)
+    }
+    static var uiCronJobsDir: URL { uiRootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
+
+    /// dev 根下的目录骨架。只在 dev mode 开着时调 —— 平时一个字节都不碰
+    /// `~/.portrait-dev`(它不存在就等于这个功能不存在,见 `DevMode.isAvailable`)。
+    static func ensureDevExists() throws {
+        guard DevMode.isOn else { return }
+        let fm = FileManager.default
+        for url in [DevMode.rootURL, uiEventsDir, uiPortraitDir,
+                    uiPersonalityDailyDir, uiCronJobsDir] {
+            try fm.createDirectory(at: url, withIntermediateDirectories: true)
+        }
     }
 
     /// Portrait layer — long-term "who is this person" distilled by
