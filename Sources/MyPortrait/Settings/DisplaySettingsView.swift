@@ -191,8 +191,13 @@ private struct AppCustomizeCard: View {
 /// DerivedData 下经常没在 LS 注册,抛 -600 procNotFound,结果 app 退了但没自启。
 ///
 /// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,绕开
-/// LaunchServices。父进程 sh 立即 exit,子进程在 sleep 1 后 fork+exec binary,
-/// 这时原 app 已经 NSApp.terminate 退完了。
+/// LaunchServices。
+///
+/// **等旧进程真的没了再拉新的**(08-09):原来是固定 `sleep 1`,而
+/// `NSApp.terminate` 的收尾(flush config、关 sqlite、停采集)不保证一秒内做完
+/// —— 超时就会新旧两个窗口同屏,观感很糟。改成轮询 `kill -0`(只探测进程存在
+/// 性,不发任何信号),旧窗口消失后新窗口才出现。10 秒封顶,免得 terminate 被
+/// 卡住时永远不重启。
 ///
 /// 原本是 AppCustomizeCard 的私有方法。dev mode 切换也要重启,提到文件级共用 ——
 /// 上面这些坑不值得为第二个调用方再踩一遍。
@@ -201,11 +206,19 @@ enum AppRelaunch {
         guard let exec = Bundle.main.executablePath else {
             NSApp.terminate(nil); return
         }
+        let pid = ProcessInfo.processInfo.processIdentifier
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
         // 单引号包路径 + \''\'' escape 内部单引号,容忍路径里的空格 / 特殊字符。
         let escaped = exec.replacingOccurrences(of: "'", with: "'\\''")
-        task.arguments = ["-c", "sleep 1; '\(escaped)' &"]
+        task.arguments = ["-c", """
+            n=0
+            while kill -0 \(pid) 2>/dev/null && [ $n -lt 100 ]; do
+              sleep 0.1
+              n=$((n+1))
+            done
+            '\(escaped)' &
+            """]
         try? task.run()
         NSApp.terminate(nil)
     }

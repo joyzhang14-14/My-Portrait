@@ -211,12 +211,17 @@ struct ContentView: View {
             // 且采集/隐私/存储/调度/记忆那几页是只读的。没有它很容易忘了自己
             // 在 dev 里,对着假数据排查真问题。
             if DevMode.isOn {
+                // ⚠️ background 在 frame **之前** —— 顺序反了橙色会铺满整行。
+                // 只包住文字的一枚小签,居中挂在顶端。
                 Text("DEV MODE · read only")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.black.opacity(0.75))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.black.opacity(0.8))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.orange.opacity(0.85)))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 3)
-                    .background(Color.orange.opacity(0.85))
+                    .padding(.top, 3)
+                    .padding(.bottom, 2)
             }
             mainSplit
         }
