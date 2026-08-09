@@ -443,11 +443,13 @@ struct IgnoredAppPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
+                // Category 在最左 —— 跟音频「暂停名单」那张卡同序:先挑大类,
+                // 再补具体 app。
+                if let categories { CategoryDropdown(categories: categories) }
                 dropdown(title: "Select app", icon: "plus.circle.fill",
                          options: discovered, emptyHint: "No captured apps yet")
                 dropdown(title: "System / privacy", icon: "macwindow",
                          options: Self.systemEntries, emptyHint: "")
-                if let categories { CategoryDropdown(categories: categories) }
             }
             if !apps.isEmpty || !(categories?.wrappedValue.isEmpty ?? true) {
                 FlowLayout(spacing: 6) {
@@ -555,9 +557,9 @@ struct TypingAppPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
+                if let categories { CategoryDropdown(categories: categories) }
                 dropdown(title: "Select app", icon: "plus.circle.fill",
                          options: discovered, emptyHint: "No typed-in apps yet")
-                if let categories { CategoryDropdown(categories: categories) }
             }
             if !locked.isEmpty || !apps.isEmpty
                 || !(categories?.wrappedValue.isEmpty ?? true) {
