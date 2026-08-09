@@ -136,10 +136,16 @@ public enum GraphConstants {
     /// Unclassified 成区门 —— **Text 列表专用**(08-09 用户定的三档):
     /// 0 个 folder 纯平铺 / 1–2 个粗灰线隔开 / ≥3 个收成灰色 Unclassified 组。
     ///
-    /// ⚠️ 图谱**不用**这个门:实测 2 个 folder + 33 颗球直连主球很难看,
-    /// 改成「只要有 folder 就立灰分区球,一个 folder 都没有才直连主球」,
-    /// 判据就是 specs 非空,见 GraphSceneBuilder.buildEvents。
+    /// ⚠️ 图谱**不用**这个门,它有自己的 `unclassifiedHubMinFolders`。
     public static let unclassifiedFolderMin: Int = 3
+
+    /// Unclassified 分区球成球门 —— **图谱专用**。存活 folder 达到此数才把
+    /// 未分类事件收成灰分区球;不够就让它们直连主球。
+    ///
+    /// 调过两轮:3(跟 Text 共用)→ 实测 2 folder + 33 颗球挂主球很难看 →
+    /// 1(有 folder 就成球)→ 现在 2。跟 Text 的三档有意不同:图谱是二维布局,
+    /// 主球周围挂几十颗散球会跟 folder 气泡抢空间,列表没有这个问题。
+    public static let unclassifiedHubMinFolders: Int = 2
 
     /// 0 个 folder 时全部事件直连主球 —— 这一族的专属线长参数。
     ///

@@ -160,18 +160,15 @@ enum GraphSceneBuilder {
                 unclassifiedMembers.append(contentsOf: members)
             }
         }
-        // Unclassified 成区门(08-09 用户实测两版后定稿):**只要有一个 folder
-        // 就立灰分区球,一个都没有才直连主球**。
-        //
-        // 上一版跟 Text 列表共用「≥3 个 folder」这道门,实测 2 个 folder + 33 颗
-        // 球直接挂主球很难看 —— 主球那圈叶跟 folder 气泡抢空间,整张图失衡。
-        // 直连主球现在只服务"全新用户,一个 folder 都还没聚出来"这一种情况。
+        // Unclassified 成区门:存活 folder 达到 unclassifiedHubMinFolders 才立
+        // 灰分区球,不够就让这些事件直连主球。门槛调过三轮(3 → 1 → 2),
+        // 理由见该常量注释。跟 Text 列表的三档有意不同。
         var rootMembers: [ScannedFile] = []
         if !unclassifiedMembers.isEmpty {
             // 并入落选 folder 成员后重排:成员顺序进节点指纹,顺序不稳
             // 会话缓存永远 miss(同顶部 scanned 排序的理由)。
             unclassifiedMembers.sort { $0.relPath < $1.relPath }
-            if !specs.isEmpty {
+            if specs.count >= GraphConstants.unclassifiedHubMinFolders {
                 specs.append(HubSpec(slug: unclassifiedSlug, name: "Unclassified",
                                      colorRGB: unclassifiedColor,
                                      members: unclassifiedMembers))
