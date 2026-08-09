@@ -19,17 +19,21 @@ enum CredentialExpiryWatcher {
     private static let dayKey = "credentialExpiry.lastCheckDay"
 
     /// 每 tick 调都安全 —— 内部按本地日期去重。
+    ///
+    /// ⚠️ **这里绝不读钥匙串。** 读 Claude Code 的钥匙串条目每次都可能弹系统
+    /// 授权框,挂在定时任务上就是隔三差五被打断一次。而且完全没必要:
+    /// `refreshTokenExpiresAt` 是个**绝对时间戳**,读到一次之后"还剩几天"
+    /// 自己会往下走。只有用户重新 `claude login` 之后那个值才会变 —— 那时候
+    /// 他自然会去点 Detect,由那条路径刷新缓存。
     static func runDailyIfNeeded() async {
         let today = localDayString(Date())
         guard UserDefaults.standard.string(forKey: dayKey) != today else { return }
-        // 先记日子:中途失败(比如用户点了"不允许"读钥匙串)也不该今天反复重试。
+        // 先记日子:中途失败也不该今天反复重试。
         UserDefaults.standard.set(today, forKey: dayKey)
-
-        await ClaudeCodeSignIn.refreshInBackground()
 
         await checkCodex()
         // Claude Code 的 refreshTokenExpiresAt 到了就是到了,我们续不了 ——
-        // 只能提醒用户去跑 `claude login`。
+        // 只能提醒用户去跑 `claude login`。用缓存值算,不重读。
         warnIfExpiringSoon(provider: "Claude Code CLI", expiry: ClaudeCodeSignIn.cachedExpiry)
     }
 

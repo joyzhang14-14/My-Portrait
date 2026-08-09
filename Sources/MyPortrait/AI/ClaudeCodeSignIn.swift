@@ -38,21 +38,8 @@ enum ClaudeCodeSignIn {
         UserDefaults.standard.removeObject(forKey: key)
     }
 
-    /// 给每日巡检用的异步版本。**只在已经有缓存时才读**:没有缓存 = 用户从没
-    /// 成功 Detect 过(没连、或者当时拒了钥匙串授权),那半夜跑去弹一个授权框
-    /// 纯属打扰。
-    ///
-    /// 钥匙串读取放在 detached task 里:万一系统真弹授权框,`SecItemCopyMatching`
-    /// 会**阻塞调用线程**直到用户点掉 —— 在主线程上就是转菊花假死。
-    static func refreshInBackground() async {
-        guard cachedExpiry != nil else { return }
-        let d = await Task.detached(priority: .utility) {
-            ClaudeCodeAgent.readSignInExpiry()
-        }.value
-        if let d {
-            UserDefaults.standard.set(d.timeIntervalSince1970, forKey: key)
-        } else {
-            UserDefaults.standard.removeObject(forKey: key)
-        }
-    }
+    // 08-09 删掉了 refreshInBackground():定时重读钥匙串会隔三差五弹一次系统
+    // 授权框,而且完全没必要 —— 存的是**绝对时间戳**,"还剩几天"自己会往下走。
+    // 只有用户重新 `claude login` 之后那个值才变,那时他会去点 Detect,由
+    // refreshFromKeychain() 刷新。**别再加回定时重读。**
 }
