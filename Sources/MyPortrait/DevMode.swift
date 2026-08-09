@@ -61,4 +61,21 @@ enum DevMode {
         UserDefaults.standard.set(on, forKey: defaultsKey)
         UserDefaults.standard.synchronize()   // 马上要 terminate,不能等系统自己刷
     }
+
+    /// 演示人物的个人信息。dev config 是整份拷贝真实 config 来的,`personalInfo`
+    /// 又是跟着 dev 走的 section —— 不覆盖的话 Personal Info 页会原样显示**真实
+    /// 姓名、国籍、生日**,录演示视频第一页就泄了。
+    ///
+    /// 跟 `scripts/gen_dev_seed.py` 里的 Alex Rivera 是同一个人。改名字要两边一起改。
+    static var demoPersonalInfo: PersonalInfoConfig {
+        var p = PersonalInfoConfig()
+        p.firstName = "Alex"
+        p.lastName = "Rivera"
+        p.alias = "alex"
+        p.gender = .they
+        p.nationality = "United States"
+        p.languages = ["English", "Spanish"]
+        p.birthDate = "1994-03-22"
+        return p
+    }
 }

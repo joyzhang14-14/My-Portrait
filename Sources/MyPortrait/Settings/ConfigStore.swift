@@ -309,6 +309,20 @@ final class ConfigStore {
               let live = try? TOMLDecoder().decode(MyPortraitConfig.self, from: raw)
         else { return }
         Self.copyBackendSections(from: live, into: &current)
+        // personalInfo 是跟着 dev 走的 section,但 dev config 是整份拷贝真实
+        // config 来的 —— 不管的话 Personal Info 页会原样显示**你的真实姓名、
+        // 国籍、生日**,录演示视频第一页就泄了。
+        //
+        // 判据用"跟真实那份一模一样"而不是"刚创建":只要还等于真实值,就说明
+        // 是拷过来没动过的,换成演示人物;你在 dev 里改过之后两者不同,这条不再
+        // 触发,改动照常保留。这样已经拷过去的旧 dev config 也能自愈,不用手删。
+        if current.personalInfo == live.personalInfo {
+            current.personalInfo = DevMode.demoPersonalInfo
+            // 落盘,别只改内存 —— 否则 ~/.portrait-dev/config.toml 里躺着的还是
+            // 你的真实姓名生日,而那个目录是**准备拿去演示 / 分享**的。
+            // 写完两者不再相等,下次启动不会重复触发,不构成回环。
+            scheduleWrite()
+        }
     }
 
     /// Hook for future schema bumps. Today this is identity; once schema
