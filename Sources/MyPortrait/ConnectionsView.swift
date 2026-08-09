@@ -716,7 +716,14 @@ struct ConnectionsView: View {
         switch i.id {
         case "chatgpt":     return "Sign in with your ChatGPT Plus / Pro account (uses the Codex OAuth flow). No API key needed."
         case "openai-byok": return "Paste a raw OpenAI API key (sk-...). Pay-per-token via api.openai.com, no ChatGPT subscription needed."
-        case "claude-code": return "Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first."
+        // 钥匙串那段是给用户看的"为什么弹密码框"。macOS 的授权对话框只说
+        // "My Portrait 想要使用您在钥匙串中存储的机密信息",不说读来干嘛 ——
+        // 不在这儿解释,用户只会看到一个凭空要密码的弹窗,还每次都弹。
+        case "claude-code": return """
+            Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first.
+
+            Detect login status also reads the expiry date from your Keychain, so My Portrait can warn you before the login runs out — instead of an overnight pipeline silently failing. macOS asks for your Mac password the first time: enter it and click Always Allow, and it won't ask again. Only the expiry date is read; the token itself never leaves this Mac.
+            """
         case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
         case "gemini":      return "Google AI Studio API key. Free tier available."
         case "perplexity":  return "Perplexity API for web-grounded answers."
