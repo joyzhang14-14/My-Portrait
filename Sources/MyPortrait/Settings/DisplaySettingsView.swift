@@ -410,6 +410,8 @@ private struct IconSlot: View {
 /// 数据源。所以这张卡同时是"这图标什么意思"和"我现在到底在被记什么"的自查面板:
 /// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
 private struct MenuBarLampCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         SettingsCard(
             title: "Menu bar icon",
@@ -426,20 +428,24 @@ private struct MenuBarLampCard: View {
                 SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
-                        // 深色底片 —— 模拟菜单栏,白色描边才读得出来。
-                        // **不透明实色**:原来是 black.opacity(0.55),light 主题
-                        // 下卡片底色透上来变成灰片,底片跟着 scheme 变。菜单栏
-                        // 永远是那个深色,这里也钉死。
+                        // 底片模拟菜单栏,**跟随系统外观**:深色模式黑底白描边、
+                        // 浅色模式白底黑描边 —— 和菜单栏里真正显示的那一版
+                        // (Assets 里 Any / Dark 两套)始终一致,不然用户在这张
+                        // 卡上看到的和抬头看到的对不上。
+                        let dark = colorScheme == .dark
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(red: 0.11, green: 0.11, blue: 0.12))
+                                .fill(dark ? Color(red: 0.11, green: 0.11, blue: 0.12)
+                                           : Color(red: 0.97, green: 0.97, blue: 0.98))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.white.opacity(0.10), lineWidth: 1))
+                                        .stroke(dark ? Color.white.opacity(0.10)
+                                                     : Color.black.opacity(0.10), lineWidth: 1))
                             LampGlyph(screen: lamps.screen.on,
                                       audio: lamps.audio.on,
                                       typing: lamps.typing.on,
-                                      now: tl.date)
+                                      now: tl.date,
+                                      ink: dark ? .white : .black)
                                 .padding(10)
                         }
                         // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
@@ -491,6 +497,9 @@ private struct LampGlyph: View {
     /// 呼吸相位由外层墙钟 TimelineView 传进来 —— 自己再套一个 TimelineView
     /// 会多一条动画时钟,而且外层已经保证了后台也在 tick。
     var now: Date
+    /// 连线与各球外圈的颜色。菜单栏深色底用白、浅色底用黑,和 Assets 里
+    /// Any / Dark 两套 PNG 一一对应。
+    var ink: Color = .white
 
     static let screenColor = Color(red: 142/255, green: 26/255,  blue: 245/255)
     static let audioColor  = Color(red: 255/255, green: 255/255, blue: 85/255)
@@ -502,10 +511,13 @@ private struct LampGlyph: View {
     /// 顶部那颗球被推到 y<0 裁掉了(看起来就是"图标偏上、上面被盖住一块")。
     /// y 的取值范围因此是 0…aspect,不是 0…1。
     private static let aspect: CGFloat = 1052.0 / 916.0     // 1.148472
+    /// ⚠️ 球 ×1.2(含中心)、描边 ×0.8、连线长度不变 —— 原版彩芯只有 2.8px@1x,
+    /// 白圈吃掉了大半,菜单栏上看不清。现在彩芯 4.0px@1x。连线长度**不能再缩**:
+    /// 球放大后三条连线本就所剩无几,再短球就压进中心球里了。
     private static let hub = CGPoint(x: 0.233624, y: 0.749236)
-    private static let rHub: CGFloat = 0.228493
-    private static let rDot: CGFloat = 0.158734
-    private static let stroke: CGFloat = 0.069869
+    private static let rHub: CGFloat = 0.274192      // 0.228493 × 1.2
+    private static let rDot: CGFloat = 0.190481      // 0.158734 × 1.2
+    private static let stroke: CGFloat = 0.055895    // 0.069869 × 0.8
     private static let dots: [(CGPoint, KeyPath<LampGlyph, Bool>, Color)] = [
         (CGPoint(x: 0.477293, y: 0.163646), \.screen, screenColor),
         (CGPoint(x: 0.836135, y: 0.563319), \.audio,  audioColor),
@@ -522,11 +534,11 @@ private struct LampGlyph: View {
                 // 等比放进给定尺寸,居中。
                 //
                 // ⚠️ **四周留 margin**:Canvas 会把画到 bounds 外的东西剪掉,
-                // 而亮灯的辉光半径能到 (rDot-stroke)*2.35 ≈ 0.209,三颗球都
+                // 而亮灯的辉光半径能到 (rDot-stroke)*1.9 ≈ 0.256,三颗球都
                 // 贴着归一化框的边(y 最大 0.988、x 最大 0.836),辉光必然超出
                 // → 灯边上出现一道直的截断。把绘制区按 1+2*margin 缩一圈,
                 // 辉光就全落在画布里。
-                let margin: CGFloat = 0.07
+                let margin: CGFloat = 0.11
                 let boxW = 1 + 2 * margin
                 let boxH = Self.aspect + 2 * margin
                 let scale = min(size.width / boxW, size.height / boxH)
@@ -543,17 +555,17 @@ private struct LampGlyph: View {
                 let hubC = P(Self.hub)
                 let sw = R(Self.stroke)
 
-                // 1) 连线 + 各球外圆,统一白色描边(菜单栏用的就是白线版)
+                // 1) 连线 + 各球外圆,统一用 ink(深色底=白,浅色底=黑)
                 for (p, _, _) in Self.dots {
                     var line = Path()
                     line.move(to: hubC)
                     line.addLine(to: P(p))
-                    ctx.stroke(line, with: .color(.white),
+                    ctx.stroke(line, with: .color(ink),
                                style: StrokeStyle(lineWidth: sw, lineCap: .round))
                 }
-                ctx.fill(disc(hubC, R(Self.rHub)), with: .color(.white))
+                ctx.fill(disc(hubC, R(Self.rHub)), with: .color(ink))
                 for (p, _, _) in Self.dots {
-                    ctx.fill(disc(P(p), R(Self.rDot)), with: .color(.white))
+                    ctx.fill(disc(P(p), R(Self.rDot)), with: .color(ink))
                 }
 
                 // 2) 内圆:中心恒亮橙;三盏灯亮=本色(带辉光)、灭=挖空成底色
@@ -563,7 +575,9 @@ private struct LampGlyph: View {
                     let ri = R(Self.rDot - Self.stroke)
                     if self[keyPath: kp] {
                         // 辉光:同色大圆低透明度垫在下面,呼吸时轻微涨缩
-                        let glow = ri * (2.0 + 0.35 * breathe)
+                        // 球放大后 ri 变大,辉光半径跟着涨 —— 系数从 2.0 收到
+                        // 1.6,配合 margin 0.11 才不会被 Canvas 边缘切出直边。
+                        let glow = ri * (1.6 + 0.30 * breathe)
                         ctx.fill(disc(c, glow), with: .color(color.opacity(0.16 + 0.08 * breathe)))
                         ctx.fill(disc(c, ri), with: .color(color))
                     } else {

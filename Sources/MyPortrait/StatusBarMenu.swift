@@ -296,6 +296,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             //
             // **isTemplate = false 是关键**:图是彩色的,设 true 会被系统压成
             // 黑白剪影,三盏灯就全一个颜色、彻底失去意义。
+            // 深浅两套不走代码分支 —— 每个 imageset 里 Any(黑描边,浅色菜单栏)
+            // 和 Dark(白描边)各一份,AppKit 按按钮的 effectiveAppearance 自己挑。
             // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
             // 变化通知,回头调 refreshIcon,重算就成自激死循环(08-01 炸过,
             // 主线程 100% CPU、UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
