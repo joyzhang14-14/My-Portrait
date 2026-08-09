@@ -299,6 +299,13 @@ struct MemoriesView: View {
         // 分组视图只在搜索为空时渲染(visibleEntries == entries),所以
         // 缓存按全量 entries 算就是对的。
         let split = (folders: folderGroups, ungrouped: ungroupedEntries)
+        // ungrouped 的呈现分三档(08-09 用户定):
+        //   0 个 folder  → 全是散事件,一条线都不画,直接平铺
+        //   1–2 个 folder → 粗灰线隔开 + 平铺(原样)
+        //   ≥3 个 folder → 列表已经是"folder 的列表"了,再挂一串裸事件在下面
+        //                  就成了两种东西混排。这时把 ungrouped 也收成一个灰色
+        //                  伪 folder(不可删/改名/改色),视觉上整列统一。
+        let usePseudoFolder = split.folders.count >= 3 && !split.ungrouped.isEmpty
         // folders 先
         ForEach(Array(split.folders.enumerated()), id: \.element.id) { idx, g in
             FolderDisclosureRow(
@@ -315,26 +322,42 @@ struct MemoriesView: View {
             )
             // 最后一个 folder 后面**不画**这条细 Divider —— 紧接着就是下面那条
             // 10px 粗线,两条线之间会被 VStack spacing 撑出间距让粗线偏下。
-            if idx < split.folders.count - 1 || split.ungrouped.isEmpty {
+            // 走伪 folder 时没有粗线,这条细线要照画(folder 之间的常规分隔)。
+            if idx < split.folders.count - 1 || usePseudoFolder || split.ungrouped.isEmpty {
                 Divider().background(Color.primary.opacity(0.08))
             }
         }
-        // folders 区 与 ungrouped 区之间的粗灰分隔线 —— 放在 folders ForEach
-        // 之后,所有 folder(含展开后的 event)天然都在它上方,ungrouped 在下方。
-        // 只在两边都非空时画,避免孤线。
-        if !split.folders.isEmpty, !split.ungrouped.isEmpty {
-            Rectangle()
-                .fill(Color.primary.opacity(0.12))
-                .frame(height: 10)
-                .frame(maxWidth: .infinity)
-        }
-        // ungrouped 平铺
-        ForEach(split.ungrouped) { entry in
-            EntryRow(entry: entry, selected: selected == entry.id)
-                .contentShape(Rectangle())
-                .onTapGesture { handleSelect(entry: entry) }
-                .contextHighlight { eventContextMenu(entry) }
+        if usePseudoFolder {
+            FolderDisclosureRow(
+                title: "Unclassified",
+                count: split.ungrouped.count,
+                colorHex: nil,
+                entries: split.ungrouped,
+                selected: selected,
+                onSelect: handleSelect,
+                onDelete: {}, onRename: { _ in }, onSetColor: { _ in },
+                eventMenu: { entry in AnyView(eventContextMenu(entry)) },
+                pseudo: true
+            )
             Divider().background(Color.primary.opacity(0.08))
+        } else {
+            // folders 区 与 ungrouped 区之间的粗灰分隔线 —— 放在 folders ForEach
+            // 之后,所有 folder(含展开后的 event)天然都在它上方,ungrouped 在下方。
+            // 只在两边都非空时画,避免孤线(0 个 folder 时就是纯平铺,无线)。
+            if !split.folders.isEmpty, !split.ungrouped.isEmpty {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(height: 10)
+                    .frame(maxWidth: .infinity)
+            }
+            // ungrouped 平铺
+            ForEach(split.ungrouped) { entry in
+                EntryRow(entry: entry, selected: selected == entry.id)
+                    .contentShape(Rectangle())
+                    .onTapGesture { handleSelect(entry: entry) }
+                    .contextHighlight { eventContextMenu(entry) }
+                Divider().background(Color.primary.opacity(0.08))
+            }
         }
     }
 
@@ -1354,6 +1377,9 @@ private struct FolderDisclosureRow: View {
     let onSetColor: (String?) -> Void
     /// 展开后每个 event 行的右键菜单(分 folder / 删除)。由 MemoriesView 构造。
     @ViewBuilder let eventMenu: (MemoriesView.Entry) -> AnyView
+    /// 伪 folder(Unclassified):磁盘上没有对应的 _folders json,所以删除 /
+    /// 改名 / 改色全部不适用 —— 连按钮带右键菜单一起藏掉。灰色 + 加粗标题。
+    var pseudo: Bool = false
 
     @State private var expanded: Bool = false
     /// 只跟踪指针是否在删除按钮本身上(不是整行)。
@@ -1365,47 +1391,48 @@ private struct FolderDisclosureRow: View {
     @State private var colorCommitTask: Task<Void, Never>? = nil
 
     private var tint: Color {
+        if pseudo { return .gray }
         // 用户设过颜色 → 用它;否则按 name hash 出默认色("第一次随机")。
         if let hex = colorHex, let c = FolderPalette.color(fromHex: hex) { return c }
         return FolderPalette.defaultTint(for: title)
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // 头部:点击切换展开。整行可点。
-            // **不 withAnimation** —— 同时动画 N 个 EntryRow 的 opacity/transform
-            // 在 N=40+ 时帧预算爆炸,scroll 完全卡死。瞬时切换无肉眼可见瑕疵。
-            // 头部用 onTapGesture 切换展开(不再用 Button 包裹整行),好让
-            // 末尾的删除按钮作为独立 Button 单独接 tap、不触发展开。
-            HStack(spacing: 12) {
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-                // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
-                // (跟 Finder 文件夹观感一致)。
-                Image(systemName: "folder.fill")
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
-                    .font(.system(size: 17))
-                    .frame(width: 22)
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text("\(count)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(tint.opacity(0.9))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(
-                        Capsule().fill(tint.opacity(0.13))
-                            .overlay(
-                                Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
-                            )
-                    )
-                // 删除按钮 —— 放在数字右边。常驻但低调,**只有指针碰到按钮本身**
-                // 才变亮(用独立 trashHover,不跟整行 hover 走)。只取消分组,不删事件。
+    /// 头部:点击切换展开。整行可点。
+    /// **不 withAnimation** —— 同时动画 N 个 EntryRow 的 opacity/transform
+    /// 在 N=40+ 时帧预算爆炸,scroll 完全卡死。瞬时切换无肉眼可见瑕疵。
+    /// 头部用 onTapGesture 切换展开(不再用 Button 包裹整行),好让
+    /// 末尾的删除按钮作为独立 Button 单独接 tap、不触发展开。
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+            // folder 图标:用 .palette 模式让 fill 跟 stroke 分两色
+            // (跟 Finder 文件夹观感一致)。
+            Image(systemName: "folder.fill")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
+                .font(.system(size: 17))
+                .frame(width: 22)
+            Text(title)
+                .font(.system(size: 16, weight: pseudo ? .bold : .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text("\(count)")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint.opacity(0.9))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(
+                    Capsule().fill(tint.opacity(0.13))
+                        .overlay(
+                            Capsule().stroke(tint.opacity(0.25), lineWidth: 0.5)
+                        )
+                )
+            // 删除按钮 —— 放在数字右边。常驻但低调,**只有指针碰到按钮本身**
+            // 才变亮(用独立 trashHover,不跟整行 hover 走)。只取消分组,不删事件。
+            if !pseudo {
                 Button { confirmingDelete = true } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 12))
@@ -1415,46 +1442,56 @@ private struct FolderDisclosureRow: View {
                 .onHover { trashHover = $0 }
                 .help("Delete folder (ungroups its events; the events are kept)")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-            .onTapGesture { expanded.toggle() }
-            // 右键菜单:改名 / 改颜色(预设色板)/ 删除。右键时蓝框框住标题行。
-            .contextHighlight(cornerRadius: 8) {
-                Button("Rename…") { renameDraft = title; renaming = true }
-                // 光谱取色(07-10 用户定稿:点开直接 spectrum,无子菜单;
-                // Default 项已删——创建时就随机固化了颜色,无"默认"可回)。
-                // 系统 NSColorPanel 持续回调防抖 0.25s 再落盘 —— onSetColor
-                // 会整列表 reload,拖光谱逐 tick 提交会打爆。
-                Button("Change color…") {
-                    ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
-                        colorCommitTask?.cancel()
-                        colorCommitTask = Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(250))
-                            if !Task.isCancelled { onSetColor(hex) }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .onTapGesture { expanded.toggle() }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if pseudo {
+                header
+            } else {
+                header
+                    // 右键菜单:改名 / 改颜色(预设色板)/ 删除。右键时蓝框框住标题行。
+                    .contextHighlight(cornerRadius: 8) {
+                        Button("Rename…") { renameDraft = title; renaming = true }
+                        // 光谱取色(07-10 用户定稿:点开直接 spectrum,无子菜单;
+                        // Default 项已删——创建时就随机固化了颜色,无"默认"可回)。
+                        // 系统 NSColorPanel 持续回调防抖 0.25s 再落盘 —— onSetColor
+                        // 会整列表 reload,拖光谱逐 tick 提交会打爆。
+                        Button("Change color…") {
+                            ColorPanelBridge.shared.present(initialHex: colorHex) { hex in
+                                colorCommitTask?.cancel()
+                                colorCommitTask = Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(250))
+                                    if !Task.isCancelled { onSetColor(hex) }
+                                }
+                            }
                         }
+                        Divider()
+                        Button("Delete folder", role: .destructive) { confirmingDelete = true }
                     }
-                }
-                Divider()
-                Button("Delete folder", role: .destructive) { confirmingDelete = true }
-            }
-            .confirmationDialog(
-                "Delete folder “\(title)”?",
-                isPresented: $confirmingDelete,
-                titleVisibility: .visible
-            ) {
-                Button("Delete folder", role: .destructive) { onDelete() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Removes the grouping only. The \(count) event(s) inside are kept and move back to ungrouped.")
-            }
-            .alert("Rename folder", isPresented: $renaming) {
-                TextField("Folder name", text: $renameDraft)
-                Button("Save") {
-                    let n = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !n.isEmpty, n != title { onRename(n) }
-                }
-                Button("Cancel", role: .cancel) {}
+                    .confirmationDialog(
+                        "Delete folder “\(title)”?",
+                        isPresented: $confirmingDelete,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete folder", role: .destructive) { onDelete() }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("Removes the grouping only. The \(count) event(s) inside are kept and move back to ungrouped.")
+                    }
+                    .alert("Rename folder", isPresented: $renaming) {
+                        TextField("Folder name", text: $renameDraft)
+                        Button("Save") {
+                            let n = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !n.isEmpty, n != title { onRename(n) }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    }
             }
 
             // 展开后的事件列表 —— **嵌一层 LazyVStack** 让子项也按需渲染。
