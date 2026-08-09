@@ -4,6 +4,10 @@ struct GeneralSettingsView: View {
     @State private var config = ConfigStore.shared
     /// 调试入口 —— 触发后弹出独立的 onboarding sheet。等流程跑顺再切到首启自动弹。
     @State private var configStoreGen = ConfigStore.shared
+    /// Permissions 卡片用。3s 轮询 TCC,用户在系统设置里改完这里自动跟上。
+    @StateObject private var permissionMonitor = PermissionMonitor()
+    /// 合盖 helper(SMAppService 后台项)是否已批准 —— 不是 TCC,单独轮询。
+    @State private var helperApproved = false
 
     var body: some View {
         SettingsPage("General",
@@ -80,6 +84,49 @@ struct GeneralSettingsView: View {
                     }
                     .font(.system(size: 12, weight: .medium))
                 }
+            }
+
+            permissionsCard
+        }
+    }
+
+    // MARK: - Permissions
+
+    /// 「你给过 App 哪些权限」一览。清单和 onboarding 共用 `PermissionCatalog`,
+    /// 交互规矩也一样:给了显示 Granted,没给显示 Not granted + 授权入口。
+    ///
+    /// 这页存在的理由:权限是在 onboarding 里一次性给的,之后用户既想不起来
+    /// 自己给了什么,也不知道某个功能不工作是因为少了哪项权限。
+    private var permissionsCard: some View {
+        SettingsCard(title: "Permissions") {
+            let items = PermissionCatalog.items(monitor: permissionMonitor,
+                                                helperApproved: helperApproved)
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index > 0 { SettingsDivider() }
+                SettingsRow(item.title, info: item.why, icon: item.icon) {
+                    HStack(spacing: 8) {
+                        PermissionStatusPill(state: item.state)
+                        if !item.state.isGranted {
+                            if let request = item.request {
+                                Button("Allow") { request() }
+                                    .font(.system(size: 12, weight: .medium))
+                            }
+                            Button("Open Settings") { item.openSettings() }
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                }
+            }
+        }
+        .onAppear { permissionMonitor.start() }
+        .onDisappear { permissionMonitor.stop() }
+        // helper 是 SMAppService 后台项,不在 PermissionMonitor 的 TCC 轮询里 ——
+        // 按同样的 3s 节奏自己查,用户在系统设置里批准完状态灯自动变绿。
+        // .task 随视图消失自动取消,不用手动 stop。
+        .task {
+            while !Task.isCancelled {
+                helperApproved = SleepHelperClient.shared.isApproved
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }

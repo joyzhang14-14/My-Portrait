@@ -257,15 +257,12 @@ private struct PermissionsStep: View {
     /// 权限**,PermissionMonitor 管不到,下面 .task 自己轮询。
     @State private var helperApproved = false
 
-    enum PermStatus { case granted, denied, unknown }
-
     /// 4 项 **TCC** 都 granted 才算"全过"。任何一项 .denied / .unknown 都阻塞 Next。
     /// ⚠️ 合盖 helper **不计入** —— 它是可选增强(不是采集层),没批准也不该拦着用户 Next。
     private var computedAllGranted: Bool {
-        mapAppKit(monitor.screenRecording) == .granted &&
-        mapAppKit(monitor.accessibility) == .granted &&
-        mapAppKit(monitor.microphone) == .granted &&
-        mapAppKit(monitor.fullDiskAccess) == .granted
+        [monitor.screenRecording, monitor.accessibility,
+         monitor.microphone, monitor.fullDiskAccess]
+            .allSatisfy { PermissionCatalog.state($0) == .granted }
     }
 
     var body: some View {
@@ -278,49 +275,12 @@ private struct PermissionsStep: View {
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 6)
 
-                permRow(
-                    icon: "rectangle.inset.filled.on.rectangle",
-                    title: "Screen Recording",
-                    why: "Required to capture what's on your screen for OCR and context.",
-                    status: mapAppKit(monitor.screenRecording),
-                    action: { monitor.requestScreenRecording() },
-                    openSettings: { monitor.openSettings(for: .screen) }
-                )
-                permRow(
-                    icon: "accessibility",
-                    title: "Accessibility",
-                    why: "Required to read window titles, focus state, and global keyboard events.",
-                    status: mapAppKit(monitor.accessibility),
-                    action: { monitor.requestAccessibility() },
-                    openSettings: { monitor.openSettings(for: .accessibility) }
-                )
-                permRow(
-                    icon: "mic",
-                    title: "Microphone",
-                    why: "Required if you want voice transcription as part of memory.",
-                    status: mapAppKit(monitor.microphone),
-                    action: { monitor.requestMicrophone() },
-                    openSettings: { monitor.openSettings(for: .microphone) }
-                )
-                permRow(
-                    icon: "externaldrive",
-                    title: "Full Disk Access",
-                    why: "Import data from Claude Code CLI, Codex CLI and Screenpipe.",
-                    status: mapAppKit(monitor.fullDiskAccess),
-                    action: nil,
-                    openSettings: { monitor.openSettings(for: .fullDisk) }
-                )
-                // 合盖时保持运行 —— 不是 TCC 权限,是 SMAppService 后台项(特权 root
-                // daemon,靠 pmset disablesleep 挡 clamshell 睡眠)。Allow → register()
-                // 并跳系统设置让用户批准一次;批准后上面的轮询把状态灯刷成 Granted。
-                permRow(
-                    icon: "bolt.fill",
-                    title: "Background activity helper",
-                    why: "Lets pipelines keep running while your Mac sits idle or the lid is shut. Register once in System Settings ▸ Login Items & Extensions.",
-                    status: helperApproved ? .granted : .denied,
-                    action: { SleepHelperClient.shared.enable() },
-                    openSettings: { SleepHelperClient.shared.openSystemSettings() }
-                )
+                // 清单本体在 PermissionCatalog —— 设置页 General ▸ Permissions
+                // 读的是同一份,加权限只改那一处。
+                ForEach(PermissionCatalog.items(monitor: monitor,
+                                                helperApproved: helperApproved)) { item in
+                    permRow(item)
+                }
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
@@ -354,37 +314,30 @@ private struct PermissionsStep: View {
     // MARK: row
 
     @ViewBuilder
-    private func permRow(
-        icon: String,
-        title: String,
-        why: String,
-        status: PermStatus,
-        action: (() -> Void)?,
-        openSettings: @escaping () -> Void
-    ) -> some View {
+    private func permRow(_ item: PermissionItem) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
+            Image(systemName: item.icon)
                 .font(.system(size: 18))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
-                    Text(title).font(.system(size: 14, weight: .semibold))
-                    statusPill(status)
+                    Text(item.title).font(.system(size: 14, weight: .semibold))
+                    PermissionStatusPill(state: item.state)
                 }
-                Text(why)
+                Text(item.why)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
-                if status != .granted, let action {
-                    Button("Allow") { action() }
+                if !item.state.isGranted, let request = item.request {
+                    Button("Allow") { request() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                 }
-                Button("Open Settings") { openSettings() }
+                Button("Open Settings") { item.openSettings() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
@@ -396,30 +349,6 @@ private struct PermissionsStep: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08), lineWidth: 1))
         )
-    }
-
-    private func statusPill(_ s: PermStatus) -> some View {
-        let (label, color): (String, Color) = {
-            switch s {
-            case .granted: return ("Granted", .green)
-            case .denied:  return ("Not granted", .orange)
-            case .unknown: return ("Unknown", .gray)
-            }
-        }()
-        return Text(label)
-            .font(.system(size: 10, weight: .medium))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.20))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
-    }
-
-    private func mapAppKit(_ s: PermissionMonitor.Status) -> PermStatus {
-        switch s {
-        case .granted:      return .granted
-        case .denied:       return .denied
-        case .notDetermined: return .unknown
-        }
     }
 
 }
