@@ -113,8 +113,10 @@ struct TimelineSidebar: View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             // App customize:跟 mainWindow.title 走同一份 config.display.appName,
             // 空串 → fallback "My Portrait"。改名 + 重启后这里跟着变。
-            // Snell Roundhand Bold —— macOS 自带的花体(/System/Library/Fonts/
-            // Supplemental/SnellRoundhand.ttc,每台 Mac 都有,不用打包字体)。
+            // SignPainter(House Script Semibold)—— macOS 自带的手绘招牌体,
+            // /System/Library/Fonts/Supplemental/SignPainter.ttc,每台 Mac 都有,
+            // 不用打包字体。PostScript 名带 "-HouseScriptSemibold" 后缀,
+            // **写 "SignPainter" 加载不到**,会静默回落成系统默认字体。
             //
             // ⚠️ 花体只有拉丁字形。用户把 appName 改成中文的话,系统会自动
             // 回落到默认字体 —— 不会缺字,只是花体白设。这是可接受的降级。
@@ -122,7 +124,7 @@ struct TimelineSidebar: View {
             // 字号 34 比 SF 的 26 大不少:花体 x-height(小写字母主体高度)
             // 天生矮,同号数看着小一圈,不加上去撑不起标题。
             Text(Self.effectiveAppName())
-                .font(.custom("SnellRoundhand-Bold", size: 34))
+                .font(.custom("SignPainter-HouseScriptSemibold", size: 34))
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {

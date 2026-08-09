@@ -19,41 +19,37 @@ struct PersonalInfoView: View {
             VStack(alignment: .leading, spacing: 20) {
                 header
 
+                // 灰字说明全部收走:字段的提示进输入框 placeholder(不占版面,
+                // 填了就自动消失),整卡 / 需要展开讲的进 ⓘ。
                 SettingsCard(
                     title: "Name",
-                    footnote: "Used as-is in prompts to the memory pipeline. Empty fields are skipped."
+                    info: "Used as-is in prompts to the memory pipeline. Empty fields are skipped."
                 ) {
-                    SettingsRow("First name",
-                                description: "Given name (or chosen first name).",
-                                icon: "person") {
-                        textField(\.personalInfo.firstName, placeholder: "")
+                    SettingsRow("First name", icon: "person") {
+                        textField(\.personalInfo.firstName, placeholder: "Given name")
                     }
                     SettingsDivider()
-                    SettingsRow("Middle name",
-                                description: "Optional.",
-                                icon: "person") {
-                        textField(\.personalInfo.middleName, placeholder: "")
+                    SettingsRow("Middle name", icon: "person") {
+                        textField(\.personalInfo.middleName, placeholder: "Optional")
                     }
                     SettingsDivider()
-                    SettingsRow("Last name",
-                                description: "Family name.",
-                                icon: "person") {
-                        textField(\.personalInfo.lastName, placeholder: "")
+                    SettingsRow("Last name", icon: "person") {
+                        textField(\.personalInfo.lastName, placeholder: "Family name")
                     }
                     SettingsDivider()
                     SettingsRow("Also goes by",
-                                description: "Alias, nickname, English name — whatever you'd like the AI to call you.",
+                                info: "Alias, nickname, English name — whatever you'd like the AI to call you.",
                                 icon: "person.crop.circle.badge.questionmark") {
-                        textField(\.personalInfo.alias, placeholder: "")
+                        textField(\.personalInfo.alias, placeholder: "Optional")
                     }
                 }
 
                 SettingsCard(
                     title: "Identity",
-                    footnote: "Helps the AI choose the right pronouns and contextualize cultural references in your events."
+                    info: "Helps the AI choose the right pronouns and contextualize cultural references in your events."
                 ) {
                     SettingsRow("Pronouns",
-                                description: "How the AI refers to you in summaries.",
+                                info: "How the AI refers to you in summaries.",
                                 icon: "text.bubble") {
                         Picker("", selection: config.binding(\.personalInfo.gender)) {
                             ForEach(PersonalInfoGender.allCases, id: \.self) { g in
@@ -65,28 +61,22 @@ struct PersonalInfoView: View {
                         .frame(width: 90)
                     }
                     SettingsDivider()
-                    SettingsRow("Nationality",
-                                description: "Free text. E.g. \"Chinese\", \"American\", \"German\".",
-                                icon: "flag") {
-                        textField(\.personalInfo.nationality, placeholder: "")
+                    SettingsRow("Nationality", icon: "flag") {
+                        textField(\.personalInfo.nationality, placeholder: "e.g. Chinese")
                     }
                     SettingsDivider()
-                    SettingsRow("Ethnicity",
-                                description: "Free text. Optional.",
-                                icon: "globe") {
-                        textField(\.personalInfo.ethnicity, placeholder: "")
+                    SettingsRow("Ethnicity", icon: "globe") {
+                        textField(\.personalInfo.ethnicity, placeholder: "Optional")
                     }
                     SettingsDivider()
-                    SettingsRow("Date of birth",
-                                description: "YYYY-MM-DD. Used as-is.",
-                                icon: "calendar") {
-                        textField(\.personalInfo.birthDate, placeholder: "1990-01-31")
+                    SettingsRow("Date of birth", icon: "calendar") {
+                        textField(\.personalInfo.birthDate, placeholder: "YYYY-MM-DD")
                     }
                 }
 
                 SettingsCard(
                     title: "Languages",
-                    footnote: "Add the languages you speak. The AI uses this to interpret what it sees in your captured screen + typing."
+                    info: "Add the languages you speak. The AI uses this to interpret what it sees in your captured screen + typing."
                 ) {
                     languagesEditor
                 }
@@ -103,14 +93,8 @@ struct PersonalInfoView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Personal info")
-                .font(.system(size: 26, weight: .semibold))
-            Text("Fill what you want — every empty field is simply skipped. Filled fields are passed to the memory pipeline (event clustering, portrait distillation, personality refresh) as extra context. Saved to `~/.portrait/config.toml`.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        Text("Personal info")
+            .font(.system(size: 26, weight: .semibold))
     }
 
     // MARK: - Languages
