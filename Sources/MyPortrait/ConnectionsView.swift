@@ -712,9 +712,10 @@ struct ConnectionsView: View {
         case .smtp: return "Save SMTP settings"
         }
     }
-    /// 描述文案按 markdown 渲染 —— `claude login` 这种反引号原样画出来很怪,
-    /// 加粗也需要它。`.inlineOnlyPreservingWhitespace` 保留段落间的空行
-    /// (完整 block 解析会把换行吃掉,多段文案挤成一坨)。解析失败退回纯文本。
+    /// 描述文案按 markdown 渲染 —— 只用加粗标关键词(试过反引号代码样式,
+    /// 在这种一两行的说明里显得很跳)。`.inlineOnlyPreservingWhitespace`
+    /// 保留段落间的空行(完整 block 解析会把换行吃掉,多段挤成一坨)。
+    /// 解析失败退回纯文本。
     private func markdown(_ s: String) -> AttributedString {
         (try? AttributedString(
             markdown: s,
@@ -724,25 +725,25 @@ struct ConnectionsView: View {
 
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {
-        case "chatgpt":     return "Sign in with your ChatGPT Plus / Pro account (uses the Codex OAuth flow). No API key needed."
-        case "openai-byok": return "Paste a raw OpenAI API key (sk-...). Pay-per-token via api.openai.com, no ChatGPT subscription needed."
+        case "chatgpt":     return "Sign in with your **ChatGPT Plus / Pro** account, via the Codex OAuth flow."
+        case "openai-byok": return "Paste a raw OpenAI API key (sk-…). **Pay-per-token**, no subscription needed."
         // 钥匙串那段是给用户看的"为什么弹密码框"。macOS 的授权对话框只说
         // "My Portrait 想要使用您在钥匙串中存储的机密信息",不说读来干嘛 ——
         // 不在这儿解释,用户只会看到一个凭空要密码的弹窗,还每次都弹。
         case "claude-code": return """
-            Use your Claude Code CLI (Pro/Max subscription quota). Requires `claude login` done in Terminal first.
+            Use your **Claude Code CLI** subscription quota (Pro/Max). Requires **claude login** in Terminal first.
 
-            **Detect login status** also reads the expiry date from your Keychain, so My Portrait can warn you **before** the login runs out — instead of an overnight pipeline silently failing. macOS asks for your Mac password the first time: enter it and click **Always Allow**, and it won't ask again. Only the expiry date is read; **the token itself never leaves this Mac**.
+            **Detect login status** also reads the expiry date from your Keychain, so you get warned **before** the login runs out — instead of an overnight pipeline failing silently. macOS asks for your Mac password the first time: enter it and click **Always Allow**, and it won't ask again. Only the expiry date is read; **the token never leaves this Mac**.
             """
-        case "anthropic-api": return "Use your Anthropic API key. Pay-per-token, lowest latency."
-        case "gemini":      return "Google AI Studio API key. Free tier available."
-        case "perplexity":  return "Perplexity API for web-grounded answers."
-        case "deepseek":    return "DeepSeek API key. OpenAI-compatible endpoint, cheap pay-per-token."
-        case "ollama":      return "Run open-source models on this Mac. Detects local Ollama install."
-        case "obsidian":    return "Read & write your Obsidian vault as memory."
-        case "notion":      return "Internal Integration Token. Create one at notion.so/profile/integrations, copy the `ntn_...` / `secret_...` token, paste below. Only pages you share with the integration will be visible."
-        case "email-smtp":  return "Let cronJobs send email via your SMTP server. Credentials stay encrypted on this Mac."
-        case "apple-calendar":      return "Access your local Calendar.app events."
+        case "anthropic-api": return "Your Anthropic API key. **Pay-per-token**, lowest latency."
+        case "gemini":      return "Google AI Studio API key. **Free tier** available."
+        case "perplexity":  return "Perplexity API — **web-grounded** answers."
+        case "deepseek":    return "DeepSeek API key. OpenAI-compatible, **cheap pay-per-token**."
+        case "ollama":      return "Run **open-source models** on this Mac. Detects your local Ollama install."
+        case "obsidian":    return "**Read & write** your Obsidian vault as memory."
+        case "notion":      return "Create an **Internal Integration Token** at notion.so/profile/integrations and paste it below. Only pages you **share with the integration** are visible."
+        case "email-smtp":  return "Let cronJobs send email via your SMTP server. Credentials stay **encrypted on this Mac**."
+        case "apple-calendar":      return "Read your local **Calendar.app** events."
         default: return "Connect this integration to your AI."
         }
     }
