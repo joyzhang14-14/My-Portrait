@@ -83,8 +83,21 @@ final class KeystrokeCharLogger {
         // 就能显示黑名单 app 的打字量,而不暴露打了什么。写作采集 worker 读击键时按
         // bundle_id 排除同一份黑名单(WritingCaptureWorker),这些无内容行不会进 Pass2。
         blacklistLock.lock()
-        let redact = blacklist.contains(app)
+        var redact = blacklist.contains(app)
         blacklistLock.unlock()
+
+        // 密码框:系统开着 secure event input 时不记内容。
+        //
+        // **本来就轮不到我们** —— secure input 一开,`.cgSessionEventTap` 根本
+        // 收不到按键(这正是键盘记录器抓不到密码的原因)。这里显式再判一次是
+        // 因为:那层保护是系统默契,代码里一处引用都没有,读代码的人看不出
+        // "密码为什么没被记下来";而且开关切换与事件投递之间存在竞态窗口。
+        //
+        // ⚠️ **挡不住自绘密码框**:app 若显示密码输入却不调
+        // `EnableSecureEventInput`(部分 Electron app),这里返回 false、AX 那
+        // 路的 role 也不是 AXSecureTextField,两层都会漏。要堵死得让
+        // TypingObserver 在焦点变化时把"当前焦点是密码框"推给这里。
+        if IsSecureEventInputEnabled() { redact = true }
 
         // 派到后台写 DB —— callback 立刻返回
         let store = self.store
