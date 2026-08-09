@@ -816,6 +816,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltPass()
         bubblePass()
         if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
+        if heavy { hubAngularPass() }     // 同上,hub 绕主球的角向均布
         // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
         // tick 的树(位置只差一步,剪枝留了 pad 余量),省掉建树大头。
         collidePass()
@@ -2264,6 +2265,51 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 let push = max(min(delta + mode1, 0.1), -0.1)
                 vel[leaf] += tangent * (push * r * k * a)
             }
+        }
+    }
+
+    /// hub 绕主球的角向均布(08-09 用户:"folder 球全偏向主球一边")。
+    ///
+    /// 根因:hub 的角度原本**只由气泡碰撞涌现** —— 两个气泡一旦不重叠,就
+    /// 没有任何力再管它们的夹角了;而初始位置是随机炸开的(explosionPositions,
+    /// GraphStaticLayout 那套等角环物理引擎根本没用),于是 2~4 个 hub 经常
+    /// 糊在主球同一侧,并且再也散不开。
+    ///
+    /// 修法直接复用 familySpreadPass 那套「向左右邻居的角向中点回正」的局部
+    /// 弛豫:左右间隙相等时力归零,挤的一侧自然流向疏的一侧,收敛到等角。
+    /// 区别只有两点 —— 圆心从自家 hub 换成原点(主球),成员从叶换成 hub。
+    ///
+    /// **只动切向速度**:半径由 hub→主球那根弹簧管,两者互不干扰。
+    private func hubAngularPass() {
+        let count = hubIndices.count
+        guard count >= 2 else { return }
+        let k = GraphConstants.hubAngularStrength
+        var items: [(t: Float, hub: Int32)] = []
+        items.reserveCapacity(count)
+        for h in hubIndices {
+            let p = pos[Int(h)]
+            items.append((atan2(p.y, p.x), h))
+        }
+        items.sort { $0.t < $1.t }
+        for i in 0..<count {
+            let tL = items[(i + count - 1) % count].t
+            let tC = items[i].t
+            let tR = items[(i + 1) % count].t
+            var gapL = tC - tL
+            if gapL < 0 { gapL += 2 * .pi }
+            var gapR = tR - tC
+            if gapR < 0 { gapR += 2 * .pi }
+            // count == 2 时左右邻居是同一个 hub,gapL + gapR = 2π,
+            // delta 把它们推向 180° —— 正是想要的,不用特判。
+            let delta = (gapR - gapL) * 0.5
+            let hub = Int(items[i].hub)
+            let p = pos[hub]
+            let r = simd_length(p)
+            guard r > 1 else { continue }
+            let tangent = SIMD2<Float>(-p.y, p.x) / r
+            // 限速 ±0.1 rad:hub 拖着整个气泡,爆冲会甩过头来回荡。
+            let push = max(min(delta, 0.1), -0.1)
+            vel[hub] += tangent * (push * r * k)
         }
     }
 
