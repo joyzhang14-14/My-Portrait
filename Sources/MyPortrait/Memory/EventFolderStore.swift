@@ -11,20 +11,28 @@ import Foundation
 /// 程序化扫 `events/` 时排除以 `_` 开头的项就过滤掉了。
 enum EventFolderStore {
 
-    /// `~/.portrait/events/_folders/`
-    static var foldersDir: URL {
-        Storage.eventsDir.appendingPathComponent("_folders", isDirectory: true)
+    /// `<events>/_folders/`。**默认是界面用的那份** —— dev mode 下在
+    /// `~/.portrait-dev/events/_folders/`。
+    ///
+    /// pipeline(EventClassifier / MemoryStaging)必须显式传 `Storage.eventsDir`:
+    /// 它产出的是真实记忆,不能因为你在录演示视频就写进演示目录。默认取界面
+    /// 那份而不是真实那份,是**故意的**——万一漏改一处,后果是演示里看到真实
+    /// folder(难看),而不是 pipeline 把结果写丢(数据不对)。
+    static func foldersDir(in eventsDir: URL) -> URL {
+        eventsDir.appendingPathComponent("_folders", isDirectory: true)
     }
+    static var foldersDir: URL { foldersDir(in: Storage.uiEventsDir) }
 
     /// 列出所有 folder(读盘,按 name 排序)。空目录返回 [],不抛。
-    static func loadAll() -> [EventFolder] {
+    static func loadAll(in eventsDir: URL = Storage.uiEventsDir) -> [EventFolder] {
         let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: foldersDir.path) else {
+        let dir = foldersDir(in: eventsDir)
+        guard let entries = try? fm.contentsOfDirectory(atPath: dir.path) else {
             return []
         }
         var out: [EventFolder] = []
         for name in entries where name.hasSuffix(".json") {
-            let url = foldersDir.appendingPathComponent(name)
+            let url = dir.appendingPathComponent(name)
             if let f = try? load(at: url) {
                 out.append(f)
             }
@@ -45,14 +53,15 @@ enum EventFolderStore {
     }
 
     /// 原子写一个 folder。目录不存在自动建。
-    static func save(_ folder: EventFolder) throws {
+    static func save(_ folder: EventFolder, in eventsDir: URL = Storage.uiEventsDir) throws {
+        let dir = foldersDir(in: eventsDir)
         try FileManager.default.createDirectory(
-            at: foldersDir, withIntermediateDirectories: true
+            at: dir, withIntermediateDirectories: true
         )
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try enc.encode(folder)
-        let url = foldersDir.appendingPathComponent("\(folder.slug).json")
+        let url = dir.appendingPathComponent("\(folder.slug).json")
         try data.write(to: url, options: .atomic)
     }
 
@@ -131,9 +140,9 @@ enum EventFolderStore {
 
     /// 当前已被任意 folder 索引的 event relativePath 集合。EventClassifier 用它
     /// 算"哪些事件还没分组",只跑增量。
-    static func classifiedEventPaths() -> Set<String> {
+    static func classifiedEventPaths(in eventsDir: URL = Storage.uiEventsDir) -> Set<String> {
         var s = Set<String>()
-        for f in loadAll() {
+        for f in loadAll(in: eventsDir) {
             for e in f.events { s.insert(e) }
         }
         return s

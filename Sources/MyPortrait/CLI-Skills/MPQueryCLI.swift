@@ -265,10 +265,10 @@ enum MPQueryCLI {
 
         var roots: [(URL, String)] = []
         if scope == nil || scope == "portrait" {
-            roots.append((Storage.portraitDir, "portrait"))
+            roots.append((Storage.uiPortraitDir, "portrait"))
         }
         if scope == nil || scope == "events" {
-            roots.append((Storage.eventsDir, "events"))
+            roots.append((Storage.uiEventsDir, "events"))
         }
 
         let fm = FileManager.default
@@ -327,11 +327,11 @@ enum MPQueryCLI {
         if rel.hasPrefix("/") || rel.contains("..") {
             errJSON("path must be relative, no `..`: \(rel)")
         }
-        let url = Storage.rootURL.appendingPathComponent(rel)
+        let url = Storage.uiRootURL.appendingPathComponent(rel)
         let normalized = url.standardizedFileURL.path
         let allowedRoots = [
-            Storage.eventsDir.standardizedFileURL.path + "/",
-            Storage.portraitDir.standardizedFileURL.path + "/",
+            Storage.uiEventsDir.standardizedFileURL.path + "/",
+            Storage.uiPortraitDir.standardizedFileURL.path + "/",
         ]
         guard allowedRoots.contains(where: { normalized.hasPrefix($0) }) else {
             errJSON("path not under events/ or portrait/: \(rel)")
@@ -360,7 +360,7 @@ enum MPQueryCLI {
     /// 把绝对 URL 转成 `~/.portrait/` 下的相对路径(memories `path` 字段 +
     /// read `--path` 接的格式)。
     private static func relPath(_ url: URL) -> String {
-        let root = Storage.rootURL.standardizedFileURL.path + "/"
+        let root = Storage.uiRootURL.standardizedFileURL.path + "/"
         let abs  = url.standardizedFileURL.path
         if abs.hasPrefix(root) { return String(abs.dropFirst(root.count)) }
         return abs   // 不在根下(理论上不会):退回绝对路径

@@ -410,7 +410,7 @@ struct MemoriesView: View {
     /// static + nonisolated:EventFolderStore.loadAll() 读盘,在 reload 的
     /// 后台任务里跑,不进 body。
     nonisolated private static func makeFolderSplit(entries: [Entry], order: MemorySortOrder) -> (folders: [FolderGroup], ungrouped: [Entry]) {
-        let prefix = Storage.eventsDir.path + "/"
+        let prefix = Storage.uiEventsDir.path + "/"
         func relPath(of url: URL) -> String {
             url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
         }
@@ -789,7 +789,7 @@ struct MemoriesView: View {
     /// 单条 `[[id]]` → DerivedRef。能读到 event 文件即可点击；否则失效（灰文本）。
     /// internal:图谱浮窗(GraphFloatWindow)复用。
     nonisolated static func resolveDerivedRef(_ rawId: String) -> DerivedRef {
-        let url = URL(fileURLWithPath: Storage.eventsDir.path + "/" + rawId)
+        let url = URL(fileURLWithPath: Storage.uiEventsDir.path + "/" + rawId)
         let date: String = {
             let seg = rawId.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
             return seg.count == 10 ? seg : ""
@@ -1031,7 +1031,7 @@ struct MemoriesView: View {
 
     /// Entry.id(绝对 URL)→ "yyyy-MM-dd/foo.md" 相对路径,跟 folder.events 对齐。
     static func eventRelPath(of url: URL) -> String {
-        let prefix = Storage.eventsDir.path + "/"
+        let prefix = Storage.uiEventsDir.path + "/"
         return url.path.hasPrefix(prefix)
             ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
     }
@@ -1113,12 +1113,12 @@ struct MemoriesView: View {
         let root: URL
         switch scope {
         case .events:
-            root = Storage.eventsDir
+            root = Storage.uiEventsDir
         case .input, .personalInfo, .textSettings, .neuralGraphSettings:
             // 这些 scope 都没文件可扫(各走专属视图)。
             return []
         case .portrait(let cat):
-            root = Storage.portraitDir.appendingPathComponent(cat, isDirectory: true)
+            root = Storage.uiPortraitDir.appendingPathComponent(cat, isDirectory: true)
         }
         guard fm.fileExists(atPath: root.path),
               let enumerator = fm.enumerator(

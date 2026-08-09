@@ -34,11 +34,11 @@ enum AIEditCLI {
     // MARK: - 路径校验
 
     private static func resolveRel(_ rel: String) -> URL? {
-        let url = Storage.rootURL.appendingPathComponent(rel)
+        let url = Storage.uiRootURL.appendingPathComponent(rel)
         let normalized = url.standardizedFileURL.path
         let allowedRoots = [
-            Storage.eventsDir.standardizedFileURL.path + "/",
-            Storage.portraitDir.standardizedFileURL.path + "/",
+            Storage.uiEventsDir.standardizedFileURL.path + "/",
+            Storage.uiPortraitDir.standardizedFileURL.path + "/",
         ]
         guard allowedRoots.contains(where: { normalized.hasPrefix($0) }) else { return nil }
         return url
@@ -61,7 +61,7 @@ enum AIEditCLI {
     private static func listTargets() {
         let fm = FileManager.default
         var rows: [String] = []
-        for root in [Storage.eventsDir, Storage.portraitDir] {
+        for root in [Storage.uiEventsDir, Storage.uiPortraitDir] {
             guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil,
                                          options: [.skipsHiddenFiles]) else { continue }
             while let url = en.nextObject() as? URL {
@@ -79,7 +79,7 @@ enum AIEditCLI {
     }
 
     private static func relativePath(_ url: URL) -> String {
-        let root = Storage.rootURL.standardizedFileURL.path + "/"
+        let root = Storage.uiRootURL.standardizedFileURL.path + "/"
         let p = url.standardizedFileURL.path
         return p.hasPrefix(root) ? String(p.dropFirst(root.count)) : p
     }
@@ -107,7 +107,7 @@ enum AIEditCLI {
         let pattern = args[idx + 1].lowercased()
         guard !pattern.isEmpty else { die("empty pattern") }
         let fm = FileManager.default
-        for root in [Storage.eventsDir, Storage.portraitDir] {
+        for root in [Storage.uiEventsDir, Storage.uiPortraitDir] {
             guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil,
                                          options: [.skipsHiddenFiles]) else { continue }
             while let url = en.nextObject() as? URL {
@@ -154,7 +154,7 @@ enum AIEditCLI {
 
     private static func locateEvent(slug: String) -> String? {
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: Storage.eventsDir, includingPropertiesForKeys: nil,
+        guard let en = fm.enumerator(at: Storage.uiEventsDir, includingPropertiesForKeys: nil,
                                      options: [.skipsHiddenFiles]) else { return nil }
         while let url = en.nextObject() as? URL {
             guard url.pathExtension == "md", url.lastPathComponent != "INDEX.md" else { continue }
@@ -168,7 +168,7 @@ enum AIEditCLI {
     private static func locatePortrait(slug: String) -> String? {
         // slug 可能形如 "personality/micro-iteration" 或单纯 "micro-iteration"
         let fm = FileManager.default
-        guard let en = fm.enumerator(at: Storage.portraitDir, includingPropertiesForKeys: nil,
+        guard let en = fm.enumerator(at: Storage.uiPortraitDir, includingPropertiesForKeys: nil,
                                      options: [.skipsHiddenFiles]) else { return nil }
         let bare = (slug as NSString).lastPathComponent
         while let url = en.nextObject() as? URL {
@@ -184,7 +184,7 @@ enum AIEditCLI {
     private static func findReferrers(toSlug slug: String) -> [String] {
         let fm = FileManager.default
         var out: [String] = []
-        for root in [Storage.eventsDir, Storage.portraitDir] {
+        for root in [Storage.uiEventsDir, Storage.uiPortraitDir] {
             guard let en = fm.enumerator(at: root, includingPropertiesForKeys: nil,
                                          options: [.skipsHiddenFiles]) else { continue }
             while let url = en.nextObject() as? URL {

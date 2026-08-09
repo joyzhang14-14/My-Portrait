@@ -5,7 +5,7 @@ import Foundation
 /// 或记忆文件，避免影响固定的本地 pipeline。
 enum PortraitGraphStyleStore {
     private static var url: URL {
-        Storage.portraitDir.appendingPathComponent("_neural_graph.json")
+        Storage.uiPortraitDir.appendingPathComponent("_neural_graph.json")
     }
 
     private struct Payload: Codable {
@@ -23,7 +23,7 @@ enum PortraitGraphStyleStore {
         var payload = Payload(colors: loadColors())
         payload.colors[category] = hex
         try FileManager.default.createDirectory(
-            at: Storage.portraitDir, withIntermediateDirectories: true
+            at: Storage.uiPortraitDir, withIntermediateDirectories: true
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -35,7 +35,7 @@ enum PortraitGraphStyleStore {
 /// 只影响 Neural Graph 显示，不改 event 归类。
 enum EventGraphStyleStore {
     private static var url: URL {
-        Storage.eventsDir.appendingPathComponent("_neural_graph.json")
+        Storage.uiEventsDir.appendingPathComponent("_neural_graph.json")
     }
 
     private struct Payload: Codable {
@@ -51,7 +51,7 @@ enum EventGraphStyleStore {
 
     static func setUnclassifiedColor(_ hex: String) throws {
         try FileManager.default.createDirectory(
-            at: Storage.eventsDir, withIntermediateDirectories: true
+            at: Storage.uiEventsDir, withIntermediateDirectories: true
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -121,7 +121,7 @@ enum GraphSceneBuilder {
     private static func buildEvents(halfLifeDays: Double, userName: String) -> GraphScene {
         // ⚠️ 必须排序:FileManager 枚举 / loadAll 的顺序不保证稳定,顺序一变
         // 节点指纹就变 → 会话缓存永远 miss → 每次切换都重新炸开(07-02 bug)。
-        let scanned = scanDir(Storage.eventsDir, halfLifeDays: halfLifeDays)
+        let scanned = scanDir(Storage.uiEventsDir, halfLifeDays: halfLifeDays)
             .sorted { $0.relPath < $1.relPath }
         let folders = EventFolderStore.loadAll().sorted { $0.slug < $1.slug }
         let unclassifiedColor = EventGraphStyleStore.loadUnclassifiedColor()
@@ -208,7 +208,7 @@ enum GraphSceneBuilder {
     private static func buildPortrait(halfLifeDays: Double, userName: String) -> GraphScene {
         let savedColors = PortraitGraphStyleStore.loadColors()
         var specs: [HubSpec] = portraitCategories.map { (name, hex) in
-            let dir = Storage.portraitDir.appendingPathComponent(name, isDirectory: true)
+            let dir = Storage.uiPortraitDir.appendingPathComponent(name, isDirectory: true)
             // 排序保证指纹稳定(同 buildEvents 的 07-02 缓存 bug 修复)。
             let members = scanDir(dir, halfLifeDays: halfLifeDays)
                 .sorted { $0.relPath < $1.relPath }

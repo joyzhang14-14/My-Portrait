@@ -83,9 +83,9 @@ enum MPQueryCronJobCLI {
         // Slug 唯一性:已存在就拒绝,逼 AI 改名或先 remove。不像 CronJobStore.save
         // 那样静默加 `-2` 后缀 —— CLI 场景必须 fail-fast 让 AI 看见冲突。
         let slug = CronJobFile.slug(name)
-        let dir = Storage.cronJobsDir.appendingPathComponent(slug, isDirectory: true)
+        let dir = Storage.uiCronJobsDir.appendingPathComponent(slug, isDirectory: true)
         let fm = FileManager.default
-        try? fm.createDirectory(at: Storage.cronJobsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: Storage.uiCronJobsDir, withIntermediateDirectories: true)
         if fm.fileExists(atPath: dir.path) {
             errJSON("cron job with slug \"\(slug)\" already exists at \(dir.path). pick a different --name or run `mp-query cronjob remove \(slug)` first.")
         }
@@ -119,7 +119,7 @@ enum MPQueryCronJobCLI {
     private static func runList(args: [String]) -> Never {
         _ = args
         let fm = FileManager.default
-        let root = Storage.cronJobsDir
+        let root = Storage.uiCronJobsDir
         let subdirs = (try? fm.contentsOfDirectory(at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles])) ?? []
@@ -163,7 +163,7 @@ enum MPQueryCronJobCLI {
             errJSON("specify which cron job to remove: positional slug, --slug, or --name")
         }
 
-        let dir = Storage.cronJobsDir.appendingPathComponent(slug, isDirectory: true)
+        let dir = Storage.uiCronJobsDir.appendingPathComponent(slug, isDirectory: true)
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir.path) else {
             errJSON("no cron job with slug \"\(slug)\". run `mp-query cronjob list` to see what's there.")

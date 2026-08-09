@@ -1214,7 +1214,7 @@ struct MemorySettingsView: View {
         Task.detached(priority: .utility) {
             var found: [String: String] = [:]
             for rel in missing {
-                let url = Storage.eventsDir.appendingPathComponent(rel)
+                let url = Storage.uiEventsDir.appendingPathComponent(rel)
                 guard let file = try? PortraitFileIO.read(from: url) else { continue }
                 let t = file.eventTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                 found[rel] = t.isEmpty ? Self.fileStem(rel) : t

@@ -21,13 +21,11 @@ enum Storage {
     /// 采集线程自己在跑的"?后者一律 `rootURL`。
     static var uiRootURL: URL { DevMode.isOn ? DevMode.rootURL : rootURL }
 
-    /// events / portrait / personality_daily / cron_jobs 的界面版。
-    /// AI chat 的 `chat.sqlite`、`agent_sessions/` 在 `AIPaths` 里切。
+    /// events / portrait / cron_jobs 的界面版。AI chat 的 `chat.sqlite`、
+    /// `agent_sessions/` 在 `AIPaths` 里切。
+    /// `personality_daily/` **不切** —— 查过调用方,只有 pipeline 在写、UI 不读。
     static var uiEventsDir: URL { uiRootURL.appendingPathComponent("events", isDirectory: true) }
     static var uiPortraitDir: URL { uiRootURL.appendingPathComponent("portrait", isDirectory: true) }
-    static var uiPersonalityDailyDir: URL {
-        uiRootURL.appendingPathComponent("personality_daily", isDirectory: true)
-    }
     static var uiCronJobsDir: URL { uiRootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
 
     /// dev 根下的目录骨架。只在 dev mode 开着时调 —— 平时一个字节都不碰
@@ -35,8 +33,7 @@ enum Storage {
     static func ensureDevExists() throws {
         guard DevMode.isOn else { return }
         let fm = FileManager.default
-        for url in [DevMode.rootURL, uiEventsDir, uiPortraitDir,
-                    uiPersonalityDailyDir, uiCronJobsDir] {
+        for url in [DevMode.rootURL, uiEventsDir, uiPortraitDir, uiCronJobsDir] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }

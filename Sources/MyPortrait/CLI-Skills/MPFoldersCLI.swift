@@ -73,7 +73,7 @@ enum MPFoldersCLI {
         // 拼每个 event 的 metadata(title / day / weight),让 AI 决策时有上下文。
         var events: [[String: Any]] = []
         for rel in f.events {
-            let url = Storage.eventsDir.appendingPathComponent(rel)
+            let url = Storage.uiEventsDir.appendingPathComponent(rel)
             if let file = try? PortraitFileIO.read(from: url) {
                 events.append([
                     "rel":     rel,
@@ -113,7 +113,7 @@ enum MPFoldersCLI {
         var hits: [[String: Any]] = []
         for rel in all {
             if onlyUnc && classified.contains(rel) { continue }
-            let url = Storage.eventsDir.appendingPathComponent(rel)
+            let url = Storage.uiEventsDir.appendingPathComponent(rel)
             guard let f = try? PortraitFileIO.read(from: url) else { continue }
             if let q = q,
                !f.eventTitle.lowercased().contains(q),
@@ -147,7 +147,7 @@ enum MPFoldersCLI {
         // 验证 event 路径存在(避免 AI 拼错路径建一个全是死链的 folder)
         var validated: [String] = []
         for rel in eventList {
-            let url = Storage.eventsDir.appendingPathComponent(rel)
+            let url = Storage.uiEventsDir.appendingPathComponent(rel)
             guard FileManager.default.fileExists(atPath: url.path) else {
                 errJSON("event not found: \(rel)")
             }
@@ -182,7 +182,7 @@ enum MPFoldersCLI {
         let existing = Set(f.events)
         var added: [String] = []
         for rel in eventList {
-            let url = Storage.eventsDir.appendingPathComponent(rel)
+            let url = Storage.uiEventsDir.appendingPathComponent(rel)
             guard FileManager.default.fileExists(atPath: url.path) else {
                 errJSON("event not found: \(rel)")
             }
@@ -252,7 +252,7 @@ enum MPFoldersCLI {
     /// (那是 `_folders/`)。
     private static func scanEventPaths(startDay: String?, endDay: String?) -> [String] {
         let fm = FileManager.default
-        let root = Storage.eventsDir
+        let root = Storage.uiEventsDir
         guard let dayDirs = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
         var out: [String] = []
         // 按日新→旧排,大概率 AI 最关心近期。

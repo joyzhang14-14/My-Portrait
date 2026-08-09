@@ -7,8 +7,12 @@ import Foundation
 enum AIPaths {
     static var supportDir: URL { Storage.rootURL }
 
+    /// ⚠️ **凭据永远留在真实目录**。dev mode 不切它 —— 这样演示配置拷过去就
+    /// 直接能用(TOML 里只有引用名),既不用重新绑定供应商,也不会把 API key
+    /// 多复制一份到演示目录里。
     static var secretsDB: URL { supportDir.appendingPathComponent("secrets.sqlite") }
-    static var chatDB: URL    { supportDir.appendingPathComponent("chat.sqlite") }
+    /// 聊天记录跟 dev mode 走(用户要求:"ai chat 的数据也会换成 dev 的")。
+    static var chatDB: URL    { Storage.uiRootURL.appendingPathComponent("chat.sqlite") }
     static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }
     static var piDir: URL     { supportDir.appendingPathComponent("pi-agent", isDirectory: true) }
@@ -25,7 +29,11 @@ enum AIPaths {
     /// AI agent 的对话 session 文件目录。每条 chat conv 对应一个文件,
     /// PiAgent 启动时 `--session <file>` 加载,ClaudeCodeAgent 走自己的
     /// `-r <sid>` 不落这里。conv 删除时连带删。
-    static var agentSessionsDir: URL { supportDir.appendingPathComponent("agent_sessions", isDirectory: true) }
+    /// 跟 chatDB 一起走 dev mode —— session 文件是按 conv id 派的,留在真实
+    /// 目录会跟 dev 的 conv 对不上号。
+    static var agentSessionsDir: URL {
+        Storage.uiRootURL.appendingPathComponent("agent_sessions", isDirectory: true)
+    }
     /// 给一条 conv 派一个固定的 pi session jsonl 路径。pi 启动时如果文件
     /// 不存在会自动创建,存在就 open。
     static func piSessionPath(for convId: UUID) -> URL {

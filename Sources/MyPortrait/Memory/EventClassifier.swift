@@ -71,12 +71,14 @@ final class EventClassifier {
     /// 落盘:写最近一次 Result 到 _folders/_last_run.json。失败 swallow ——
     /// UI 没读到只是没看 banner,不影响数据。
     static var lastRunFileURL: URL {
-        EventFolderStore.foldersDir.appendingPathComponent("_last_run.json")
+        EventFolderStore.foldersDir(in: Storage.eventsDir)
+            .appendingPathComponent("_last_run.json")
     }
     static func saveLastResult(_ r: Result) {
         do {
             try FileManager.default.createDirectory(
-                at: EventFolderStore.foldersDir, withIntermediateDirectories: true
+                at: EventFolderStore.foldersDir(in: Storage.eventsDir),
+                withIntermediateDirectories: true
             )
             let enc = JSONEncoder()
             enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -127,7 +129,7 @@ final class EventClassifier {
 
         for batchIdx in 0..<Self.maxBatchesPerCall {
             // 每批只刷新 folder 状态(上一批刚写过 _folders/);.md 扫描已提到循环外。
-            let classified = EventFolderStore.classifiedEventPaths()
+            let classified = EventFolderStore.classifiedEventPaths(in: Storage.eventsDir)
             // 排除本轮已看过的事件，避免模糊/no-op 批次卡住队首，让后面的
             // 候选永远没有机会被处理。
             let unclassified = allEvents.filter {
@@ -138,7 +140,7 @@ final class EventClassifier {
 
             // 2) 切批
             let batch = Array(unclassified.prefix(batchCap))
-            let existing = EventFolderStore.loadAll()
+            let existing = EventFolderStore.loadAll(in: Storage.eventsDir)
 
             // 3) 调 LLM。单批失败(parse / spawn / timeout)→ 跳本批 + 继续下一批。
             //    BudgetExhaustedError 例外 —— 撞额度上抛终止整轮(不该烧更多 token)。
@@ -240,7 +242,7 @@ final class EventClassifier {
             guard !toAdd.isEmpty else { continue }
             folder.events.append(contentsOf: toAdd)
             folder.updatedAtMs = nowMs
-            try EventFolderStore.save(folder)
+            try EventFolderStore.save(folder, in: Storage.eventsDir)
             existingBySlug[folder.slug] = folder
             assignedPaths.formUnion(toAdd)
             classifiedCount += toAdd.count
@@ -267,7 +269,7 @@ final class EventClassifier {
                 events: filtered, createdAtMs: nowMs, updatedAtMs: nowMs,
                 colorHex: colorHex
             )
-            try EventFolderStore.save(folder)
+            try EventFolderStore.save(folder, in: Storage.eventsDir)
             existingBySlug[slug] = folder
             assignedPaths.formUnion(filtered)
             classifiedCount += filtered.count
@@ -286,7 +288,7 @@ final class EventClassifier {
     }
     func dryRunScan() -> DryRunScan {
         let all = scanAllEvents()
-        let classified = EventFolderStore.classifiedEventPaths()
+        let classified = EventFolderStore.classifiedEventPaths(in: Storage.eventsDir)
         let unclassified = all.filter { !classified.contains($0.path) }
         return DryRunScan(classifiedCount: classified.count, unclassified: unclassified)
     }

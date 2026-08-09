@@ -109,7 +109,7 @@ enum MemoryStaging {
         case .events:      return Storage.eventsDir
         case .portrait:    return Storage.portraitDir
         case .personality: return Storage.portraitDir.appendingPathComponent("personality", isDirectory: true)
-        case .classify:    return EventFolderStore.foldersDir
+        case .classify:    return EventFolderStore.foldersDir(in: Storage.eventsDir)
         }
     }
 
