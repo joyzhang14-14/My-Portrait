@@ -65,6 +65,8 @@ struct GeneralSettingsView: View {
                 CronJobStore.shared.applyHistoryLimit()
             }
 
+            permissionsCard
+
             // Onboarding 在 ContentView 首启自动弹(没走完就反复弹);这里
              // 给「已走完」的用户一个再看一次的入口。点这个不会重置首启 flag,
              // 只是临时显示一次 sheet。
@@ -85,8 +87,6 @@ struct GeneralSettingsView: View {
                     .font(.system(size: 12, weight: .medium))
                 }
             }
-
-            permissionsCard
         }
     }
 
