@@ -229,7 +229,7 @@ struct ContentView: View {
                             ZStack {
                                 Rectangle().fill(Color.orange.opacity(0.85))
                                 Text("DEV MODE · read only")
-                                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                    .font(.system(size: 15, weight: .bold, design: .monospaced))
                                     .foregroundStyle(.black.opacity(0.8))
                             }
                             .ignoresSafeArea(edges: .top)
