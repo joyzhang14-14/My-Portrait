@@ -31,16 +31,21 @@ struct AIModelsSettingsView: View {
                      subtitle: "Local models that keep your data safe.",
                      onResetCurrentPage: { config.mutate { $0.aiModels = .init() } }) {
 
-            VStack(alignment: .leading, spacing: 14) {
-                SettingsSectionHeader(
-                    "Audio capture models",
-                    info: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
-                )
-
+            // 四个分类塞进**同一张标准卡片**,每类一行 —— 收起态就跟别的设置页
+            // 完全同构(图标 + 标题 + 右侧值 + 箭头)。展开的模型行缩进着排在
+            // 该行下面,仍在这张卡里。
+            //
+            // 为什么不四张卡各自常驻展开:模型只会越加越多,常驻展开的话进页面
+            // 先撞上十几行不相干的模型;而四张各自折叠的卡片,收起时是四个孤零零
+            // 的标题,页面上没有一个卡片形体,看着不像设置页。
+            SettingsCard(
+                title: "Audio capture models",
+                info: "These power voice features. Some download automatically; others have a Download button. Each stays disabled until it shows Ready."
+            ) {
                 // Whisper / Qwen3-ASR 转录模型 —— 跟 Audio Capture 的 model
                 // picker 同一份目录。没装的这里点 Download 下载,装好后才能在
                 // picker 里选。Qwen 一律手动下(不随 app 启动自动下)。
-                modelSection("Transcription",
+                modelSection("Transcription", icon: "waveform",
                              installed: transcriptionInstalled, total: transcriptionTotal) {
                     ForEach(Array(WhisperKitWrapper.allTranscriptionModels.enumerated()), id: \.offset) { _, m in
                         transcriptionModelRow(m)
@@ -51,23 +56,26 @@ struct AIModelsSettingsView: View {
                         if idx < Qwen3ASRWrapper.allQwenModels.count - 1 { SettingsDivider() }
                     }
                 }
+                SettingsDivider()
 
                 // 声纹模型 —— 这里只管下载,选用哪个在 Audio Capture。
-                modelSection("Speaker recognition",
+                modelSection("Speaker recognition", icon: "person.wave.2",
                              installed: speakerInstalled, total: SpeakerModel.embeddingOptions.count) {
                     ForEach(Array(SpeakerModel.embeddingOptions.enumerated()), id: \.offset) { idx, m in
                         speakerDownloadRow(m)
                         if idx < SpeakerModel.embeddingOptions.count - 1 { SettingsDivider() }
                     }
                 }
+                SettingsDivider()
 
-                modelSection("Voice segmentation",
+                modelSection("Voice segmentation", icon: "scissors",
                              installed: SpeakerModelStore.isOnDisk(.segmentation) ? 1 : 0, total: 1) {
                     localModelRow("pyannote segmentation-3.0", detail: "~6 MB",
                                   ready: SpeakerModelStore.isOnDisk(.segmentation), model: .segmentation)
                 }
+                SettingsDivider()
 
-                modelSection("Voice activity detection",
+                modelSection("Voice activity detection", icon: "waveform.badge.mic",
                              installed: SpeakerModelStore.isOnDisk(.vadSilero) ? 1 : 0, total: 1) {
                     localModelRow("Silero VAD", detail: "~2 MB",
                                   ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
@@ -98,41 +106,43 @@ struct AIModelsSettingsView: View {
         }
     }
 
-    // MARK: - 可折叠分区(标题行 + 蓝色 Installed n/m,点标题展开)
+    // MARK: - 分类行(标准 SettingsRow + 点开缩进展开模型)
 
-    /// 一个模型分区。收起时只留标题行,展开才渲染卡片。
+    /// 一个模型分类。收起时就是一条普通设置行;展开后模型行**缩进**排在它
+    /// 下面,仍在同一张卡里 —— 视觉上一眼看出"这些属于上面那一类"。
     @ViewBuilder
     private func modelSection<Content: View>(_ title: String,
+                                             icon: String,
                                              installed: Int, total: Int,
                                              @ViewBuilder content: @escaping () -> Content) -> some View {
         let open = expanded.contains(title)
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        SettingsRow(title, icon: icon) {
+            HStack(spacing: 8) {
+                Text("\(installed)/\(total) installed")
+                    .font(.system(size: 12, design: .monospaced))
+                    // 全装齐了给绿色,没齐用中性色 —— 蓝色会跟可点击的东西混。
+                    .foregroundStyle(installed == total
+                                     ? Color.green.opacity(0.85)
+                                     : Theme.textPrimary.opacity(0.55))
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.45))
                     .rotationEffect(.degrees(open ? 90 : 0))
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                Text("Installed \(installed)/\(total)")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.accent)
-                Spacer(minLength: 0)
             }
-            .padding(.leading, 12)
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.16)) {
-                    if open { expanded.remove(title) } else { expanded.insert(title) }
-                }
+        }
+        // 整行可点 —— 不是只有箭头能点。
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                if open { expanded.remove(title) } else { expanded.insert(title) }
             }
-            if open {
-                SettingsCard { content() }
-            }
+        }
+        if open {
+            VStack(spacing: 0) { content() }
+                // 缩进对齐分类行的图标右侧(leading 14 + 图标 22 + 间距 12)。
+                .padding(.leading, 34)
+                // 展开区压暗一档,跟分类行分层。
+                .background(Color.primary.opacity(0.03))
         }
     }
 
