@@ -44,9 +44,9 @@ struct InputCaptureView: View {
     /// writing-style chip 跳转:查 record 所属 (app,url) → 选中该 app 组 → 选中 record。
     @MainActor
     private func handleJump() async {
-        guard let target = jumpToRecordId?.wrappedValue, let store else { return }
+        guard let target = jumpToRecordId?.wrappedValue else { return }
         jumpToRecordId?.wrappedValue = nil
-        guard let grp = store.groupForRecord(id: target),
+        guard let grp = WritingCaptureBrowse.group(forRecord: target),
               let summary = apps.first(where: { $0.app == grp.app && $0.url == grp.url })
         else { return }
         await openGroup(summary)
@@ -353,23 +353,14 @@ struct InputCaptureView: View {
 
     // MARK: - Actions
 
-    // dev mode 不读真实打字库(08-10 用户):演示里不能出现真实击键。
-    // dev 目录没有 portrait.sqlite → 返回 nil,页面走空态。
-    private var store: WritingCaptureStore? {
-        DevMode.isOn ? nil : WritingCaptureWorker.shared?.store
-    }
-
     @MainActor
     private func reloadApps() async {
-        guard let store else {
+        guard WritingCaptureBrowse.isAvailable else {
             loadFailed = true
             apps = []
             return
         }
-        let result = await Task.detached(priority: .userInitiated) {
-            (try? store.writingRecordAppSummaries()) ?? []
-        }.value
-        apps = result
+        apps = await WritingCaptureBrowse.appSummaries()
         loadFailed = false
         if let g = selectedGroup, !apps.contains(where: { $0.id == g.id }) {
             selectedGroup = nil
@@ -380,12 +371,9 @@ struct InputCaptureView: View {
 
     @MainActor
     private func openGroup(_ group: WritingCaptureAppSummary) async {
-        guard let store else { return }
         selectedGroup = group
         selectedRecordId = nil
-        let result = await Task.detached(priority: .userInitiated) {
-            (try? store.writingRecordsForGroup(app: group.app, url: group.url)) ?? []
-        }.value
+        let result = await WritingCaptureBrowse.records(app: group.app, url: group.url)
         // 快速连点两个分组时两次 openGroup 并发,慢查询晚归会把前一个分组的
         // records 盖在当前分组名下(标题是 B 列表是 A)。回来后确认选中的
         // 还是本次的分组才落地。
@@ -395,10 +383,7 @@ struct InputCaptureView: View {
 
     @MainActor
     private func deleteGroup(_ group: WritingCaptureAppSummary) async {
-        guard let store else { return }
-        await Task.detached(priority: .userInitiated) {
-            try? store.deleteWritingRecordsForGroup(app: group.app, url: group.url)
-        }.value
+        await WritingCaptureBrowse.deleteGroup(app: group.app, url: group.url)
         selectedGroup = nil
         records = []
         selectedRecordId = nil
@@ -407,10 +392,7 @@ struct InputCaptureView: View {
 
     @MainActor
     private func deleteRecord(_ id: Int64) async {
-        guard let store else { return }
-        await Task.detached(priority: .userInitiated) {
-            try? store.deleteWritingRecord(id: id)
-        }.value
+        await WritingCaptureBrowse.deleteRecord(id: id)
         records.removeAll { $0.id == id }
         selectedRecordId = nil
         await reloadApps()

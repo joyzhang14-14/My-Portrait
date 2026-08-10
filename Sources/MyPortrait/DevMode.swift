@@ -208,4 +208,117 @@ enum DevMode {
             )
         }
     }
+
+    // MARK: - Input(打字记录)演示数据
+
+    /// Memories → Input 那两页的素材。跟 writing style 同理:`writing_records`
+    /// / `keystroke_log` 在真实 sqlite 里,dev mode 不切库,只能顶替查询结果。
+    /// 演示环境里显示真实击键是最不能接受的一种泄漏。
+    ///
+    /// 内容在 `~/.portrait-dev/input_records.json`,由
+    /// `scripts/gen_dev_seed.py` 生成,改完存盘切页回来即生效(不缓存)。
+    static var inputRecordsURL: URL {
+        rootURL.appendingPathComponent("input_records.json")
+    }
+
+    private struct InputPayload: Decodable {
+        struct Record: Decodable {
+            let id: Int64
+            let daysAgo: Int?               // 0 = 今天
+            let start: String?              // "HH:mm"
+            let durationMinutes: Int?
+            let app: String                 // bundle id
+            let url: String?
+            let kind: String?
+            let text: String
+            let contextSummary: String?
+            let confidence: Double?
+            let source: String?
+        }
+        let records: [Record]?
+    }
+
+    private static func loadInputRecords() -> InputPayload? {
+        guard let data = try? Data(contentsOf: inputRecordsURL) else { return nil }
+        let dec = JSONDecoder()
+        dec.keyDecodingStrategy = .convertFromSnakeCase
+        return try? dec.decode(InputPayload.self, from: data)
+    }
+
+    /// 时间用「几天前 + 当天几点」而不是绝对时刻 —— 活动图默认看今天,
+    /// 写死日期的话演示数据永远落在过去,打开就是空图。
+    private static func timestamp(daysAgo: Int, hhmm: String) -> Int64 {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let parts = hhmm.split(separator: ":").compactMap { Int($0) }
+        let day = cal.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+        let base = cal.startOfDay(for: day)
+        let secs = (parts.first ?? 9) * 3600 + (parts.count > 1 ? parts[1] : 0) * 60
+        return Int64((base.timeIntervalSince1970 + Double(secs)) * 1000)
+    }
+
+    static var demoInputRecords: [WritingRecordViewRow] {
+        guard let p = loadInputRecords() else { return [] }
+        return (p.records ?? []).map { r in
+            let start = timestamp(daysAgo: r.daysAgo ?? 0, hhmm: r.start ?? "09:00")
+            let end = start + Int64(max(1, r.durationMinutes ?? 3) * 60_000)
+            return WritingRecordViewRow(
+                id: r.id,
+                startTs: start,
+                endTs: end,
+                app: r.app,
+                url: r.url,
+                location: nil,
+                text: r.text,
+                editLog: demoEditLog(text: r.text, start: start, end: end),
+                confidence: r.confidence ?? 0.92,
+                contextSummary: r.contextSummary,
+                source: r.source ?? "ax_cleaned",
+                kind: r.kind ?? "other",
+                workerRunId: nil,
+                createdAt: end
+            )
+        }
+    }
+
+    /// edit_log 由正文**推出来**而不是手写 —— 手写一份跟正文对不上的时序,
+    /// 详情页的回放会自相矛盾;而让人手改 JSON 时还要同步维护它,这份演示
+    /// 数据就没人愿意改了。切成三段 commit,看起来就是"分几次敲完"。
+    private static func demoEditLog(text: String, start: Int64, end: Int64) -> String {
+        let chars = Array(text)
+        guard chars.count > 12 else { return "[]" }
+        let cuts = [chars.count / 3, chars.count * 2 / 3, chars.count]
+        let span = max(1, end - start)
+        let entries = cuts.enumerated().map { i, upTo in
+            EditEntry(ts: start + span * Int64(i + 1) / Int64(cuts.count),
+                      kind: "commit",
+                      text: String(chars[0..<upTo]))
+        }
+        guard let data = try? JSONEncoder().encode(entries) else { return "[]" }
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    /// 活动图的击键流同样由正文推出来:每个字符一次击键,均匀铺在这条
+    /// record 的时间窗里。这样图上的活动段跟下面列出的 record 严格对齐 ——
+    /// 手写一份独立的击键序列必然对不上。
+    static func demoKeystrokes(records: [WritingRecordViewRow]) -> [KeystrokeEntry] {
+        var out: [KeystrokeEntry] = []
+        var nextId: Int64 = 1
+        for r in records {
+            let chars = Array(r.text)
+            guard !chars.isEmpty else { continue }
+            let span = max(1, r.endTs - r.startTs)
+            for (i, ch) in chars.enumerated() {
+                out.append(KeystrokeEntry(
+                    id: nextId,
+                    tsMs: r.startTs + span * Int64(i) / Int64(chars.count),
+                    bundleId: r.app,
+                    char: String(ch),
+                    isBackspace: 0
+                ))
+                nextId += 1
+            }
+        }
+        return out.sorted { $0.tsMs < $1.tsMs }
+    }
 }

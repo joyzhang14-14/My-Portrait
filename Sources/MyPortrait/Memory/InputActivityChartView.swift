@@ -65,10 +65,6 @@ struct InputActivityChartView: View {
 
     // dev mode 不读真实打字库(08-10 用户):演示里不能出现真实击键。
     // dev 目录没有 portrait.sqlite → 返回 nil,页面走空态。
-    private var store: WritingCaptureStore? {
-        DevMode.isOn ? nil : WritingCaptureWorker.shared?.store
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             TimelineControlsBar(currentDate: $selectedDay, onRefresh: { Task { await reload() } })
@@ -100,12 +96,9 @@ struct InputActivityChartView: View {
     /// 查该 record 所在天 → 切天(或同天直接定位)。消费 binding 防重触发。
     @MainActor
     private func handleJump() async {
-        guard let target = jumpToRecordId?.wrappedValue, let store else { return }
+        guard let target = jumpToRecordId?.wrappedValue else { return }
         jumpToRecordId?.wrappedValue = nil
-        let ts = await Task.detached(priority: .userInitiated) {
-            store.writingRecordStartTs(id: target)
-        }.value
-        guard let ts else { return }   // record 不存在(可能已删)→ 放弃
+        guard let ts = WritingCaptureBrowse.startTs(forRecord: target) else { return }   // record 不存在(可能已删)→ 放弃
         let day = Date(timeIntervalSince1970: TimeInterval(ts) / 1000)
         pendingJumpId = target
         if Calendar.current.isDate(day, inSameDayAs: selectedDay) {
@@ -361,10 +354,7 @@ struct InputActivityChartView: View {
     @MainActor
     private func deleteRecord(_ id: Int64) async {
         confirmingDeleteId = nil
-        guard let store else { return }
-        await Task.detached(priority: .userInitiated) {
-            try? store.deleteWritingRecord(id: id)
-        }.value
+        await WritingCaptureBrowse.deleteRecord(id: id)
         records.removeAll { $0.id == id }
         expandedIds.remove(id)
     }
@@ -390,7 +380,7 @@ struct InputActivityChartView: View {
 
     @MainActor
     private func reload() async {
-        guard let store else { buckets = .empty; return }
+        guard WritingCaptureBrowse.isAvailable else { buckets = .empty; return }
         reloadGen += 1
         let gen = reloadGen
         loading = true
@@ -404,18 +394,16 @@ struct InputActivityChartView: View {
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
         let endMs = startMs + 86_400_000
 
-        let result = await Task.detached(priority: .userInitiated) {
-            () -> (MinuteBuckets, [WritingRecordViewRow]) in
-            let ks = (try? store.keystrokesInRange(
-                startMs: startMs, endMs: endMs, excludeBundleIds: [])) ?? []
-            let recs = (try? store.writingRecordsInRange(
-                startMs: startMs, endMs: endMs)) ?? []
-            return (MinuteBuckets.aggregate(ks, dayStartMs: startMs), recs)
+        let ks = await WritingCaptureBrowse.keystrokes(
+            startMs: startMs, endMs: endMs, excludeBundleIds: [])
+        let recs = await WritingCaptureBrowse.records(startMs: startMs, endMs: endMs)
+        let agg = await Task.detached(priority: .userInitiated) {
+            MinuteBuckets.aggregate(ks, dayStartMs: startMs)
         }.value
 
         guard gen == reloadGen else { return }   // 期间切到别的天 → 丢弃
-        buckets = result.0
-        records = result.1
+        buckets = agg
+        records = recs
         loading = false
         if pendingJumpId != nil { performPendingJump() }   // 换天 reload 完成 → 定位
     }

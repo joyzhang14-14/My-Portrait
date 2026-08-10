@@ -703,6 +703,87 @@ WRITING_STYLE_REVIEW = {
 }
 
 
+# input_records.json —— Memories → Input 两页(记录浏览 + 打字活动图)的演示素材。
+#
+# 同样是"数据在真实 sqlite 里、dev mode 不切库"的情况:writing_records /
+# keystroke_log 顶替成这份 JSON,否则演示环境要么显示真实击键、要么整页空白。
+#
+# 时间用 days_ago + 当天时刻(不是绝对日期)—— 活动图默认看今天,写死日期
+# 的话演示数据永远落在过去,打开就是空图。
+#
+# edit_log 和击键流都由 text **推出来**(见 DevMode.demoEditLog /
+# demoKeystrokes),这里不用写:手写一份跟正文对不上的时序,详情页的回放
+# 会自相矛盾,而且以后改文案还得同步维护它。
+INPUT_RECORDS = {
+    "records": [
+        {"id": 9001, "days_ago": 0, "start": "09:12", "duration_minutes": 4,
+         "app": "com.tinyspeck.slackmacgap", "kind": "short_form",
+         "context_summary": "Morning standup thread in #backend",
+         "text": "Rolling this back — the retry loop double-counts on 429s. "
+                 "I can take the fix today if nobody's already on it."},
+        {"id": 9002, "days_ago": 0, "start": "10:41", "duration_minutes": 12,
+         "app": "md.obsidian", "kind": "long_form",
+         "context_summary": "Notes while working through the Rust ownership chapter",
+         "text": "The borrow checker isn't fighting me, it's telling me the lifetime is "
+                 "wrong. Every error I've hit this week came from holding a shared borrow "
+                 "across a mutation — the iterator over the map, the slice into the buffer, "
+                 "the cached reference in the parser. Collecting the keys first isn't a "
+                 "workaround; it separates deciding what to change from changing it, which "
+                 "is the shape the code wanted anyway."},
+        {"id": 9003, "days_ago": 0, "start": "11:58", "duration_minutes": 2,
+         "app": "com.apple.Terminal", "kind": "other",
+         "context_summary": "Commit message after the test suite finally passed",
+         "text": "fix(retry): reset the counter on 429 so backoff doesn't double-count"},
+        {"id": 9004, "days_ago": 0, "start": "15:20", "duration_minutes": 6,
+         "app": "com.google.Chrome", "url": "https://github.com/acme/parser/pull/412",
+         "kind": "short_form",
+         "context_summary": "Review comment on a teammate's pull request",
+         "text": "This allocates on every frame. Hoisting the buffer out of the loop should "
+                 "be enough — happy to push that change if you'd rather keep going on the "
+                 "grammar."},
+        {"id": 9005, "days_ago": 1, "start": "08:47", "duration_minutes": 3,
+         "app": "com.tinyspeck.slackmacgap", "kind": "short_form",
+         "context_summary": "DM planning next sprint with a teammate",
+         "text": "I can take the migration if you'd rather stay on the parser. Either way "
+                 "works, just say which."},
+        {"id": 9006, "days_ago": 1, "start": "13:05", "duration_minutes": 9,
+         "app": "md.obsidian", "kind": "long_form",
+         "context_summary": "Weekly review note",
+         "text": "Two things went badly this week and both were the same mistake: I started "
+                 "writing before I knew what the answer was, then spent longer deleting the "
+                 "detour than the detour saved. The fix isn't to plan more, it's to write "
+                 "the last paragraph first and see whether I believe it."},
+        {"id": 9007, "days_ago": 1, "start": "17:32", "duration_minutes": 1,
+         "app": "com.apple.Terminal", "kind": "other",
+         "context_summary": "Commit message after the build finally succeeded",
+         "text": "qué bueno, it finally compiles"},
+        {"id": 9008, "days_ago": 2, "start": "09:55", "duration_minutes": 5,
+         "app": "com.apple.mail", "kind": "short_form",
+         "context_summary": "Reply to the vet about the kitten's follow-up appointment",
+         "text": "Thursday afternoon works. She's eating normally again and the limp is "
+                 "gone — happy to bring the old X-rays if that's useful."},
+        {"id": 9009, "days_ago": 2, "start": "14:18", "duration_minutes": 7,
+         "app": "com.google.Chrome", "url": "https://github.com/acme/parser/issues/398",
+         "kind": "long_form",
+         "context_summary": "Writing up a reproduction for a flaky test",
+         "text": "The failure only shows up when the fixture directory is on a case-"
+                 "insensitive volume, which is why CI never caught it. Repro: create both "
+                 "Cache.json and cache.json, run the loader twice, second run reads the "
+                 "first file's contents under the second file's name."},
+        {"id": 9010, "days_ago": 2, "start": "16:44", "duration_minutes": 1,
+         "app": "com.apple.Terminal", "kind": "other",
+         "context_summary": "Commit message after the same test failed twice",
+         "text": "otra vez"},
+    ],
+}
+
+
+def write_input_records():
+    path = os.path.join(ROOT, "input_records.json")
+    with open(path, "w") as f:
+        json.dump(INPUT_RECORDS, f, indent=2, ensure_ascii=False)
+
+
 def write_writing_style_review():
     path = os.path.join(ROOT, "writing_style_review.json")
     with open(path, "w") as f:
@@ -774,6 +855,7 @@ def main():
 
     write_chat_db()
     write_writing_style_review()
+    write_input_records()
 
     print(f"写到 {ROOT}")
     loose = len(LOOSE) + n_loose_from_dropped
@@ -788,6 +870,8 @@ def main():
         print(f"  → 图谱:folder < {GRAPH_HUB_MIN} → {loose} 条未分类**直连主球**")
     print(f"  portrait  {n_portrait} 条 / {len(PORTRAIT)} 个类别")
     print(f"  chat      {len(CHATS)} 段对话")
+    print(f"  input     input_records.json "
+          f"({len(INPUT_RECORDS['records'])} 条打字记录,活动图/edit_log 由正文推出)")
     print(f"  writing   writing_style_review.json "
           f"({len(WRITING_STYLE_REVIEW['drafts'])} 条 draft,可直接手改,不用重 build)")
     print("config.toml 不在这里生成 —— app 首次进 dev mode 时自己从真实 config 拷一份。")
