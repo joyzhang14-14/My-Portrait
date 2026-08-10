@@ -825,29 +825,30 @@ private struct SchedulerStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                StepHeader(
-                    title: "Automatic processing",
-                    info: "Each stage can run on its own, or stay manual-only. Auto means the scheduler picks it up whenever there's pending work and retries failures on its own. Tune it later in Settings → Memory."
-                )
-                .padding(.bottom, 6)
+                StepHeader(title: "Set up automatic pipeline processing")
+                Text("On means the scheduler runs it whenever there's pending work. Off means it only runs when you ask.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
 
                 schedulerCard(
                     title: "Event processing",
-                    info: "Clusters raw activity into events and scores their long-term importance.",
+                    info: "Groups your day into events and scores how much each one matters.",
                     config: \.scheduler.event)
                 schedulerCard(
                     title: "Portrait distillation",
-                    info: "Distills events into long-term portrait entries (one LLM call per category).",
+                    info: "Turns those events into your long-term portrait.",
                     config: \.scheduler.portrait)
                 schedulerCard(
                     title: "Personality refresh",
-                    info: "Aggregates events + portraits + OCR into personality tags.",
+                    info: "Re-reads events and portrait to update your personality tags.",
                     config: \.scheduler.personality)
                 // 07-30:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
                 // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
                 schedulerCard(
                     title: "Writing style",
-                    info: "Distills how you write (formality, language mix, recurring phrases) into the Writing Style portrait.",
+                    info: "Learns how you write — tone, language mix, phrases you reuse.",
                     config: \.scheduler.writingStyle)
 
                 Color.clear.frame(height: 8)
@@ -875,11 +876,20 @@ private struct SchedulerStep: View {
             get: { freq.wrappedValue != .off },
             set: { freq.wrappedValue = $0 ? .daily : .off }
         )
-        // 原来开关下面还有一行灰字复述开关的状态("Auto — …" / "Manual only — …")。
-        // 删掉:开关自己就说明了状态,那行是纯冗余,把卡片撑高一倍。
-        HStack(alignment: .center, spacing: 12) {
-            Text(title).font(.system(size: 13, weight: .semibold))
-            SettingsInfoBadge(text: info)
+        // 说明直接显示,不进 ⓘ —— 四条并排读才看得出这是一条流水线
+        // (原始活动 → 事件 → 画像 → 人格),藏起来就只剩四个不知道
+        // 在开什么的开关。
+        //
+        // (开关下面原本还有一行复述开关状态的灰字,已删:开关自己就说明了
+        //  状态,那行纯冗余还把卡片撑高一倍。)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(info)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 12)
             Toggle("", isOn: autoRun)
                 .labelsHidden()
