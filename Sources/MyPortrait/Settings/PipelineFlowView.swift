@@ -375,7 +375,7 @@ extension PipelineFlow {
                 title: "Captured data",
                 kind: .source,
                 chip: "~/.portrait",
-                detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing. **This is the only input** — nothing is invented later.",
+                detail: "One UTC day: screenshots + their OCR text, audio transcripts with speakers, your typing.\n\n**The only input.** Nothing is added later.",
                 pos: CGPoint(x: 0.5, y: 0.05)
             ),
             Node(
@@ -383,7 +383,7 @@ extension PipelineFlow {
                 title: "Build events",
                 kind: .llm,
                 chip: "main model",
-                detail: "Reads the whole day and clusters it into events — **one Markdown file per event**, written to `~/.portrait/events/<day>/`.\n\nA day is only picked up once it is over: **UTC midnight plus 10 minutes**, so transcripts and OCR that are still finishing land in time. Days that aren't ready are retried every 15 minutes.",
+                detail: "Clusters the day into events. **One Markdown file per event**, at `~/.portrait/events/<day>/`.\n\nStarts at **UTC midnight + 10 min** — the grace period lets late transcripts and OCR land. Not ready → retried every 15 min.",
                 pos: CGPoint(x: 0.5, y: 0.196)
             ),
             Node(
@@ -391,7 +391,7 @@ extension PipelineFlow {
                 title: "Merge repeats",
                 kind: .llm,
                 chip: "main model",
-                detail: "While building, the model also sees your recent events. A cluster that is the same thing again — same work, same trip planning, same game — **merges into the existing event** instead of becoming a second file.\n\nA merge adds one to the event's occurrence count and attaches the new day's frames. **Events seen on more days decay slower**, so recurring things outlive one-offs. Title and summary stay as first written.",
+                detail: "The model sees your recent events while building. Same thing again → **merges into the existing event**, no second file.\n\nA merge adds 1 to occurrence count and attaches the new day's frames. **More days = slower decay**, so recurring things outlive one-offs. Title and summary stay as first written.",
                 pos: CGPoint(x: 0.5, y: 0.341)
             ),
             Node(
@@ -399,14 +399,14 @@ extension PipelineFlow {
                 title: "Score impact",
                 kind: .llm,
                 chip: "main model",
-                detail: "Every event gets an impact score — **how much it mattered to you**. That score decides which events survive in your memory, and how big they show up in the Neural Graph.",
+                detail: "One impact score per event — **how much it mattered to you**.\n\nDecides what survives in memory, and node size in the Neural Graph.",
                 pos: CGPoint(x: 0.5, y: 0.487)
             ),
             Node(
                 id: "weight",
                 title: "Weights + daily budget",
                 kind: .deterministic,
-                detail: "Two plain algorithms, **no AI**.\n\n• **Weights** — every event decays over time (exponential half-life), recomputed across the whole tree.\n\n• **Daily budget** — a busy day can't flood your memory. If a day's total impact goes over the cap it is scaled back down; quiet days are left alone. Peak events above the protection threshold are never scaled.",
+                detail: "**No AI.** Two algorithms.\n\n• **Weights** — exponential half-life decay, recomputed across the whole tree.\n\n• **Daily budget** — a busy day can't flood memory. Over the cap → scaled down; quiet days untouched. Peaks above the protection threshold are never scaled.",
                 pos: CGPoint(x: 0.5, y: 0.632)
             ),
             Node(
@@ -414,21 +414,21 @@ extension PipelineFlow {
                 title: "Group into folders",
                 kind: .llm,
                 chip: "light model",
-                detail: "Sorts events into project folders, stored as `~/.portrait/events/_folders/*.json`. Uses the **light model** because the decision is narrow: does this event go in a folder that already exists, or does it need a new one?\n\n**Last step of the run.**",
+                detail: "Files events into project folders at `~/.portrait/events/_folders/*.json`.\n\n**Light model** — the call is narrow: existing folder, or a new one.\n\n**Last step of the run.**",
                 pos: CGPoint(x: 0.5, y: 0.778)
             ),
             Node(
                 id: "distill",
                 title: "Portraits Distiller",
                 kind: .downstream,
-                detail: "Once events land, the portrait distiller is **marked pending**. It turns events into long-term portrait entries — experiences, social, and so on — on its own schedule.",
+                detail: "Events landed → distiller **marked pending**. It turns them into long-term portrait entries on its own schedule.",
                 pos: CGPoint(x: 0.27, y: 0.93)
             ),
             Node(
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
-                detail: "Each processed day is also **marked pending** for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
+                detail: "Each processed day is also **marked pending** for the refresher. It re-derives personality tags from that day's events, the rest of the portrait, and OCR.",
                 pos: CGPoint(x: 0.73, y: 0.93)
             ),
         ],
@@ -460,14 +460,14 @@ extension PipelineFlow {
                 title: "Processed events",
                 kind: .source,
                 chip: "events/",
-                detail: "Not one day — the whole tree. The distiller reads every event that isn't archived yet, which is why a portrait entry can be backed by things that happened months apart.\n\nEvents come from the Events Processor; days that failed there have their events removed, so only clean days ever reach here.",
+                detail: "**The whole tree, not one day.** Every event that isn't archived — which is why one portrait entry can be backed by things months apart.\n\nSource is the Events Processor. Days that failed there have their events removed, so only clean days arrive.",
                 pos: CGPoint(x: 0.30, y: 0.09)
             ),
             Node(
                 id: "group",
                 title: "Sort into categories",
                 kind: .deterministic,
-                detail: "No AI. Two passes over the disk:\n\n• Every event is filed under the portrait categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing portrait entries are re-weighted first, so an entry that nothing touched this round still decays with time instead of sitting frozen.\n\nCategories with no events and no existing entries are skipped entirely — no tokens spent on nothing.",
+                detail: "**No AI.** Two passes over disk.\n\n• Every event filed under the categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing entries re-weighted first, so an untouched entry still decays instead of freezing.\n\nEmpty categories are skipped — **no tokens spent on nothing**.",
                 pos: CGPoint(x: 0.30, y: 0.34)
             ),
             Node(
@@ -475,7 +475,7 @@ extension PipelineFlow {
                 title: "Distill each category",
                 kind: .llm,
                 chip: "main model",
-                detail: "One round trip per category — the column on the right lists them. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
+                detail: "**One round trip per category** — listed on the right. The model sees that category's events plus the entries already written, and answers **create / update / no change** per entry.\n\nResults land as Markdown at `~/.portrait/portrait/<category>/`.\n\nPersonality and writing style are excluded on purpose — they have their own pipelines and would be overwritten here.",
                 pos: CGPoint(x: 0.30, y: 0.60)
             ),
             // 五个类别 —— 挂在右侧的**注释列**(08-10 用户三稿):不是流程的
@@ -511,7 +511,7 @@ extension PipelineFlow {
                 id: "archive",
                 title: "Archive faded entries",
                 kind: .deterministic,
-                detail: "No AI. A sweep over the portrait tree right after it was updated: any entry whose weight has dropped below the archive threshold and that hasn't been touched for long enough is moved to the archive.\n\nNothing is deleted — archived entries stay on disk and stop showing up in your portrait. Pinned entries are never archived. Both limits live in Settings → Memory.",
+                detail: "**No AI.** A sweep right after the update: weight below the archive threshold **and** untouched long enough → archived.\n\n**Nothing is deleted.** Archived entries stay on disk, just out of your portrait. Pinned entries are never archived. Both limits are in Settings → Memory.",
                 pos: CGPoint(x: 0.30, y: 0.88)
             ),
         ],
@@ -544,7 +544,7 @@ extension PipelineFlow {
                 title: "Timeline patterns & events",
                 kind: .source,
                 chip: "events/<day>",
-                detail: "Personality is rebuilt day by day, oldest pending day first, up to 7 days per run. Each day is handled independently — a day that fails is retried later without holding up the rest.",
+                detail: "Rebuilt **day by day**, oldest pending first, up to 7 days per run.\n\nEach day is independent — one that fails is retried later without holding up the rest.",
                 pos: CGPoint(x: 0.5, y: 0.055)
             ),
             Node(
@@ -552,14 +552,14 @@ extension PipelineFlow {
                 title: "Read the day for traits",
                 kind: .llm,
                 chip: "main model",
-                detail: "The heaviest step. The model reads that day's important events and proposes personality tags — each one carrying the events it came from, plus a handful of keywords that should be visible on your screen if the trait is real.\n\nThose keywords are what the next step checks against.",
+                detail: "**The heaviest step.** The model reads that day's important events and proposes personality tags.\n\nEach tag carries the events it came from **plus keywords that should be visible on screen if the trait is real** — that's what the next step checks.",
                 pos: CGPoint(x: 0.5, y: 0.257)
             ),
             Node(
                 id: "ocr",
                 title: "Check it against your screen",
                 kind: .deterministic,
-                detail: "No AI, and the strictest gate in the whole system. For every proposed trait, the day's screenshots are searched for its keywords. Fewer than 15 matching frames — roughly 45 seconds of screen time — and the trait is thrown away.\n\nThis exists because a language model asked \"what is this person like?\" will always find something to say. Requiring the evidence to be visible on screen is what keeps personality from drifting into flattering fiction.",
+                detail: "**No AI. The strictest gate in the system.** Every proposed trait is searched for in that day's screenshots. **Under 15 matching frames (~45s of screen time) → discarded.**\n\nA model asked \"what is this person like?\" will always find something to say. Requiring on-screen evidence is what keeps personality from turning into flattery.",
                 pos: CGPoint(x: 0.5, y: 0.422)
             ),
             Node(
@@ -567,7 +567,7 @@ extension PipelineFlow {
                 title: "Group similar traits",
                 kind: .llm,
                 chip: "light model",
-                detail: "Survivors get grouped by meaning, so \"careful about details\", \"double-checks work\" and \"perfectionist\" become one thing instead of three.\n\nUses the light model on purpose — the decision is narrow and a smaller model is more decisive at it.",
+                detail: "Survivors are grouped by meaning — \"careful about details\", \"double-checks work\", \"perfectionist\" become one instead of three.\n\n**Light model on purpose**: narrow call, and a smaller model is more decisive at it.",
                 pos: CGPoint(x: 0.5, y: 0.587)
             ),
             Node(
@@ -575,14 +575,14 @@ extension PipelineFlow {
                 title: "Merge into what's known",
                 kind: .llm,
                 chip: "main model",
-                detail: "Each group is compared against the personality concepts you already have: is this the same trait showing up again (reinforce it), a sharper version of it (rewrite), or genuinely new (create)?\n\nThis is why personality accumulates instead of being replaced every day.",
+                detail: "Each group is compared against the concepts you already have — **reinforce / rewrite / create**.\n\nThis is why personality **accumulates** instead of being replaced every day.",
                 pos: CGPoint(x: 0.5, y: 0.752)
             ),
             Node(
                 id: "apply",
                 title: "Write concepts",
                 kind: .deterministic,
-                detail: "No AI. The merge decisions are applied to portrait/personality/ — new concepts created, existing ones updated with the day's evidence appended, and the day is marked done.",
+                detail: "**No AI.** Merge decisions applied to `~/.portrait/portrait/personality/` — new concepts created, existing ones get the day's evidence appended. Day marked done.",
                 pos: CGPoint(x: 0.5, y: 0.917)
             ),
         ],
@@ -617,7 +617,7 @@ extension PipelineFlow {
                 title: "Writing events",
                 kind: .source,
                 chip: "writing_records",
-                detail: "Not events, and not everything you typed — the pieces of writing that Typing Capture reconstructed and kept: the message, the email, the commit note, along with what you were doing at the time.\n\nEach piece is consumed exactly once. Nothing here is invented; if you didn't type it, it isn't in this pipeline.",
+                detail: "**Not events, and not everything you typed.** The pieces Typing Capture reconstructed and kept: the message, the email, the commit note, plus what you were doing at the time.\n\nEach piece is consumed **exactly once**. If you didn't type it, it isn't here.",
                 pos: CGPoint(x: 0.5, y: 0.083)
             ),
             Node(
@@ -625,7 +625,7 @@ extension PipelineFlow {
                 title: "Take a batch",
                 kind: .deterministic,
                 chip: "up to \(WritingStyleDistiller.defaultBatchCap) per run",
-                detail: "No AI. Pulls the oldest unprocessed pieces, up to the batch cap, and reads the style entries you already have so the model can update them instead of writing near-duplicates.\n\nExisting entries are re-weighted at the same time, so styles you've stopped using fade even on runs that change nothing.",
+                detail: "**No AI.** Pulls the oldest unprocessed pieces up to the batch cap, and loads your existing style entries so the model updates them instead of writing near-duplicates.\n\nEntries are re-weighted in the same pass — **styles you stopped using fade even on runs that change nothing**.",
                 pos: CGPoint(x: 0.5, y: 0.389)
             ),
             Node(
@@ -633,14 +633,14 @@ extension PipelineFlow {
                 title: "Distill style facets",
                 kind: .llm,
                 chip: "light model",
-                detail: "The model reads the batch next to your existing entries and answers with drafts — a new facet, or an update to one that exists. Facets are things like tone, sentence rhythm, how you open and close a message, how you edit yourself.\n\nRuns on the light model: the input is short text and the judgement is narrow.",
+                detail: "The model reads the batch next to your existing entries and returns drafts — **a new facet, or an update to one**. Facets: tone, sentence rhythm, how you open and close a message, how you edit yourself.\n\n**Light model** — short input, narrow call.",
                 pos: CGPoint(x: 0.5, y: 0.639)
             ),
             Node(
                 id: "apply",
                 title: "Save + mark processed",
                 kind: .deterministic,
-                detail: "No AI. Drafts are written under portrait/writing_style/, weights are refreshed across the tree, and the whole batch is marked processed — including pieces the model chose not to use, so they don't come back next run.\n\nAutomatic runs save straight away. A manual run stages the drafts instead and waits for you to approve them; while a run is waiting, nothing else starts.",
+                detail: "**No AI.** Drafts written to `~/.portrait/portrait/writing_style/`, weights refreshed across the tree, whole batch marked processed — **including pieces the model didn't use**, so they don't come back next run.\n\nAutomatic runs save straight away. A manual run **stages** the drafts and waits for your approval; nothing else starts while one is waiting.",
                 pos: CGPoint(x: 0.5, y: 0.889)
             ),
         ],
