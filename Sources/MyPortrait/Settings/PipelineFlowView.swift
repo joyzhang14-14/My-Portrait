@@ -372,7 +372,7 @@ extension PipelineFlow {
         nodes: [
             Node(
                 id: "capture",
-                title: "Captured day",
+                title: "Captured data",
                 kind: .source,
                 chip: "~/.portrait",
                 detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing. **This is the only input** — nothing is invented later.",
@@ -457,7 +457,7 @@ extension PipelineFlow {
         nodes: [
             Node(
                 id: "events",
-                title: "Every event you have",
+                title: "Processed events",
                 kind: .source,
                 chip: "events/",
                 detail: "Not one day — the whole tree. The distiller reads every event that isn't archived yet, which is why a portrait entry can be backed by things that happened months apart.\n\nEvents come from the Events Processor; days that failed there have their events removed, so only clean days ever reach here.",
@@ -541,7 +541,7 @@ extension PipelineFlow {
         nodes: [
             Node(
                 id: "day",
-                title: "One processed day",
+                title: "Timeline patterns & events",
                 kind: .source,
                 chip: "events/<day>",
                 detail: "Personality is rebuilt day by day, oldest pending day first, up to 7 days per run. Each day is handled independently — a day that fails is retried later without holding up the rest.",
@@ -614,7 +614,7 @@ extension PipelineFlow {
         nodes: [
             Node(
                 id: "records",
-                title: "Things you actually wrote",
+                title: "Writing events",
                 kind: .source,
                 chip: "writing_records",
                 detail: "Not events, and not everything you typed — the pieces of writing that Typing Capture reconstructed and kept: the message, the email, the commit note, along with what you were doing at the time.\n\nEach piece is consumed exactly once. Nothing here is invented; if you didn't type it, it isn't in this pipeline.",
