@@ -91,6 +91,9 @@ struct MemorySettingsView: View {
     /// staging diff 的后台刷新 task —— 连续触发时 cancel 旧的合并成一次(debounce)。
     @State private var stagingRefreshTask: Task<Void, Never>? = nil
     @State private var previewChange: MemoryStaging.StagedChange? = nil
+    /// 打开预览的那条改动属于哪个 portrait 分区(路径读不出来时才用得上,
+    /// 见 PortraitCategoryTag.fallback)。
+    @State private var previewCategory: String? = nil
 
     // EventClassifier 已并入每天的 event job，不再单独提供 Run 按钮。
 
@@ -250,7 +253,8 @@ struct MemorySettingsView: View {
             Text("\(trigger.title) uses LLM tokens. \(trigger.desc)")
         }
         .sheet(item: $previewChange) { change in
-            StagedChangePreview(change: change, categoryColors: portraitCatColors)
+            StagedChangePreview(change: change, categoryColors: portraitCatColors,
+                                fallbackCategory: previewCategory)
         }
     }
 
@@ -300,7 +304,10 @@ struct MemorySettingsView: View {
             stagedFolders = folders
             portraitCatColors = catColors
             eventsChanges = e
-            portraitChanges = p
+            // portrait 快照是整棵 `portrait/` 树(回滚要的就是整棵),里面
+            // 含 `personality/` 子目录 —— 但 personality 有自己的 pipeline
+            // 和自己的审核页,不该在 Portraits Distiller 页里再列一遍。
+            portraitChanges = p.filter { !$0.relativePath.hasPrefix("personality/") }
             personalityChanges = s
         }
         refreshHasWork()
@@ -1305,14 +1312,19 @@ struct MemorySettingsView: View {
                     .buttonStyle(.borderedProminent).controlSize(.small)
             }
             ForEach(changes) { ch in
-                changeRow(ch)
+                // personality 的产出相对路径不含目录层,分区名只能由 kind 给。
+                changeRow(ch, category: kind == .personality ? "personality" : nil)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func changeRow(_ ch: MemoryStaging.StagedChange) -> some View {
-        Button { previewChange = ch } label: {
+    private func changeRow(_ ch: MemoryStaging.StagedChange,
+                           category: String? = nil) -> some View {
+        Button {
+            previewChange = ch
+            previewCategory = category
+        } label: {
             HStack(spacing: 8) {
                 Text(ch.isNew ? "NEW" : "CHANGED")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -1322,7 +1334,8 @@ struct MemorySettingsView: View {
                     .font(.system(size: 11))
                     .lineLimit(1)
                 PortraitCategoryTag(relativePath: ch.relativePath,
-                                    userColors: portraitCatColors)
+                                    userColors: portraitCatColors,
+                                    fallback: category)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9))
@@ -2087,6 +2100,8 @@ private struct StagedChangePreview: View {
     let change: MemoryStaging.StagedChange
     /// portrait 分区的用户自定义色(Neural Graph 里改的那份)。
     var categoryColors: [String: String] = [:]
+    /// 路径里读不出分区时由调用方给(personality)。
+    var fallbackCategory: String? = nil
     @Environment(\.dismiss) private var dismiss
     /// 默认渲染成人看的样子;原始 markdown(含 frontmatter)收在开关后面。
     @State private var showRaw = false
@@ -2101,7 +2116,8 @@ private struct StagedChangePreview: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 PortraitCategoryTag(relativePath: change.relativePath,
-                                    userColors: categoryColors, prefixed: true)
+                                    userColors: categoryColors,
+                                    fallback: fallbackCategory, prefixed: true)
                 Spacer()
                 Toggle("Raw data", isOn: $showRaw)
                     .toggleStyle(.switch)
@@ -2241,6 +2257,9 @@ private struct EventCardFields {
 private struct PortraitCategoryTag: View {
     let relativePath: String
     var userColors: [String: String] = [:]
+    /// 路径里读不出分区时的兜底 —— personality 的产出直接躺在
+    /// `portrait/personality/` 下,相对路径不含目录层,只能由调用方告知。
+    var fallback: String? = nil
     /// 预览窗标题行里加个 "in" 前缀,读起来是一句话。
     var prefixed = false
 
@@ -2248,20 +2267,22 @@ private struct PortraitCategoryTag: View {
         if let cat = category {
             let c = color(cat)
             HStack(spacing: 4) {
-                Circle().fill(c).frame(width: 6, height: 6)
+                // 小标志跟侧栏 / 流程图同一套图标(MemoryScope.systemImage)
+                Image(systemName: MemoryScope.portrait(category: cat).systemImage)
+                    .font(.system(size: 8.5))
                 Text((prefixed ? "in " : "") + cat.replacingOccurrences(of: "_", with: " "))
                     .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(c)
             }
+            .foregroundStyle(c)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(Capsule().fill(c.opacity(0.14)))
         }
     }
 
     private var category: String? {
-        guard let first = relativePath.split(separator: "/").first else { return nil }
+        guard let first = relativePath.split(separator: "/").first else { return fallback }
         let name = String(first)
-        return GraphSceneBuilder.portraitCategories.contains { $0.name == name } ? name : nil
+        return GraphSceneBuilder.portraitCategories.contains { $0.name == name } ? name : fallback
     }
 
     private func color(_ cat: String) -> Color {
