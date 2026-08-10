@@ -37,7 +37,7 @@ enum PermissionCatalog {
                 id: "screen",
                 icon: "rectangle.inset.filled.on.rectangle",
                 title: "Screen Recording",
-                why: "Periodic screenshots and the text on them. Used to build your timeline.",
+                why: "Periodic screenshots and the text on them. Used to **build your timeline**.",
                 state: state(monitor.screenRecording),
                 request: { monitor.requestScreenRecording() },
                 openSettings: { monitor.openSettings(for: .screen) }
@@ -46,7 +46,7 @@ enum PermissionCatalog {
                 id: "accessibility",
                 icon: "accessibility",
                 title: "Accessibility",
-                why: "Window titles, the active app, and your keystrokes. Used to label what you were doing and typing.",
+                why: "Window titles, the active app, and your keystrokes. Used to **label what you were doing and typing**.",
                 state: state(monitor.accessibility),
                 request: { monitor.requestAccessibility() },
                 openSettings: { monitor.openSettings(for: .accessibility) }
@@ -55,7 +55,7 @@ enum PermissionCatalog {
                 id: "microphone",
                 icon: "mic",
                 title: "Microphone",
-                why: "Captures audio activity, then transcribes it to text. Makes voice chat part of your portrait.",
+                why: "Captures audio activity, then transcribes it to text. **Makes voice chat part of your portrait**.",
                 state: state(monitor.microphone),
                 request: { monitor.requestMicrophone() },
                 openSettings: { monitor.openSettings(for: .microphone) }
@@ -64,7 +64,7 @@ enum PermissionCatalog {
                 id: "full-disk",
                 icon: "externaldrive",
                 title: "Full Disk Access",
-                why: "Import data from chosen apps and manage it manually.",
+                why: "**Import data from chosen apps** and manage it manually.",
                 state: state(monitor.fullDiskAccess),
                 request: nil,
                 openSettings: { monitor.openSettings(for: .fullDisk) }
@@ -75,7 +75,7 @@ enum PermissionCatalog {
                 id: "sleep-helper",
                 icon: "bolt.fill",
                 title: "Background activity helper",
-                why: "Runs the nightly analysis while your Mac is idle or the lid is shut. Never while you're using it.",
+                why: "Runs the nightly analysis while your Mac is idle or the lid is shut. **Never while you're using it**.",
                 state: helperApproved ? .granted : .denied,
                 request: { SleepHelperClient.shared.enable() },
                 openSettings: { SleepHelperClient.shared.openSystemSettings() }

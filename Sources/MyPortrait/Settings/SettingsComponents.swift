@@ -115,6 +115,24 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
+/// 说明文字里的 **加粗** 等行内 markdown 的统一渲染入口。
+///
+/// 存在的理由:这些说明多数人不会逐字读,加粗让他们扫一眼就抓到重点。
+/// `SwiftUI.Text` 吃的是纯字符串,`**` 会原样画出来,必须先解析成
+/// `AttributedString`。
+///
+/// `.inlineOnlyPreservingWhitespace` = 只认行内语法(加粗 / 代码),**保留换行**。
+/// 换成完整 block 解析会把段落间的空行吃掉,多段说明挤成一坨。
+/// 解析失败(不该发生)退回纯文本,绝不吞内容。
+enum Markdown {
+    static func inline(_ s: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: s,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(s)
+    }
+}
+
 /// 标题旁的 ⓘ,点击弹出浮窗(再点一次 / 点别处收起)。浮窗内容任意 ——
 /// 可以只是一段说明,也可以放真正能操作的控件。
 /// 图标本身 11pt,外面垫 6pt padding 把可点范围撑到 ~23pt。
@@ -141,7 +159,7 @@ struct SettingsInfoBadge: View {
 
     var body: some View {
         SettingsInfoPopover {
-            Text(text)
+            Text(Markdown.inline(text))
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)

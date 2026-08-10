@@ -243,16 +243,16 @@ private struct WelcomeStep: View {
                 .frame(width: 132, height: 132)
             Text("Welcome to My Portrait")
                 .font(.system(size: 32, weight: .semibold))
-            Text("A private AI memory system. Everything stays on this Mac.")
+            Text(Markdown.inline("A **private** AI memory system. **Everything stays on this Mac**."))
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 540)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                bullet("Captures screen + keyboard + audio with your permission")
-                bullet("Builds an external memory and a portrait just for you")
-                bullet("You may read, edit, or delete it at any time — or bring it to your own AI")
+                bullet("Captures **screen + keyboard + audio** with your permission")
+                bullet("Builds an **external memory** and a **portrait just for you**")
+                bullet("You may **read, edit, or delete** it at any time — or **bring it to your own AI**")
             }
             .padding(.top, 8)
             Spacer(minLength: 40)
@@ -266,7 +266,7 @@ private struct WelcomeStep: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.green.opacity(0.75))
                 .padding(.top, 2)
-            Text(s).font(.system(size: 13))
+            Text(Markdown.inline(s)).font(.system(size: 13))
         }
     }
 }
@@ -370,7 +370,7 @@ private struct PermissionsStep: View {
                     Text(item.title).font(.system(size: 14, weight: .semibold))
                     PermissionStatusPill(state: item.state)
                 }
-                Text(item.why)
+                Text(Markdown.inline(item.why))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -415,7 +415,7 @@ private struct PersonalInfoStep: View {
                     title: "About you",
                     info: "Filled fields are passed to the analysis pipeline as extra context. Empty fields are skipped — all of this is optional. You can edit any of it later in Memories → Personal Info."
                 )
-                Text("Adding personal info makes your portrait and memory more accurate.")
+                Text(Markdown.inline("Adding personal info makes your portrait and memory **more accurate**."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .padding(.bottom, 6)
@@ -593,7 +593,7 @@ private struct ConnectAIStep: View {
                     title: "Connect an AI",
                     info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything."
                 )
-                Text("Complex tasks still need a stronger cloud AI. The goal is to eventually run everything locally and privately.")
+                Text(Markdown.inline("Complex tasks still need a **stronger cloud AI**. The goal is to eventually run **everything locally and privately**."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -656,7 +656,7 @@ private struct MemoryProviderStep: View {
                 // 这一步的说明**不收进 ⓘ**(08-09 用户):这是全流程里唯一
                 // 需要用户理解"我在选什么"才能选对的一步,藏起来等于让他瞎选。
                 StepHeader(title: "Choose AI model for pipelines")
-                Text("Turns your captured activity into events and a portrait. Main model for the heavy passes, light model for the frequent cheap ones.")
+                Text(Markdown.inline("Turns your captured activity into **events and a portrait**. **Main model** for the heavy passes, **light model** for the frequent cheap ones."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -826,7 +826,7 @@ private struct SchedulerStep: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 StepHeader(title: "Set up automatic pipeline processing")
-                Text("On means the scheduler runs it whenever there's pending work. Off means it only runs when you ask.")
+                Text(Markdown.inline("**On** means the scheduler runs it whenever there's pending work. **Off** means it only runs when you ask."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -834,21 +834,21 @@ private struct SchedulerStep: View {
 
                 schedulerCard(
                     title: "Event processing",
-                    info: "Groups your day into events and scores how much each one matters.",
+                    info: "Groups your day into **events** and scores **how much each one matters**.",
                     config: \.scheduler.event)
                 schedulerCard(
                     title: "Portrait distillation",
-                    info: "Turns those events into your long-term portrait.",
+                    info: "Turns those events into your **long-term portrait**.",
                     config: \.scheduler.portrait)
                 schedulerCard(
                     title: "Personality refresh",
-                    info: "Re-reads events and portrait to update your personality tags.",
+                    info: "Re-reads events and portrait to update your **personality tags**.",
                     config: \.scheduler.personality)
                 // 07-30:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
                 // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
                 schedulerCard(
                     title: "Writing style",
-                    info: "Learns how you write — tone, language mix, phrases you reuse.",
+                    info: "Learns **how you write** — tone, language mix, phrases you reuse.",
                     config: \.scheduler.writingStyle)
 
                 Color.clear.frame(height: 8)
@@ -885,7 +885,7 @@ private struct SchedulerStep: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.system(size: 13, weight: .semibold))
-                Text(info)
+                Text(Markdown.inline(info))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -940,7 +940,7 @@ private struct SpeakerTrainingStep: View {
                     title: "Train your voice",
                     info: "You can also do this later in Settings → Speakers, and retrain any time — the newest recording replaces the old voiceprint."
                 )
-                Text("This is what audio recognition uses to tell your voice apart from everyone else's.")
+                Text(Markdown.inline("This is what **audio recognition** uses to **tell your voice apart** from everyone else's."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -971,16 +971,16 @@ private struct FinishStep: View {
                 .foregroundStyle(.green)
             Text("You're all set")
                 .font(.system(size: 32, weight: .semibold))
-            Text("My Portrait is ready, and will start capturing in the background.")
+            Text(Markdown.inline("My Portrait is ready, and will start **capturing in the background**."))
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 540)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
-                FinishHint(icon: "bubble.left.and.bubble.right", text: "Open the chat from the sidebar to ask anything.")
-                FinishHint(icon: "person.text.rectangle", text: "Edit your portrait under Memories at any time.")
-                FinishHint(icon: "lock.shield", text: "All captured data and analysis are stored locally.")
+                FinishHint(icon: "bubble.left.and.bubble.right", text: "Open the **chat** from the sidebar to ask anything.")
+                FinishHint(icon: "person.text.rectangle", text: "**Edit your portrait** under Memories at any time.")
+                FinishHint(icon: "lock.shield", text: "All captured data and analysis are **stored locally**.")
             }
             .padding(.top, 8)
             Spacer(minLength: 40)
@@ -999,7 +999,7 @@ private struct FinishHint: View {
                 .foregroundStyle(Theme.textPrimary.opacity(0.70))
                 .frame(width: 18)
                 .padding(.top, 1)
-            Text(text).font(.system(size: 13))
+            Text(Markdown.inline(text)).font(.system(size: 13))
         }
     }
 }

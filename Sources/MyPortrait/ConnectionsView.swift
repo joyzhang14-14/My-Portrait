@@ -766,15 +766,8 @@ struct ConnectionsView: View {
         }
     }
     /// 描述文案按 markdown 渲染 —— 只用加粗标关键词(试过反引号代码样式,
-    /// 在这种一两行的说明里显得很跳)。`.inlineOnlyPreservingWhitespace`
-    /// 保留段落间的空行(完整 block 解析会把换行吃掉,多段挤成一坨)。
-    /// 解析失败退回纯文本。
-    private func markdown(_ s: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: s,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(s)
-    }
+    /// 在这种一两行的说明里显得很跳)。实现在 `Markdown.inline`,全 app 一份。
+    private func markdown(_ s: String) -> AttributedString { Markdown.inline(s) }
 
     private func descriptionFor(_ i: Integration) -> String {
         switch i.id {

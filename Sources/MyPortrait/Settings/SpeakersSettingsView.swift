@@ -809,7 +809,7 @@ struct VoiceTrainingCard: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
                 }
-                Text("Read a short passage aloud for about 30 seconds. Your microphone turns on for the session and off again when it's done.")
+                Text(Markdown.inline("Read a short passage aloud for about **30 seconds**. Your microphone **turns on for the session and off again** when it's done."))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
