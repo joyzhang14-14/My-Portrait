@@ -327,6 +327,13 @@ struct ContentView: View {
                 // 把文件 / 图片拖到 sidebar 之外的任何 chat 空白处都 OK,
                 // 拖到输入框 / 消息上也 OK(allowsHitTesting=false 不挡)。
                 .chatDropZone(enabled: (selection ?? .home) == .home)
+                // 右侧画布拖窗。底图(SidebarBackdrop / AmbientBackground)上
+                // 那份手势只在没有 ScrollView 压着时才收得到事件 —— 设置类
+                // 页面整页都是 ScrollView,画布空白因此拖不动。挂在 pane 这
+                // 一层就绕过了:SwiftUI 里**子视图的手势优先于父视图**,所以
+                // 按钮 / 开关 / 输入框 / 列表行 / 图谱照样自己吃掉拖拽,只有
+                // 没人认领的空白才落到这条手势上。
+                .gesture(WindowDragGesture())
         }
         // 最小尺寸约束在外层 mainContent 上(dev 提示条也算进去)。否则首启 /
         // Replay onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
