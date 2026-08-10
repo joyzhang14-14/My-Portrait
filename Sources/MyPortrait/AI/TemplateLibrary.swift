@@ -19,7 +19,7 @@ final class TemplateLibrary {
     private let key = "MyPortrait.summaryTemplates.v2"
 
     /// 「已退休的种子清过一次没有」标志。见 removeRetiredFolderSeed。
-    private let retiredSeedsKey = "MyPortrait.summaryTemplates.retiredSeeds.v2"
+    private let retiredSeedsKey = "MyPortrait.summaryTemplates.retiredSeeds.v3"
 
     private init() {
         load()
@@ -40,6 +40,7 @@ final class TemplateLibrary {
         "Folder Suggestions":  "mp-folders",
         "Standup Update":      "standup update",
         "My Portrait Update":  "long-term portrait",
+        "Schedule a Cron Job":  "activity-summary",
     ]
 
     /// 一次性清掉已退休的种子。
@@ -54,12 +55,19 @@ final class TemplateLibrary {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: retiredSeedsKey) else { return }
         defaults.set(true, forKey: retiredSeedsKey)
-        let before = templates.count
+        let before = templates
         templates.removeAll { t in
             guard let marker = Self.retiredSeeds[t.title] else { return false }
             return t.prompt.lowercased().contains(marker)
         }
-        if templates.count != before { save() }
+        // 补上新加的种子 —— 只删不补的话,新种子永远只有全新安装能看到
+        // (老用户的列表非空,init 里那句 `if templates.isEmpty` 不会执行)。
+        // 同样靠上面那个标志只跑一次:用户之后自己删掉的卡不会再长回来。
+        let titles = Set(templates.map(\.title))
+        for seed in Self.seeds where !titles.contains(seed.title) {
+            templates.append(seed)
+        }
+        if templates != before { save() }
     }
 
     // MARK: - CRUD
@@ -103,19 +111,100 @@ final class TemplateLibrary {
     // MARK: - Seed defaults
 
     static let seeds: [SummaryTemplate] = [
-        .init(emoji: "⚡️", title: "Schedule a Cron Job",
-              subtitle: "Spot something repetitive and automate it",
+        .init(emoji: "🔔", title: "Setup Follow-up Reminder",
+              subtitle: "Catch promises and loose ends you may have forgotten",
               prompt: """
-                Start with `mp-query activity-summary --start "8h ago"` to \
-                see what apps + windows I've been bouncing between. Pick ONE \
-                recurring chore I'm clearly doing by hand (e.g. daily \
-                Obsidian inbox cleanup, checking specific Slack channels, \
-                pulling git logs) that a scheduled AI cron job could \
-                shoulder. Briefly propose it (name, schedule, prompt body, \
-                window) and confirm with me before running \
-                `mp-query cronjob add`. One proposal, not three.
+                Set up a cron job for me: title "Follow-up Reminders", runs \
+                every 60 minutes, context window "last 3h", no connections. \
+                Show me the schedule and confirm before you call \
+                `mp-query cronjob add`. Use exactly this prompt body:
+
+                ---
+                You are a follow-up assistant. You run every hour. Your goal is to surface **promises, follow-ups and stuck items the user may have forgotten** — not to recap what they just did.
+
+                **Input**: the last 3 hours of activity (screen OCR, transcripts, typing) is already injected above this prompt — read it directly. If the last 3 hours are quiet, or you suspect something was promised on an earlier day, also call:
+                  - `mp-query memories --scope events --start "7d ago"` — this week's distilled events (already summarised + tagged)
+                  - `mp-query writing --start "7d ago" --q "<keyword>"` — what the user actually typed, more reliable than OCR
+                  - `mp-query memories --scope portrait` — long-term portrait: what they care about, who they deal with
+                  - `mp-query read --path events/<day>/<file>.md` — the full body of one event
+
+                Use these to **connect** things: a promise made today against something said last week and never done; an email they said they'd reply to; a build left broken. Cross-day, cross-source links are the whole point of this job.
+
+                ## Step 1 — Read the existing todo file
+
+                Read `~/.portrait/cron_jobs/follow-up-reminders/output/todos.md`. If it doesn't exist, start fresh. **This step is mandatory** — step 4 decides whether to notify entirely from the `notified` fields in this file.
+
+                ## Step 2 — Scan for action items
+
+                Scan the injected 3-hour activity for:
+                - promises the user made ("I'll send that", "I'll follow up", "I'll get back to you tomorrow")
+                - tasks someone assigned to them
+                - deadlines mentioned
+                - messages they haven't replied to
+                - failures (a broken build, a command that errored)
+
+                If the last 3 hours are thin, go further back with `mp-query` (see Input). Pay special attention to **urgent items still open in todos.md**: should this run escalate them, move them forward, or close them?
+
+                If neither the injected context nor `mp-query` turns up any action item, just say "nothing new to follow up on" and stop. Don't update the file. Don't invent anything.
+
+                ## Step 3 — Update the todo file
+
+                Write `~/.portrait/cron_jobs/follow-up-reminders/output/todos.md` as markdown:
+
+                ```markdown
+                # Todo List
+                Last updated: <ISO timestamp>
+
+                ## Urgent (do today)
+                - [ ] Task — source: where / who / when — notified: <ISO timestamp or empty>
+
+                ## This Week
+                - [ ] Task — source
+
+                ## Waiting on
+                - [ ] Waiting on <person> — when to check back
+
+                ## Completed (last 3 days)
+                - [x] Task — done <date>
+                ```
+
+                **Rules**:
+                - Deduplicate — never list the same task twice ("send Sarah the doc" = "get the doc to Sarah")
+                - Mark done when there is evidence: email sent, reply posted, build green, file committed
+                - Drop items older than 7 days
+                - Never invent an item
+                - Every urgent item carries a `notified` field (empty = the user hasn't been told yet)
+
+                ## Step 4 — Notification rules (important: no repeat pings)
+
+                Go through the urgent list you just wrote and pick the subset worth notifying:
+                - `notified` is **empty** → first time this urgent item appears → **notify**
+                - `notified` is **more than 24 hours old** → they may have forgotten → **notify again**
+                - `notified` is **within 24 hours** → **do not notify**, they were just told
+
+                If nothing qualifies, **do not write a `### Notify` block at all** — the system then skips the notification. If something does, append this to the end of your reply:
+
+                ```
+                ### Notify
+                🔔 Needs follow-up:
+                - <most urgent 1>
+                - <most urgent 2>
+                (N total)
+                ```
+
+                Then **set `notified` to the current ISO timestamp on exactly the items you just notified about**, in the same write as step 3. Don't forget this.
+
+                Keep the Notify block to 5 lines or fewer, and keep narration out of it.
+
+                ## ⚠ Anti-patterns
+
+                - Don't stop at screen OCR — leaving `mp-query` unused wastes this job; the cross-day links are its value
+                - Don't treat something the user did 5 minutes ago as urgent — that's in progress, not forgotten
+                - Don't notify about the same item twice within 24 hours
+                - Don't invent a source — "somewhere" is banned; a source must name an app, a person and a time
+                ---
                 """,
-              window: .lastHours(8)),
+              window: .none),
 
         .init(emoji: "📋", title: "Day Recap",
               subtitle: "Today's accomplishments grouped by project",
