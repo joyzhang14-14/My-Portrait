@@ -72,7 +72,89 @@ struct ContentView: View {
             if configStore.current.general.onboardingCompleted {
                 mainContent
             } else {
-                OnboardingView {
+                onboardingContent
+            }
+        }
+        .environment(appState)
+        .environment(chat)
+        .environment(chatStore)
+        .environment(ConfigStore.shared)
+        // **SwiftUI colorScheme 必须显式 .preferredColorScheme()** 强制 ——
+        // ConfigApplier 设了 NSApp.appearance 影响 AppKit chrome,但 SwiftUI
+        // view tree 不会自动 reload colorScheme,所有 Theme.textPrimary
+        // / Color(nsColor:) 等 dynamic 颜色不变。这里读 config.display.theme
+        // 直接告诉 SwiftUI 切。"system" → nil 跟 macOS 走。
+        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme,
+                                                   systemIsDark: systemAppearance.isDark))
+        .onAppear { bindProviderResolver() }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
+            selection = .home
+        }
+        // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)
+        // 并定位该 record。
+        .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
+            guard let id = notif.object as? Int64 else { return }
+            selection = .memories
+            memoryViewMode = .neuralGraph
+            memoryScope = .input
+            memoryInputJump = id
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
+            guard let date = notif.object as? Date else { return }
+            selection = .timeline
+            timeline.seek(to: date)
+        }
+        // Memories 停在哪就记在哪。**两个都要监听** —— 只记 scope 的话,
+        // 用户在 Events 上切到图谱视图,下次回来又是文字视图。
+        // ConfigStore 的写盘本来就是 debounce 的,切标签的频率不用担心。
+        .onChange(of: memoryScope) { _, s in
+            MemoryLanding.persist(scope: s, mode: memoryViewMode)
+        }
+        .onChange(of: memoryViewMode) { _, m in
+            MemoryLanding.persist(scope: memoryScope, mode: m)
+        }
+    }
+
+    /// Onboarding 全屏分支。dev mode 下同样挂标题栏警示条 —— replay 是从
+    /// dev 卡点进来的,不提示的话很容易忘了自己看的是演示环境。固定橙色
+    /// read only:onboarding 写的 onboardingCompleted / 供应商选择等都在
+    /// 跟 dev 走的 config section 里,不动真实数据。
+    private var onboardingContent: some View {
+        onboardingView
+            .overlay(alignment: .top) {
+                if DevMode.isOn {
+                    DevModeTitlebarBanner(live: false)
+                }
+            }
+    }
+
+    /// 标题栏警示条本体 —— mainContent 的注释里有形态/实现的完整来龙去脉
+    ///(零高锚点 + background 里 ZStack ignoresSafeArea 向上扩进标题栏)。
+    /// 抽成组件是因为 onboarding 分支也要挂(08-09)。
+    private struct DevModeTitlebarBanner: View {
+        let live: Bool
+        var body: some View {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 0)
+                .background {
+                    ZStack {
+                        Rectangle().fill(live ? Color.red.opacity(0.80)
+                                              : Color.orange.opacity(0.85))
+                        Text(live ? "DEV MODE · THIS PAGE WRITES YOUR REAL DATA"
+                                  : "DEV MODE · read only")
+                            .font(.system(size: 15, weight: .bold, design: .monospaced))
+                            .foregroundStyle(live ? Color.white.opacity(0.95)
+                                                  : Color.black.opacity(0.8))
+                    }
+                    .ignoresSafeArea(edges: .top)
+                }
+                .allowsHitTesting(false)   // 纯标识,别挡下面内容的点击
+        }
+    }
+
+    private var onboardingView: some View {
+        OnboardingView {
                     // 写 flag + 立即 flush —— debounced 写默认 ~1s 才落盘,
                     // 用户 Finish 后秒退应用就会丢这条记录,下次启动又看到 onboarding。
                     configStore.mutate { $0.general.onboardingCompleted = true }
@@ -89,21 +171,13 @@ struct ContentView: View {
                             win.center()
                         }
                     }
-                }
-            }
         }
-        .environment(appState)
-        .environment(chat)
-        .environment(chatStore)
-        .environment(ConfigStore.shared)
-        // **SwiftUI colorScheme 必须显式 .preferredColorScheme()** 强制 ——
-        // ConfigApplier 设了 NSApp.appearance 影响 AppKit chrome,但 SwiftUI
-        // view tree 不会自动 reload colorScheme,所有 Theme.textPrimary
-        // / Color(nsColor:) 等 dynamic 颜色不变。这里读 config.display.theme
-        // 直接告诉 SwiftUI 切。"system" → nil 跟 macOS 走。
-        .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme,
-                                                   systemIsDark: systemAppearance.isDark))
-        .onAppear {
+    }
+
+    /// Provider resolver / scheduler / 通知路由接线 —— 原样搬自 body 的
+    /// .onAppear 大闭包(纯副作用,无 view 语义)。onboarding 分支拆成独立
+    /// 属性后,body 的修饰符链不便再挂这个长闭包,挪成方法一行调用。
+    private func bindProviderResolver() {
             // Bind chat.providerResolver to the live appState so each new
             // PiAgent spawns against whichever provider the user picked in
             // Connections.
@@ -162,33 +236,6 @@ struct ContentView: View {
                 selection = .home
                 (NSApp.delegate as? AppDelegate)?.showMainWindow()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
-            selection = .home
-        }
-        // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)
-        // 并定位该 record。
-        .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
-            guard let id = notif.object as? Int64 else { return }
-            selection = .memories
-            memoryViewMode = .neuralGraph
-            memoryScope = .input
-            memoryInputJump = id
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
-            guard let date = notif.object as? Date else { return }
-            selection = .timeline
-            timeline.seek(to: date)
-        }
-        // Memories 停在哪就记在哪。**两个都要监听** —— 只记 scope 的话,
-        // 用户在 Events 上切到图谱视图,下次回来又是文字视图。
-        // ConfigStore 的写盘本来就是 debounce 的,切标签的频率不用担心。
-        .onChange(of: memoryScope) { _, s in
-            MemoryLanding.persist(scope: s, mode: memoryViewMode)
-        }
-        .onChange(of: memoryViewMode) { _, m in
-            MemoryLanding.persist(scope: memoryScope, mode: m)
-        }
     }
 
     /// 把 config.display.theme 字符串("system" / "light" / "dark")映射到
@@ -222,23 +269,7 @@ struct ContentView: View {
         mainSplit
             .overlay(alignment: .top) {
                 if DevMode.isOn {
-                    let live = paneTouchesRealData
-                    Color.clear
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 0)
-                        .background {
-                            ZStack {
-                                Rectangle().fill(live ? Color.red.opacity(0.80)
-                                                      : Color.orange.opacity(0.85))
-                                Text(live ? "DEV MODE · THIS PAGE WRITES YOUR REAL DATA"
-                                          : "DEV MODE · read only")
-                                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(live ? .white.opacity(0.95)
-                                                          : .black.opacity(0.8))
-                            }
-                            .ignoresSafeArea(edges: .top)
-                        }
-                        .allowsHitTesting(false)   // 纯标识,别挡下面内容的点击
+                    DevModeTitlebarBanner(live: paneTouchesRealData)
                 }
             }
             .frame(minWidth: 1200, minHeight: 835)
