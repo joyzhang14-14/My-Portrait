@@ -229,9 +229,18 @@ private struct WelcomeStep: View {
     var body: some View {
         VStack(spacing: 24) {
             Spacer(minLength: 40)
-            Image(systemName: "sparkles")
-                .font(.system(size: 56, weight: .light))
-                .foregroundStyle(Color.accentColor)
+            // App 图标本体,不是 SF Symbol —— 欢迎页第一眼该认出"这是哪个 app",
+            // 一颗通用的星星做不到这件事。
+            //
+            // `NSApp.applicationIconImage` 而不是 `NSImage(named: "AppIcon")`:
+            // 前者跟着用户在 Display ▸ App customize 里换的自定义 Dock 图标走
+            //(ConfigApplier 把自定义图赋给的就是这个属性),后者永远是打包进
+            // bundle 的那张。用户换过图标却在欢迎页看到原版,是明显的不一致。
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 88, height: 88)
             Text("Welcome to My Portrait")
                 .font(.system(size: 32, weight: .semibold))
             Text("A private AI memory system. Everything stays on this Mac.")
