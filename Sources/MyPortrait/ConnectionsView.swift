@@ -63,6 +63,10 @@ struct ConnectionsView: View {
     }
 
     var body: some View {
+        // ScrollViewReader:点开一张 tile 之后自动滚到下面展开的那块面板。
+        // 窗口矮的时候(onboarding 只有 560pt 高)面板整个在视口外,点完
+        // 屏幕上什么都没变,看着像没反应。
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if showsHeader {
@@ -85,6 +89,7 @@ struct ConnectionsView: View {
                 if let sel = selectedIntegration {
                     expandedPanel(for: sel)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                        .id(Self.expandedPanelAnchor)
                 }
 
                 Spacer(minLength: 0)
@@ -106,7 +111,21 @@ struct ConnectionsView: View {
         .onChange(of: connecting) { _, now in
             if now == nil { codexExpiry = ChatGPTOAuth.accessTokenExpiry() }
         }
+        // 面板是这一帧才插进 VStack 的,同一帧 scrollTo 那个 id 还不存在。
+        // 推到下一个 runloop tick 再滚。
+        .onChange(of: selectedId) { _, now in
+            guard now != nil else { return }
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    proxy.scrollTo(Self.expandedPanelAnchor, anchor: .bottom)
+                }
+            }
+        }
+        }
     }
+
+    /// 展开面板的滚动锚点 id。
+    private static let expandedPanelAnchor = "connections.expanded-panel"
 
     // search
     private var searchField: some View {
