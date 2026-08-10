@@ -374,7 +374,7 @@ extension PipelineFlow {
                 id: "capture",
                 title: "Captured data",
                 kind: .source,
-                chip: "~/.portrait",
+                chip: "~/.portrait/portrait.sqlite",
                 detail: "One UTC day: screenshots + their OCR text, audio transcripts with speakers, your typing.\n\n**The only input.** Nothing is added later.",
                 pos: CGPoint(x: 0.5, y: 0.05)
             ),
@@ -406,7 +406,7 @@ extension PipelineFlow {
                 id: "weight",
                 title: "Weights + daily budget",
                 kind: .deterministic,
-                detail: "**No AI.** Two algorithms.\n\n• **Weights** — exponential half-life decay, recomputed across the whole tree.\n\n• **Daily budget** — a busy day can't flood memory. Over the cap → scaled down; quiet days untouched. Peaks above the protection threshold are never scaled.",
+                detail: "Two algorithms, no AI.\n\n• **Weights** — exponential half-life decay, recomputed across the whole tree.\n\n• **Daily budget** — a busy day can't flood memory. Over the cap → scaled down; quiet days untouched. Peaks above the protection threshold are never scaled.",
                 pos: CGPoint(x: 0.5, y: 0.632)
             ),
             Node(
@@ -459,7 +459,7 @@ extension PipelineFlow {
                 id: "events",
                 title: "Processed events",
                 kind: .source,
-                chip: "events/",
+                chip: "~/.portrait/events/",
                 detail: "**The whole tree, not one day.** Every event that isn't archived — which is why one portrait entry can be backed by things months apart.\n\nSource is the Events Processor. Days that failed there have their events removed, so only clean days arrive.",
                 pos: CGPoint(x: 0.30, y: 0.09)
             ),
@@ -467,7 +467,7 @@ extension PipelineFlow {
                 id: "group",
                 title: "Sort into categories",
                 kind: .deterministic,
-                detail: "**No AI.** Two passes over disk.\n\n• Every event filed under the categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing entries re-weighted first, so an untouched entry still decays instead of freezing.\n\nEmpty categories are skipped — **no tokens spent on nothing**.",
+                detail: "Two passes over disk, no AI.\n\n• Every event filed under the categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing entries re-weighted first, so an untouched entry still decays instead of freezing.\n\nEmpty categories are skipped — **no tokens spent on nothing**.",
                 pos: CGPoint(x: 0.30, y: 0.34)
             ),
             Node(
@@ -511,7 +511,7 @@ extension PipelineFlow {
                 id: "archive",
                 title: "Archive faded entries",
                 kind: .deterministic,
-                detail: "**No AI.** A sweep right after the update: weight below the archive threshold **and** untouched long enough → archived.\n\n**Nothing is deleted.** Archived entries stay on disk, just out of your portrait. Pinned entries are never archived. Both limits are in Settings → Memory.",
+                detail: "No AI. A sweep right after the update: weight below the archive threshold **and** untouched long enough → archived.\n\n**Nothing is deleted.** Archived entries stay on disk, just out of your portrait. Pinned entries are never archived. Both limits are in Settings → Memory.",
                 pos: CGPoint(x: 0.30, y: 0.88)
             ),
         ],
@@ -543,7 +543,7 @@ extension PipelineFlow {
                 id: "day",
                 title: "Timeline patterns & events",
                 kind: .source,
-                chip: "events/<day>",
+                chip: "~/.portrait/events/<day>/",
                 detail: "Rebuilt **day by day**, oldest pending first, up to 7 days per run.\n\nEach day is independent — one that fails is retried later without holding up the rest.",
                 pos: CGPoint(x: 0.5, y: 0.055)
             ),
@@ -559,7 +559,7 @@ extension PipelineFlow {
                 id: "ocr",
                 title: "Check it against your screen",
                 kind: .deterministic,
-                detail: "**No AI. The strictest gate in the system.** Every proposed trait is searched for in that day's screenshots. **Under 15 matching frames (~45s of screen time) → discarded.**\n\nA model asked \"what is this person like?\" will always find something to say. Requiring on-screen evidence is what keeps personality from turning into flattery.",
+                detail: "No AI, and the strictest gate in the system. Every proposed trait is searched for in that day's screenshots. **Under 15 matching frames (~45s of screen time) → discarded.**\n\nA model asked \"what is this person like?\" will always find something to say. Requiring on-screen evidence is what keeps personality from turning into flattery.",
                 pos: CGPoint(x: 0.5, y: 0.422)
             ),
             Node(
@@ -582,7 +582,7 @@ extension PipelineFlow {
                 id: "apply",
                 title: "Write concepts",
                 kind: .deterministic,
-                detail: "**No AI.** Merge decisions applied to `~/.portrait/portrait/personality/` — new concepts created, existing ones get the day's evidence appended. Day marked done.",
+                detail: "No AI. Merge decisions applied to `~/.portrait/portrait/personality/` — new concepts created, existing ones get the day's evidence appended. Day marked done.",
                 pos: CGPoint(x: 0.5, y: 0.917)
             ),
         ],
@@ -616,7 +616,7 @@ extension PipelineFlow {
                 id: "records",
                 title: "Writing events",
                 kind: .source,
-                chip: "writing_records",
+                chip: "~/.portrait/portrait.sqlite · writing_records",
                 detail: "**Not events, and not everything you typed.** The pieces Typing Capture reconstructed and kept: the message, the email, the commit note, plus what you were doing at the time.\n\nEach piece is consumed **exactly once**. If you didn't type it, it isn't here.",
                 pos: CGPoint(x: 0.5, y: 0.083)
             ),
@@ -625,7 +625,7 @@ extension PipelineFlow {
                 title: "Take a batch",
                 kind: .deterministic,
                 chip: "up to \(WritingStyleDistiller.defaultBatchCap) per run",
-                detail: "**No AI.** Pulls the oldest unprocessed pieces up to the batch cap, and loads your existing style entries so the model updates them instead of writing near-duplicates.\n\nEntries are re-weighted in the same pass — **styles you stopped using fade even on runs that change nothing**.",
+                detail: "No AI. Pulls the oldest unprocessed pieces up to the batch cap, and loads your existing style entries so the model updates them instead of writing near-duplicates.\n\nEntries are re-weighted in the same pass — **styles you stopped using fade even on runs that change nothing**.",
                 pos: CGPoint(x: 0.5, y: 0.389)
             ),
             Node(
@@ -640,7 +640,7 @@ extension PipelineFlow {
                 id: "apply",
                 title: "Save + mark processed",
                 kind: .deterministic,
-                detail: "**No AI.** Drafts written to `~/.portrait/portrait/writing_style/`, weights refreshed across the tree, whole batch marked processed — **including pieces the model didn't use**, so they don't come back next run.\n\nAutomatic runs save straight away. A manual run **stages** the drafts and waits for your approval; nothing else starts while one is waiting.",
+                detail: "No AI. Drafts written to `~/.portrait/portrait/writing_style/`, weights refreshed across the tree, whole batch marked processed — **including pieces the model didn't use**, so they don't come back next run.\n\nAutomatic runs save straight away. A manual run **stages** the drafts and waits for your approval; nothing else starts while one is waiting.",
                 pos: CGPoint(x: 0.5, y: 0.889)
             ),
         ],
