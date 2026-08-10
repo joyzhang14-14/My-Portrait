@@ -655,8 +655,8 @@ private struct MemoryProviderStep: View {
             VStack(alignment: .leading, spacing: 14) {
                 // 这一步的说明**不收进 ⓘ**(08-09 用户):这是全流程里唯一
                 // 需要用户理解"我在选什么"才能选对的一步,藏起来等于让他瞎选。
-                StepHeader(title: "Cloud AI model for pipelines")
-                Text("Turns your captured activity into events and a portrait, on a schedule. The main model does the heavy passes, the light one the frequent cheap ones. Changeable later in Settings → Memory.")
+                StepHeader(title: "Choose AI model for pipelines")
+                Text("Turns your captured activity into events and a portrait. Main model for the heavy passes, light model for the frequent cheap ones.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
