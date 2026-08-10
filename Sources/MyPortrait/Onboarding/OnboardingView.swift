@@ -387,11 +387,16 @@ private struct PersonalInfoStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                // 灰字和 ⓘ 并存:灰字回答"我为什么要填"(一句,给动机),
+                // ⓘ 回答"填了会怎样、不填会怎样"(细节)。
                 StepHeader(
-                    title: "Tell me about you (optional)",
-                    info: "Filled fields are passed to the memory pipeline as extra context. Empty fields are skipped. You can edit any of this later in Memories → Personal Info."
+                    title: "About you",
+                    info: "Filled fields are passed to the analysis pipeline as extra context. Empty fields are skipped — all of this is optional. You can edit any of it later in Memories → Personal Info."
                 )
-                .padding(.bottom, 6)
+                Text("Adding personal info makes your portrait and memory more accurate.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 6)
 
                 groupCard("Name") {
                     formRow("First name") {
