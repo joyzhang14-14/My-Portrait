@@ -1150,7 +1150,9 @@ struct MemorySettingsView: View {
                 Circle()
                     .stroke(Color.secondary.opacity(0.5), lineWidth: 1)
                     .frame(width: 9, height: 9)
-                Text("Not in a folder")
+                // 跟 Text 列表的伪 folder、图谱的灰分区球同名 —— 同一个概念
+                // 在三处必须叫同一个名字。
+                Text("Unclassified")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
