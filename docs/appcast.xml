@@ -12,47 +12,6 @@
         -->
 
         <item>
-            <title>1.3.106</title>
-            <pubDate>Sun, 10 Aug 2026 00:48:00 -0500</pubDate>
-            <sparkle:version>179</sparkle:version>
-            <sparkle:shortVersionString>1.3.106</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-                <p>This release is a front-to-back redo of the app's interface — the biggest UI release so far:</p>
-                <p><strong>171 commits · 81 features &amp; fixes · 134 files (+6,200 / −1,704 lines) · 24 screens touched, including every live settings page, onboarding, the menu bar and the graph.</strong></p>
-                <h3>Features</h3>
-                <ul>
-                    <li><strong>Pipeline flow diagrams</strong> — every memory pipeline page (Events Processor, Portraits Distiller, Personality Refresher, Writing Style Distiller) now has an interactive "How it works" diagram: click any step to see what it does, which model it uses, and what it writes. Includes the merge step and a breakdown of the five portrait categories.</li>
-                    <li><strong>ⓘ info popovers everywhere</strong> — long grey descriptions across all settings pages moved behind hover/click ⓘ badges. Every page reads dramatically cleaner; the details are still one hover away.</li>
-                    <li><strong>Category-based blacklists</strong> — screen, typing and audio ignore lists now accept whole app categories (e.g. all password managers) and URLs, with unified chip styling.</li>
-                    <li><strong>Smarter event review</strong> — pending events grouped by folder and expandable; unclassified events get a grey Unclassified group in text view and smarter linking rules in the graph (folders under 2 link straight to your main ball, hubs spread evenly around it).</li>
-                    <li><strong>Credential expiry warnings</strong> — Codex / Claude Code login tiles show days remaining, refresh daily, and warn you two days before sign-in expires.</li>
-                    <li><strong>Permissions overview</strong> — General now lists every permission the app holds, with one-click grant for anything missing.</li>
-                    <li><strong>Onboarding polish</strong> — every step fits one screen without rubber-band scrolling, clearer copy with bolded keywords, app icon on the welcome page.</li>
-                    <li><strong>Menu bar lamp icon v2</strong> — bigger colour cores (+43%), thinner strokes, and proper light/dark menu-bar variants.</li>
-                    <li><strong>Storage page redo</strong> — capture / analysis / app data split that matches the README architecture, background cache cleanup, corrected sizes.</li>
-                </ul>
-                <h3>Bug fixes</h3>
-                <ul>
-                    <li>Ignored apps are now dropped at the very front of the capture pipeline — and no longer trigger false "capture stalled" warnings.</li>
-                    <li>Switching the theme back to "Follow system" now actually refreshes the whole UI.</li>
-                    <li>Storage stats undercounted local models</li>
-                    <li>The menu bar lamp icon was clipped at the bottom; its glow was clipped in the Display preview.</li>
-                    <li>Manual "Process events now" skipped the folder-classification step that the scheduled run does.</li>
-                    <li>Codex credentials warned about expiry even when they would auto-renew.</li>
-                    <li>OCR backfill: fixed an off-by-one frame, added resume-from-checkpoint and busy-timeout handling.</li>
-                </ul>
-                <h3>For developers</h3>
-                <ul>
-                    <li><strong>Dev mode</strong> — a demo environment for debugging and screen recordings: one click switches the UI to made-up data (<code>~/.portrait-dev</code>) with a fake persona, while capture and pipelines keep running on your real data. Settings changes stay in the demo config; a title-bar banner keeps you oriented.</li>
-                </ul>
-            ]]></description>
-            <enclosure
-                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.106/MyPortrait_1.3.106_arm64.dmg"
-                type="application/octet-stream"
-                sparkle:edSignature="0m1N+6om5t8Ph6Kf0VIvgqoTNyJd2w0mlkGl900Lq+incINNIDwhGSIEmbfXltRnuDB78A8YOkh+i28TuTVqBA==" length="27679236" />
-        </item>
-        <item>
             <title>1.3.25</title>
             <pubDate>Sat, 01 Aug 2026 16:03:59 +0000</pubDate>
             <sparkle:version>178</sparkle:version>
