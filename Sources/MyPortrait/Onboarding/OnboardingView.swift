@@ -575,7 +575,7 @@ private struct ConnectAIStep: View {
                 categoryFilter: [.ai, .local],
                 showsHeader: false,
                 showsBackground: false,
-                searchPlaceholder: "search AI providers…"
+                showsSearch: false
             )
             .frame(maxHeight: .infinity)
 

@@ -22,8 +22,9 @@ struct ConnectionsView: View {
     /// 两个叠在一起就等于在页面中间又起一次渐变、又亮一次 glow,接缝处
     /// 深浅突变,看着像两块画布拼起来的。外层已经铺了一张,这里不用再铺。
     var showsBackground: Bool = true
-    /// 搜索框占位文字。onboarding 那步只列 AI,叫 "connections" 对不上。
-    var searchPlaceholder: String = "search connections…"
+    /// 显不显示搜索框。onboarding 那步只列 AI/local 八九个 tile,一屏看全,
+    /// 搜索框纯占版面。Settings 全量十几个,留着。
+    var showsSearch: Bool = true
 
     @Environment(AppState.self) private var appState
     @State private var search: String = ""
@@ -77,7 +78,7 @@ struct ConnectionsView: View {
                     .padding(.bottom, 4)
                 }
 
-                searchField
+                if showsSearch { searchField }
 
                 grid
 
@@ -113,7 +114,7 @@ struct ConnectionsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary.opacity(0.5))
-            TextField(searchPlaceholder, text: $search)
+            TextField("search connections…", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
