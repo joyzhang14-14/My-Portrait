@@ -150,8 +150,8 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.event)
-                    pipelineFlowSection(.eventsProcessor)
                     reviewSectionFor(.eventProcessing)
+                    pipelineFlowSection(.eventsProcessor)
                 case .portraitsDistiller:
                     autoRunSection(
                         nil,
@@ -164,8 +164,8 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.portrait, usesLightModel: false)
-                    pipelineFlowSection(.portraitsDistiller)
                     reviewSectionFor(.distill)
+                    pipelineFlowSection(.portraitsDistiller)
                 case .personalityRefresher:
                     autoRunSection(
                         nil,
@@ -178,8 +178,8 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.personality)
-                    pipelineFlowSection(.personalityRefresher)
                     reviewSectionFor(.personality)
+                    pipelineFlowSection(.personalityRefresher)
                 case .writingStyleDistiller:
                     // writing style 不走 ManualTrigger(自己一套禁用判据 + 运行
                     // 态),所以手动那一行是自己写的,但卡片形态跟另外三条一样:
@@ -189,8 +189,8 @@ struct MemorySettingsView: View {
                         writingStyleManualRow
                     }
                     providerSection(\.scheduler.writingStyle, usesLightModel: false)
-                    pipelineFlowSection(.writingStyleDistiller)
                     writingStyleReviewSection
+                    pipelineFlowSection(.writingStyleDistiller)
                 case .changelog:
                     attentionSection
                     changelogSection
