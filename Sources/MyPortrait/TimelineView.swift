@@ -221,7 +221,7 @@ struct TimelineView: View {
         state.reloadToken &+= 1
         let token = state.reloadToken
         Task { @MainActor in
-            let fetched = (try? await db.framesForDay(day)) ?? []
+            let fetched = await TimelineFeed.framesForDay(day, db: db)
             // 已有更新的 reload(快速切天),丢弃这次旧天结果 —— 否则慢的旧天
             // 查询迟到会盖掉新天 frames,日期栏显示新天、画面却是旧天。
             guard token == state.reloadToken else { return }

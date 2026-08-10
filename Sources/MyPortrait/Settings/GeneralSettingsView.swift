@@ -106,6 +106,10 @@ struct GeneralSettingsView: View {
     /// 紧接着的 NSApp.terminate 杀掉,配置没真落盘 —— 跟 AppCustomizeCard 的
     /// saveAndRestart 踩的是同一个坑。
     private func switchMode(to on: Bool) {
+        // 切回真实数据前先给 dev timeline 的当前区间收尾 —— 心跳最多滞后一
+        // 分钟,这里补齐;`setEnabled` 之后 `DevMode.isOn` 仍是本进程的旧值
+        // (它进程内冻结),所以顺序无所谓,但写在前面读起来更清楚。
+        DevTimelineSessions.endSession()
         DevMode.setEnabled(on)
         Task { @MainActor in
             await ConfigStore.shared.saveNowAndWait()

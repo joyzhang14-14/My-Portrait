@@ -765,12 +765,10 @@ struct TimelineSidebar: View {
         let token = reloadToken
         loading = true
         Task {
-            let apps = (try? await db.activeAppsAround(
-                timestamp: moment, windowSeconds: 45
-            )) ?? []
-            let audio = (try? await db.audioTranscriptsAround(
-                timestamp: moment, beforeSeconds: 120, afterSeconds: 30
-            )) ?? []
+            let apps = await TimelineFeed.activeAppsAround(
+                moment, windowSeconds: 45, db: db)
+            let audio = await TimelineFeed.audioTranscriptsAround(
+                moment, beforeSeconds: 120, afterSeconds: 30, db: db)
             await MainActor.run {
                 guard token == reloadToken else { return }   // 已有更新的 reload,丢弃这次旧结果
                 self.activeApps = apps

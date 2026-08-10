@@ -565,6 +565,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             lifecycleLog.error("Storage.ensureExists failed: \(error.localizedDescription, privacy: .public)")
         }
+        // dev mode 的 timeline 只长「开着 dev mode 的那些时段」—— 这里开一段
+        // 新区间并起心跳。非 dev mode 下是 no-op。
+        DevTimelineSessions.beginSession()
+
         // 必须在窗口和后台服务之前落运行标记。若本次之后被 SIGKILL / OOM，
         // 下次启动能看到上次没有走 applicationWillTerminate。
         RunTerminationTracker.shared.start()
