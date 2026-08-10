@@ -2083,7 +2083,7 @@ private struct StagedChangePreview: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
-                Toggle("Raw", isOn: $showRaw)
+                Toggle("Raw data", isOn: $showRaw)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
                     .font(.system(size: 10))
@@ -2107,7 +2107,7 @@ private struct StagedChangePreview: View {
                 .foregroundStyle(.quaternary)
                 .padding(.horizontal, 12).padding(.vertical, 5)
         }
-        .frame(width: 860, height: 580)
+        .frame(width: 600, height: 406)
     }
 
     @ViewBuilder
