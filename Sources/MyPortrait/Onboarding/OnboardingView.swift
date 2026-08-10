@@ -203,6 +203,26 @@ struct OnboardingView: View {
     }
 }
 
+// MARK: - Step header
+
+/// 每步的标题行 —— 标题 + ⓘ。
+///
+/// 原来每步标题下面都挂一段 13pt 灰字长解释,一上来就是一堵字,而且跟设置页
+/// 现在的做法(灰字一律收进 ⓘ)不一致。想看的人点一下就有,不想看的人
+/// 直接看下面的控件。
+private struct StepHeader: View {
+    let title: String
+    var info: String? = nil
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .font(.system(size: 24, weight: .semibold))
+            if let info { SettingsInfoBadge(text: info) }
+        }
+    }
+}
+
 // MARK: - Step 1: Welcome
 
 private struct WelcomeStep: View {
@@ -214,7 +234,7 @@ private struct WelcomeStep: View {
                 .foregroundStyle(Color.accentColor)
             Text("Welcome to My Portrait")
                 .font(.system(size: 32, weight: .semibold))
-            Text("A private, on-device AI memory system. It quietly captures what you do, then turns it into a long-term portrait that any chat model you connect can reference. Everything stays on this Mac.")
+            Text("A private AI memory system. Everything stays on this Mac.")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -268,12 +288,11 @@ private struct PermissionsStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Grant permissions")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("Each one unlocks a specific capture layer. Skip any you don't want — the rest of the app keeps working.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 6)
+                StepHeader(
+                    title: "Grant permissions",
+                    info: "Each one unlocks a specific capture layer. Skip any you don't want — the rest of the app keeps working."
+                )
+                .padding(.bottom, 6)
 
                 // 清单本体在 PermissionCatalog —— 设置页 General ▸ Permissions
                 // 读的是同一份,加权限只改那一处。
@@ -315,20 +334,20 @@ private struct PermissionsStep: View {
 
     @ViewBuilder
     private func permRow(_ item: PermissionItem) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        // 说明进 ⓘ 之后整行只剩一行文字,`.top` 会让图标和按钮吊在上沿 ——
+        // 改 `.center`。
+        HStack(alignment: .center, spacing: 14) {
             Image(systemName: item.icon)
                 .font(.system(size: 18))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(item.title).font(.system(size: 14, weight: .semibold))
-                    PermissionStatusPill(state: item.state)
-                }
-                Text(item.why)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // 「为什么要这项权限」收进 ⓘ —— 跟设置页 Permissions 卡同款。
+            // ⚠️ 这是本页唯一有争议的一处:这一步的目的就是**说服**用户授权,
+            // 把理由藏起来可能降低授权率。要退回去只是把 info 换回一行灰字。
+            HStack(spacing: 0) {
+                Text(item.title).font(.system(size: 14, weight: .semibold))
+                SettingsInfoBadge(text: item.why)
+                PermissionStatusPill(state: item.state)
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
@@ -364,12 +383,11 @@ private struct PersonalInfoStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Tell me about you (optional)")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("Filled fields are passed to the memory pipeline as extra context. Empty fields are skipped. You can edit any of this later in Memories → Personal Info.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 6)
+                StepHeader(
+                    title: "Tell me about you (optional)",
+                    info: "Filled fields are passed to the memory pipeline as extra context. Empty fields are skipped. You can edit any of this later in Memories → Personal Info."
+                )
+                .padding(.bottom, 6)
 
                 groupCard("Name") {
                     formRow("First name") {
@@ -539,14 +557,10 @@ private struct ConnectAIStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Connect an AI")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("Pick a provider you already have access to. You'll bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            StepHeader(
+                title: "Connect an AI",
+                info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything."
+            )
             .padding(.horizontal, 32)
             .padding(.top, 24)
             .padding(.bottom, 12)
@@ -597,13 +611,11 @@ private struct MemoryProviderStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Memory AI model")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("Which AI runs the memory pipeline — clustering raw activity into events, scoring importance, distilling your portrait, refreshing personality. Two model slots: a main model for heavy tasks, a lighter model for clustering / writing capture. You can change all of this later in Settings → Memory → Parameter.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 6)
+                StepHeader(
+                    title: "Memory AI model",
+                    info: "Which AI runs the memory pipeline — clustering raw activity into events, scoring importance, distilling your portrait, refreshing personality.\n\nTwo model slots: a main model for heavy tasks, a lighter one for clustering. You can change all of this later in Settings → Memory."
+                )
+                .padding(.bottom, 6)
 
                 if availableProviders.isEmpty {
                     HStack(alignment: .top, spacing: 10) {
@@ -686,7 +698,7 @@ private struct MemoryProviderStep: View {
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            row("Provider", desc: "Which AI service to use. Applies to all memory pipelines — tune each later in Settings → Memory.") {
+            row("Provider", info: "Which AI service to use. Applies to all memory pipelines — tune each later in Settings → Memory.") {
                 Picker("", selection: providerBinding) {
                     ForEach(availableProviders, id: \.rawValue) { p in
                         Text(Self.providerDisplayName(p)).tag(p.rawValue)
@@ -699,7 +711,7 @@ private struct MemoryProviderStep: View {
             //(没配置 → picker 留空白)。
             if selectedProvider != nil {
                 Divider().overlay(Color.primary.opacity(0.08))
-                row("Main model", desc: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
+                row("Main model", info: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
                     Picker("", selection: modelBinding) {
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
@@ -707,7 +719,7 @@ private struct MemoryProviderStep: View {
                     .frame(maxWidth: 280)
                 }
                 Divider().overlay(Color.primary.opacity(0.08))
-                row("Light model", desc: "Lighter tasks: tag clustering, writing capture passes.") {
+                row("Light model", info: "Lighter tasks: tag clustering, writing capture passes.") {
                     Picker("", selection: modelLightBinding) {
                         ForEach(models, id: \.self) { m in Text(m).tag(m) }
                     }
@@ -730,16 +742,11 @@ private struct MemoryProviderStep: View {
 
     @ViewBuilder
     private func row<Trailing: View>(_ title: String,
-                                     desc: String,
+                                     info: String,
                                      @ViewBuilder _ trailing: () -> Trailing) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13, weight: .semibold))
-                Text(desc)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        HStack(alignment: .center, spacing: 12) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            SettingsInfoBadge(text: info)
             Spacer(minLength: 12)
             trailing()
         }
@@ -771,31 +778,29 @@ private struct SchedulerStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Automatic processing")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("Each pipeline stage can run automatically on its own schedule, or stay manual-only. Times are local; weekly/monthly defaults to Sunday / the 1st (tune later in Settings → Memory → Scheduler).")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 6)
+                StepHeader(
+                    title: "Automatic processing",
+                    info: "Each stage can run on its own, or stay manual-only. Auto means the scheduler picks it up whenever there's pending work and retries failures on its own. Tune it later in Settings → Memory."
+                )
+                .padding(.bottom, 6)
 
                 schedulerCard(
                     title: "Event processing",
-                    desc: "Clusters raw activity into events and scores their long-term importance.",
+                    info: "Clusters raw activity into events and scores their long-term importance.",
                     config: \.scheduler.event)
                 schedulerCard(
                     title: "Portrait distillation",
-                    desc: "Distills events into long-term portrait entries (one LLM call per category).",
+                    info: "Distills events into long-term portrait entries (one LLM call per category).",
                     config: \.scheduler.portrait)
                 schedulerCard(
                     title: "Personality refresh",
-                    desc: "Aggregates events + portraits + OCR into personality tags.",
+                    info: "Aggregates events + portraits + OCR into personality tags.",
                     config: \.scheduler.personality)
                 // 07-30:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
                 // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
                 schedulerCard(
                     title: "Writing style",
-                    desc: "Distills how you write (formality, language mix, recurring phrases) into the Writing Style portrait.",
+                    info: "Distills how you write (formality, language mix, recurring phrases) into the Writing Style portrait.",
                     config: \.scheduler.writingStyle)
 
                 Color.clear.frame(height: 8)
@@ -810,7 +815,7 @@ private struct SchedulerStep: View {
     @ViewBuilder
     private func schedulerCard(
         title: String,
-        desc: String,
+        info: String,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>
     ) -> some View {
         // 单一 Auto-run toggle —— 跟 Settings → Scheduler 同口径,砍 Frequency
@@ -821,25 +826,15 @@ private struct SchedulerStep: View {
             get: { freq.wrappedValue != .off },
             set: { freq.wrappedValue = $0 ? .daily : .off }
         )
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 13, weight: .semibold))
-                    Text(desc)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                Toggle("", isOn: autoRun)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-            }
-            Text(autoRun.wrappedValue
-                ? "Auto — scheduler picks it up when there's pending work, retries failures with backoff."
-                : "Manual only — runs only when you trigger it.")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+        // 原来开关下面还有一行灰字复述开关的状态("Auto — …" / "Manual only — …")。
+        // 删掉:开关自己就说明了状态,那行是纯冗余,把卡片撑高一倍。
+        HStack(alignment: .center, spacing: 12) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+            SettingsInfoBadge(text: info)
+            Spacer(minLength: 12)
+            Toggle("", isOn: autoRun)
+                .labelsHidden()
+                .toggleStyle(.switch)
         }
         .padding(14)
         .background(
@@ -882,13 +877,11 @@ private struct SpeakerTrainingStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Train your voice (optional)")
-                    .font(.system(size: 24, weight: .semibold))
-                Text("My Portrait separates speakers by voiceprint. Read a short passage now and future recordings can attribute lines to \"you\" instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 6)
+                StepHeader(
+                    title: "Train your voice (optional)",
+                    info: "My Portrait separates speakers by voiceprint. Read a short passage now and future recordings can label lines as you instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers."
+                )
+                .padding(.bottom, 6)
 
                 VoiceTrainingCard(existingNames: [])
 
@@ -913,7 +906,7 @@ private struct FinishStep: View {
                 .foregroundStyle(.green)
             Text("You're all set")
                 .font(.system(size: 32, weight: .semibold))
-            Text("My Portrait is ready. It will start capturing in the background — open the chat anytime to talk to your portrait, or visit Settings → Memory to tune how it consolidates events.")
+            Text("My Portrait is ready, and will start capturing in the background.")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
