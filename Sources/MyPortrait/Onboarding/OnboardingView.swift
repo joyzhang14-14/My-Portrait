@@ -296,12 +296,15 @@ private struct PermissionsStep: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            // 间距比别的步紧:5 行权限是全流程里最高的一屏,按别处的
+            // spacing 14 / vertical 24 排会超出视口十几 pt —— 差一点点却
+            // 一样会出滚动条。收到 10 / 16 才真的放得下。
+            VStack(alignment: .leading, spacing: 10) {
                 StepHeader(
                     title: "Grant permissions",
                     info: "Each one unlocks a specific capture layer. Skip any you don't want — the rest of the app keeps working."
                 )
-                .padding(.bottom, 6)
+                .padding(.bottom, 2)
 
                 // 清单本体在 PermissionCatalog —— 设置页 General ▸ Permissions
                 // 读的是同一份,加权限只改那一处。
@@ -311,14 +314,14 @@ private struct PermissionsStep: View {
                 }
             }
             .padding(.horizontal, 32)
-            .padding(.vertical, 24)
+            .padding(.vertical, 16)
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // 五行刚好放得下,却仍然能橡皮筋式地上下拖 —— 看着像内容没显示全。
         // `.basedOnSize` = 内容真的超出视口才允许滚/回弹,放得下就完全固定。
         // 比 `.scrollDisabled(true)` 安全:窗口被拉小 / 以后加第六项权限时,
-        // 它自己会恢复成可滚,不会把内容卡死在视口外。
+        // 它自己会恢复成可滚,不会把内容卡死在视口外 —— 代价是"放得下"
+        // 得靠上面的间距真的算得过来,差 10pt 也照样出滚动条。
         .scrollBounceBehavior(.basedOnSize)
         .onAppear {
             monitor.start()
@@ -380,7 +383,7 @@ private struct PermissionsStep: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.white.opacity(0.04))
