@@ -1173,8 +1173,17 @@ struct MemorySettingsView: View {
                 Text("Unclassified")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
+                // 计数与徽标口径跟真 folder 行完全一致(+N 绿标 + "N events")
+                let newCount = changes.filter(\.isNew).count
+                if newCount > 0 {
+                    Text("+\(newCount)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.green)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.green.opacity(0.14)))
+                }
                 Spacer(minLength: 8)
-                Text("\(changes.count)")
+                Text("\(changes.count) event\(changes.count == 1 ? "" : "s")")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
