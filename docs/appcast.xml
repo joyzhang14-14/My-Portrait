@@ -22,7 +22,6 @@
                 <p><strong>171 commits · 81 features &amp; fixes · 134 files (+6,200 / −1,704 lines) · 24 screens touched, including every live settings page, onboarding, the menu bar and the graph.</strong></p>
                 <h3>Features</h3>
                 <ul>
-                    <li><strong>Dev mode</strong> — a full demo environment: one click switches the UI to made-up data (<code>~/.portrait-dev</code>) with a fake persona, while capture and pipelines keep running on your real data. Read-only guardrails, a title-bar banner, and red warnings on the few pages that still touch real data.</li>
                     <li><strong>Pipeline flow diagrams</strong> — every memory pipeline page (Events Processor, Portraits Distiller, Personality Refresher, Writing Style Distiller) now has an interactive "How it works" diagram: click any step to see what it does, which model it uses, and what it writes. Includes the merge step and a breakdown of the five portrait categories.</li>
                     <li><strong>ⓘ info popovers everywhere</strong> — long grey descriptions across all settings pages moved behind hover/click ⓘ badges. Every page reads dramatically cleaner; the details are still one hover away.</li>
                     <li><strong>Category-based blacklists</strong> — screen, typing and audio ignore lists now accept whole app categories (e.g. all password managers) and URLs, with unified chip styling.</li>
@@ -42,6 +41,10 @@
                     <li>Manual "Process events now" skipped the folder-classification step that the scheduled run does.</li>
                     <li>Codex credentials warned about expiry even when they would auto-renew.</li>
                     <li>OCR backfill: fixed an off-by-one frame, added resume-from-checkpoint and busy-timeout handling.</li>
+                </ul>
+                <h3>For developers</h3>
+                <ul>
+                    <li><strong>Dev mode</strong> — a demo environment for debugging and screen recordings: one click switches the UI to made-up data (<code>~/.portrait-dev</code>) with a fake persona, while capture and pipelines keep running on your real data. Settings changes stay in the demo config; a title-bar banner keeps you oriented.</li>
                 </ul>
             ]]></description>
             <enclosure
