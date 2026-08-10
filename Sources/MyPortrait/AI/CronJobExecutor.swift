@@ -84,7 +84,11 @@ enum CronJobExecutor {
         }
 
         // 2. New conv in the store, titled after cronJob + timestamp.
-        let store = ChatStore.shared
+        // **ChatStore.live 而不是 .shared** —— cron_jobs/ 不跟 dev mode 走,
+        // 它的 runs.json 记在真实那份;会话要是落进 dev 库,两边就对不上号
+        // (真实侧 CRON JOB HISTORY 出现点开是空的条目)。定时任务产出的是
+        // 真实结果,会话就该跟 runs.json 待在同一个根下。
+        let store = ChatStore.live
         let stampFmt = DateFormatter()
         stampFmt.dateFormat = "HH:mm"
         let conv = store.createConversation(

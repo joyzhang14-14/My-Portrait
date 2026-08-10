@@ -87,7 +87,7 @@ final class CronJobStore {
             // 完全不是用户预期的"超 cap 自动 GC"行为。
             let dropped = cronJobs[i].runs.suffix(from: cap)
             for r in dropped {
-                ChatStore.shared.deleteConversation(r.convId)
+                ChatStore.live.deleteConversation(r.convId)
             }
             cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
         }
@@ -106,7 +106,7 @@ final class CronJobStore {
         for i in cronJobs.indices where cronJobs[i].runs.count > cap {
             let dropped = cronJobs[i].runs.suffix(from: cap)
             for r in dropped {
-                ChatStore.shared.deleteConversation(r.convId)
+                ChatStore.live.deleteConversation(r.convId)
             }
             cronJobs[i].runs = Array(cronJobs[i].runs.prefix(cap))
             changed = true

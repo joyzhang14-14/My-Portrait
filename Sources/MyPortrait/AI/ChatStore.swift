@@ -20,14 +20,37 @@ private struct BackgroundChatMessages: @unchecked Sendable {
 @MainActor
 @Observable
 final class ChatStore {
+    /// 界面用的那份 —— 跟 dev mode 走(`AIPaths.chatDB`)。
     static let shared = ChatStore()
+
+    /// **永远指真实 `~/.portrait/chat.sqlite`** 的那份,给后台定时任务用。
+    ///
+    /// 为什么需要它:`cron_jobs/` 不跟 dev mode 走(定时任务照常按真实配置
+    /// 出结果),但 `chat.sqlite` 跟着走。两者错配的后果实测过:
+    ///   - dev mode 期间跑的 cron,会话落进 dev 库,`runs.json` 却记在真实那份
+    ///     → 真实侧 CRON JOB HISTORY 里出现点开是空的条目;
+    ///   - 超 cap 裁剪时 `deleteConversation` 打在 dev 库上,影响 0 行,真实库
+    ///     里那条会话活了下来又反查不到 run → **回弹到 RECENTS**。
+    ///
+    /// 非 dev mode 下直接复用 `shared`(同一个文件开两个连接会让两份
+    /// in-memory `conversations` 各走各的,界面看不到 cron 刚写进去的会话)。
+    static var live: ChatStore { DevMode.isOn ? realRoot : shared }
+
+    /// `static let` 是惰性的 —— 只有 dev mode 下取 `live` 才会真的建起来,
+    /// 普通运行时这个连接根本不存在。
+    private static let realRoot = ChatStore(
+        dbURL: Storage.rootURL.appendingPathComponent("chat.sqlite")
+    )
 
     private(set) var conversations: [Conversation] = []
 
+    /// 这个实例连的库。`shared` 用 `AIPaths.chatDB`(跟 dev 走)。
+    private let dbURL: URL
     private var db: OpaquePointer?
     nonisolated(unsafe) private static let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    private init() {
+    private init(dbURL: URL? = nil) {
+        self.dbURL = dbURL ?? AIPaths.chatDB
         try? AIPaths.ensureExists()
         openDB()
         createSchema()
@@ -359,7 +382,7 @@ final class ChatStore {
     private func openDB() {
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
-        if sqlite3_open_v2(AIPaths.chatDB.path, &handle, flags, nil) == SQLITE_OK {
+        if sqlite3_open_v2(dbURL.path, &handle, flags, nil) == SQLITE_OK {
             self.db = handle
             sqlite3_exec(handle, "PRAGMA journal_mode=WAL;", nil, nil, nil)
             sqlite3_exec(handle, "PRAGMA busy_timeout=5000;", nil, nil, nil)
