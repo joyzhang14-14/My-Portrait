@@ -29,6 +29,8 @@ struct MemoryTextSettingsView: View {
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 放得下就完全固定,超出才可滚(同 SettingsPage / onboarding)。
+        .scrollBounceBehavior(.basedOnSize)
         .background(SidebarBackdrop().ignoresSafeArea())
     }
 }

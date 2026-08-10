@@ -267,6 +267,10 @@ struct SettingsPage<Content: View>: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 内容一屏放得下时完全固定,超出才可滚 —— 同 onboarding。
+        // 卡片少的页(General / Display / Import)原本也能橡皮筋式上下拖,
+        // 看着像下面还藏着东西。挂在 SettingsPage 上,所有设置页一次生效。
+        .scrollBounceBehavior(.basedOnSize)
         .background(SidebarBackdrop())
     }
 }

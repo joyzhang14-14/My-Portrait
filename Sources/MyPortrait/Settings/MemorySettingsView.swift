@@ -209,6 +209,8 @@ struct MemorySettingsView: View {
             // 内层的 VStack 上 —— 挂整页会连滚动手势一起禁,页面卡死。
             .disabled(DevMode.isOn)
         }
+        // 放得下就完全固定,超出才可滚(同 SettingsPage / onboarding)。
+        .scrollBounceBehavior(.basedOnSize)
         .task { reload() }
         // 调度器实时信号 → 刷新本页缓存。后台(定时)触发的 run 不经过本页
         // 点击路径,没有这组 onChange 时:run 开始 dbInProgress 缓存还是
