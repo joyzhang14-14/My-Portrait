@@ -678,6 +678,8 @@ private struct MemoryProviderStep: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 放得下就完全固定,超出才可滚(同 Permissions 步)。
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     /// provider 配置已 per-pipeline(SchedulerConfig)。onboarding 只让用户选一次,
@@ -844,6 +846,8 @@ private struct SchedulerStep: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 放得下就完全固定,超出才可滚(同 Permissions 步)。
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     @ViewBuilder
@@ -926,6 +930,8 @@ private struct SpeakerTrainingStep: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 放得下就完全固定,超出才可滚(同 Permissions 步)。
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
