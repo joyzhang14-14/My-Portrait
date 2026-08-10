@@ -1924,6 +1924,8 @@ struct MemorySettingsView: View {
             body()
         }
         .padding(16)
+        // 卡片本身不参与拖窗(同 SettingsCard)。
+        .blocksWindowDrag()
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(NSColor.windowBackgroundColor).opacity(0.85))

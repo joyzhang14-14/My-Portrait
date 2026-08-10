@@ -502,6 +502,8 @@ private struct UnidentifiedCard: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            // Menu 不认领拖拽手势,不挡的话按住它拖会把整个窗口拽走。
+            .blocksWindowDrag()
         }
         .padding(14)
         .background(

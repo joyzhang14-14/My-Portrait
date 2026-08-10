@@ -164,6 +164,23 @@ struct SidebarBackdrop: View {
     }
 }
 
+// MARK: - 拖窗防护
+
+extension View {
+    /// 挡住「按住拖动 = 拖窗」。
+    ///
+    /// 右侧画布那一层挂了 `WindowDragGesture()`(见 ContentView.mainSplit),
+    /// 靠的是"子视图手势优先于父视图"—— Button 自带按压手势所以天然免疫,
+    /// 但 **Menu / Picker 这类下拉触发区不认领拖拽**,不挡的话在它们身上按住
+    /// 拖会把整个窗口拽走。
+    ///
+    /// `DragGesture()` 的 minimumDistance 是默认的 10pt:点击(零位移)照常
+    /// 穿过去交给控件,只有真的拖起来才被这条空手势吃掉。
+    func blocksWindowDrag() -> some View {
+        gesture(DragGesture().onChanged { _ in })
+    }
+}
+
 // MARK: - Bouncy button
 
 /// Button style that renders the label exactly like `.plain` (no chrome of

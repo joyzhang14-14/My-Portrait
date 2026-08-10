@@ -369,6 +369,9 @@ struct CronJobQuickEditor: View {
         }
         .padding(20)
         .frame(width: 480)
+        // 编辑面板整块不参与拖窗 —— 里面的 Picker / Menu 不认领拖拽手势,
+        // 不挡的话按住下拉框拖会把整个窗口拽走。
+        .blocksWindowDrag()
     }
 
     /// Multi-select menu over connected integrations. Toggling a row adds /

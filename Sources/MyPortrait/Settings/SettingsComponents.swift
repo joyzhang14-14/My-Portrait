@@ -32,6 +32,10 @@ struct SettingsCard<Content: View>: View {
             VStack(spacing: 0) {
                 content()
             }
+            // 卡片本身不参与拖窗 —— 拖窗留给卡片之外的画布。挂在容器上而不是
+            // 逐个控件挂,是因为卡片里的 Picker / Menu 有几十个,漏一个就又能
+            // 把窗口拽走(Button 自带按压手势,不需要这层)。
+            .blocksWindowDrag()
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(.ultraThinMaterial)
