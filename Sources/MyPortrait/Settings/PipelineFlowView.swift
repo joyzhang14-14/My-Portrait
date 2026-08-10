@@ -33,6 +33,9 @@ struct PipelineFlow {
         case wrap
         /// 触发关系:不传数据,只是把下游标成待跑。虚线 + 箭头。
         case trigger
+        /// 侧向注释:从节点右边框水平出线到注释节点左边框,虚线。
+        /// 语义是"解释/展开",不是流程的一步 —— 注释节点不再接回主干。
+        case note
     }
 
     struct Node: Identifiable {
@@ -118,8 +121,9 @@ struct PipelineFlowView: View {
         let ax = a.pos.x * size.width, ay = a.pos.y * size.height
         let bx = b.pos.x * size.width, by = b.pos.y * size.height
         let halfH = Self.nodeH / 2
-        let color = Color.primary.opacity(kind == .trigger ? 0.18 : 0.28)
-        let style: StrokeStyle = kind == .trigger
+        let dashed = kind == .trigger || kind == .note
+        let color = Color.primary.opacity(dashed ? 0.18 : 0.28)
+        let style: StrokeStyle = dashed
             ? StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [4, 4])
             : StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round)
 
@@ -127,7 +131,18 @@ struct PipelineFlowView: View {
         var tip = CGPoint.zero          // 箭头尖
         var facing = Facing.down
 
-        if kind == .wrap {
+        if kind == .note {
+            // 侧向注释:右边框 → 左边框,水平方向的三次贝塞尔(控制点只在
+            // x 上伸,y 各贴自己那端),上下方向的目标都走得顺。
+            let p0 = CGPoint(x: ax + Self.width(of: a) / 2, y: ay)
+            tip = CGPoint(x: bx - Self.width(of: b) / 2, y: by)
+            let dx = (tip.x - p0.x) * 0.55
+            path.move(to: p0)
+            path.addCurve(to: tip,
+                          control1: CGPoint(x: p0.x + dx, y: p0.y),
+                          control2: CGPoint(x: tip.x - dx, y: tip.y))
+            facing = .right
+        } else if kind == .wrap {
             // 下 → 横 → 下。折点落在两行正中间。
             let midY = (ay + halfH + by - halfH) / 2
             let p0 = CGPoint(x: ax, y: ay + halfH)
@@ -444,73 +459,70 @@ extension PipelineFlow {
                 kind: .source,
                 chip: "events/",
                 detail: "Not one day — the whole tree. The distiller reads every event that isn't archived yet, which is why a portrait entry can be backed by things that happened months apart.\n\nEvents come from the Events Processor; days that failed there have their events removed, so only clean days ever reach here.",
-                pos: CGPoint(x: 0.5, y: 0.083)
+                pos: CGPoint(x: 0.30, y: 0.09)
             ),
             Node(
                 id: "group",
                 title: "Sort into categories",
                 kind: .deterministic,
                 detail: "No AI. Two passes over the disk:\n\n• Every event is filed under the portrait categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing portrait entries are re-weighted first, so an entry that nothing touched this round still decays with time instead of sitting frozen.\n\nCategories with no events and no existing entries are skipped entirely — no tokens spent on nothing.",
-                pos: CGPoint(x: 0.5, y: 0.389)
+                pos: CGPoint(x: 0.30, y: 0.34)
             ),
             Node(
                 id: "distill",
                 title: "Distill each category",
                 kind: .llm,
                 chip: "main model",
-                detail: "One round trip per category — each branch below is one of those calls. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
-                pos: CGPoint(x: 0.5, y: 0.55)
+                detail: "One round trip per category — the column on the right lists them. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
+                pos: CGPoint(x: 0.30, y: 0.60)
             ),
-            // 五个类别分支 —— 同一轮 distill 的多路产出(每类一次 LLM 往返)。
-            // narrow 盒子一行摆下;详情各写各的"这一类装什么"。
+            // 五个类别 —— 挂在右侧的**注释列**(08-10 用户三稿):不是流程的
+            // 步骤,是"distill 都分成哪些 portrait"的展开说明,所以 note 虚线
+            // 从 distill 侧向引出、**不接回 archive**。主干整体左移让位。
             // (emotions 08-10 前端下线,不再展示;pipeline 的彻底移除挂账。)
             Node(
                 id: "cat_experiences", title: "Experiences", kind: .llm,
                 detail: "Chapters of your life as lived — projects, trips, milestones, hard weeks. Events that tell a story over time end up here.\n\nWritten to portrait/experiences/.",
-                pos: CGPoint(x: 0.10, y: 0.74), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.28), narrow: true
             ),
             Node(
                 id: "cat_social", title: "Social", kind: .llm,
                 detail: "Who shows up in your life and how — collaborators, friends, communities, how you host and keep in touch.\n\nWritten to portrait/social/.",
-                pos: CGPoint(x: 0.30, y: 0.74), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.42), narrow: true
             ),
             Node(
                 id: "cat_background", title: "Background", kind: .llm,
                 detail: "The slow-moving facts — where you work and study, where you're from, the long arcs everything else sits on.\n\nWritten to portrait/background/.",
-                pos: CGPoint(x: 0.50, y: 0.74), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.56), narrow: true
             ),
             Node(
                 id: "cat_interests", title: "Interests", kind: .llm,
                 detail: "What you keep coming back to unprompted — topics, hobbies, rabbit holes. Recurrence is the signal here.\n\nWritten to portrait/interests/.",
-                pos: CGPoint(x: 0.70, y: 0.74), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.70), narrow: true
             ),
             Node(
                 id: "cat_skills", title: "Skills", kind: .llm,
                 detail: "What you can actually do, with evidence — languages, tools, crafts, and how deep each one goes.\n\nWritten to portrait/skills/.",
-                pos: CGPoint(x: 0.90, y: 0.74), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.84), narrow: true
             ),
             Node(
                 id: "archive",
                 title: "Archive faded entries",
                 kind: .deterministic,
                 detail: "No AI. A sweep over the portrait tree right after it was updated: any entry whose weight has dropped below the archive threshold and that hasn't been touched for long enough is moved to the archive.\n\nNothing is deleted — archived entries stay on disk and stop showing up in your portrait. Pinned entries are never archived. Both limits live in Settings → Memory.",
-                pos: CGPoint(x: 0.5, y: 0.92)
+                pos: CGPoint(x: 0.30, y: 0.88)
             ),
         ],
         edges: [
             Edge(from: "events", to: "group",
                  label: "Marked pending whenever new events land"),
             Edge(from: "group", to: "distill"),
-            Edge(from: "distill", to: "cat_experiences"),
-            Edge(from: "distill", to: "cat_social"),
-            Edge(from: "distill", to: "cat_background"),
-            Edge(from: "distill", to: "cat_interests"),
-            Edge(from: "distill", to: "cat_skills"),
-            Edge(from: "cat_experiences", to: "archive"),
-            Edge(from: "cat_social", to: "archive"),
-            Edge(from: "cat_background", to: "archive"),
-            Edge(from: "cat_interests", to: "archive"),
-            Edge(from: "cat_skills", to: "archive"),
+            Edge(from: "distill", to: "cat_experiences", kind: .note),
+            Edge(from: "distill", to: "cat_social", kind: .note),
+            Edge(from: "distill", to: "cat_background", kind: .note),
+            Edge(from: "distill", to: "cat_interests", kind: .note),
+            Edge(from: "distill", to: "cat_skills", kind: .note),
+            Edge(from: "distill", to: "archive"),
         ],
         height: 520
     )
