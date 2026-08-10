@@ -33,7 +33,7 @@ enum EventJobStagedCLI {
     @MainActor
     private static func runImpl() async throws {
         // 拒绝条件:已有 pending review,UI 还没拍板,不该再跑覆盖。
-        if MemoryStaging.hasPending(.events) {
+        if MemoryStaging.hasPending(.events, root: Storage.rootURL) {
             throw ExitError(code: 2, msg: "events kind has pending review — Approve/Reject in UI first.")
         }
         guard MemoryScheduler.shared.eventJobHasWork() else {
@@ -41,21 +41,21 @@ enum EventJobStagedCLI {
             return
         }
 
-        try MemoryStaging.beginRun(.events)
+        try MemoryStaging.beginRun(.events, root: Storage.rootURL)
         print("[event-staged] beginRun OK — backup at ~/.portrait/.staging/events_backup")
         print("[event-staged] running scheduler.runEventJob…")
 
         let outcome = await MemoryScheduler.shared.runEventJob()
         switch outcome {
         case .ran(let days):
-            try? MemoryStaging.markRan(.events, days: days)
+            try? MemoryStaging.markRan(.events, days: days, root: Storage.rootURL)
             print("[event-staged] ✅ run complete — \(days.count) day(s): \(days.joined(separator: ", "))")
             print("[event-staged] open UI → Memory → Scheduler → Pending review to Approve or Reject.")
         case .noWork:
-            try? MemoryStaging.approve(.events)
+            try? MemoryStaging.approve(.events, root: Storage.rootURL)
             print("[event-staged] no work — staging discarded.")
         case .busy:
-            try? MemoryStaging.approve(.events)
+            try? MemoryStaging.approve(.events, root: Storage.rootURL)
             throw ExitError(code: 1, msg: "scheduler reports busy — another job already running.")
         }
     }

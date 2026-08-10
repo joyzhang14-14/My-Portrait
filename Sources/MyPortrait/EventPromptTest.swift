@@ -976,13 +976,13 @@ enum DistillStagedCLI {
         let state = State()
         Task.detached {
             do {
-                try MemoryStaging.beginRun(.portrait)
+                try MemoryStaging.beginRun(.portrait, root: Storage.rootURL)
                 print("snapshot: portrait/ → .staging/portrait_backup/")
                 let distiller = await PortraitDistiller()
                 let r = try await distiller.distill { p in
                     print("category \(p.categoryIndex + 1)/\(p.categoryCount): \(p.category) — written so far \(p.written)")
                 }
-                try MemoryStaging.markRan(.portrait, days: [ProcessingLogStore.distillAnchorDate])
+                try MemoryStaging.markRan(.portrait, days: [ProcessingLogStore.distillAnchorDate], root: Storage.rootURL)
                 print("=== distill done (staged for review) ===")
                 print("written \(r.portraitFilesWritten) / updated \(r.portraitFilesUpdated) / archived \(r.archivedCount)")
                 print("LLM-failed categories: \(r.llmFailedCategories)")

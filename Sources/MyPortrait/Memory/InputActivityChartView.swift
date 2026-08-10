@@ -63,7 +63,11 @@ struct InputActivityChartView: View {
     @State private var reloadGen = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    private var store: WritingCaptureStore? { WritingCaptureWorker.shared?.store }
+    // dev mode 不读真实打字库(08-10 用户):演示里不能出现真实击键。
+    // dev 目录没有 portrait.sqlite → 返回 nil,页面走空态。
+    private var store: WritingCaptureStore? {
+        DevMode.isOn ? nil : WritingCaptureWorker.shared?.store
+    }
 
     var body: some View {
         VStack(spacing: 0) {

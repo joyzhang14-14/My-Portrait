@@ -542,9 +542,9 @@ final class MemoryScheduler {
 
         // 有手动触发的结果在等审核 / AI 编辑 draft 在等审 → 暂停定时调度,
         // 避免 distill / personality 跑完覆盖了用户没拍板的改动。
-        guard !MemoryStaging.hasPending(.events),
-              !MemoryStaging.hasPending(.portrait),
-              !MemoryStaging.hasPending(.personality),
+        guard !MemoryStaging.hasPending(.events, root: Storage.rootURL),
+              !MemoryStaging.hasPending(.portrait, root: Storage.rootURL),
+              !MemoryStaging.hasPending(.personality, root: Storage.rootURL),
               !EditDraft.hasAnyPending() else {
             schedLog.info("tick: manual run / AI edit draft pending — skip")
             return
@@ -1525,9 +1525,9 @@ final class MemoryScheduler {
     /// 清单还没写),在那里清会误杀活着的 run。
     private func discardOrphanStagingSnapshots() {
         for k in [MemoryStaging.Kind.events, .portrait, .personality]
-        where MemoryStaging.isOrphan(k) {
+        where MemoryStaging.isOrphan(k, root: Storage.rootURL) {
             do {
-                try MemoryStaging.discardOrphan(k)
+                try MemoryStaging.discardOrphan(k, root: Storage.rootURL)
                 schedLog.notice("discarded orphan staging snapshot '\(k.rawValue, privacy: .public)' (run crashed before manifest) — scheduled jobs unblocked")
                 print("[Scheduler] discarded orphan staging snapshot '\(k.rawValue)' (run crashed mid-way; live tree kept)")
             } catch {
@@ -1588,9 +1588,9 @@ final class MemoryScheduler {
         // 回滚会抹掉多天 run 里已 complete 的天);中断那天的半成品由上面的
         // paused 回收 deleteEvents + 重跑清理。多 row 同 stage 也只 reject
         // 一次(MemoryStaging 是 kind-级)。
-        for k in pausedKinds where MemoryStaging.hasPending(k) {
+        for k in pausedKinds where MemoryStaging.hasPending(k, root: Storage.rootURL) {
             do {
-                try MemoryStaging.reject(k)
+                try MemoryStaging.reject(k, root: Storage.rootURL)
                 print("[Scheduler] rejected staging '\(k.rawValue)' on pause (snapshot discarded, live tree kept)")
             } catch {
                 schedLog.error("staging \(k.rawValue, privacy: .public) reject failed: \(error.localizedDescription, privacy: .public)")
