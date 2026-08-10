@@ -583,10 +583,16 @@ private struct ConnectAIStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            StepHeader(
-                title: "Connect an AI",
-                info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything."
-            )
+            VStack(alignment: .leading, spacing: 6) {
+                StepHeader(
+                    title: "Connect an AI",
+                    info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything."
+                )
+                Text("Complex tasks still need a stronger cloud AI. The goal is to eventually run everything locally and privately.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             .padding(.horizontal, 32)
             .padding(.top, 24)
             .padding(.bottom, 12)
