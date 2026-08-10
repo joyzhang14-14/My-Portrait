@@ -96,9 +96,14 @@ struct ConnectionsView: View {
             }
             // 跟 SettingsPage 同款 padding —— horizontal 28 + top 30 + bottom 40。
             // 之前 top 22 让标题贴顶,跟其他 Settings 页对比"挤上去"了。
+            //
+            // 内嵌进 onboarding 时(showsHeader=false)大幅收紧:那 70pt 上下
+            // 留白是给"整页只有这一块"准备的,嵌进去之后上面已经有步骤标题、
+            // 下面还有一条状态栏,照搬就会把 tile 网格顶出视口 —— 明明一屏
+            // 装得下却出滚动条。
             .padding(.horizontal, 28)
-            .padding(.top, 30)
-            .padding(.bottom, 40)
+            .padding(.top, showsHeader ? 30 : 6)
+            .padding(.bottom, showsHeader ? 40 : 12)
             .frame(maxWidth: 920)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
