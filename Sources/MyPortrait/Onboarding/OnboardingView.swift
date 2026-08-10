@@ -936,8 +936,11 @@ private struct SpeakerTrainingStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                StepHeader(title: "Train your voice")
-                Text("This is what audio recognition uses to tell your voice apart from everyone else's. You can also do it later in Settings → Speakers.")
+                StepHeader(
+                    title: "Train your voice",
+                    info: "You can also do this later in Settings → Speakers, and retrain any time — the newest recording replaces the old voiceprint."
+                )
+                Text("This is what audio recognition uses to tell your voice apart from everyone else's.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -780,8 +780,11 @@ struct VoiceTrainingCard: View {
     private var name: String { trainingName }
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
     private var micGranted: Bool { monitor.microphone == .granted }
+    /// 按钮灰不灰。**麦克风权限不在这里** —— 没权限时按钮照常可点,点了
+    /// 去要权限(见 startTraining)。灰着一个按钮 + 一行"去系统设置开"
+    /// 等于把用户支走,他多半就不回来了。
     private var blocked: Bool {
-        trimmedName.isEmpty || !micGranted || trainer.isRunning
+        trimmedName.isEmpty || trainer.isRunning
     }
 
     private var suggestions: [String] {
@@ -843,7 +846,7 @@ struct VoiceTrainingCard: View {
             }
 
             if !micGranted {
-                warningRow("Microphone permission needed — grant it in System Settings → Privacy.")
+                warningRow("Microphone access needed — Start training will ask for it.")
             }
 
             HStack {
@@ -926,6 +929,19 @@ struct VoiceTrainingCard: View {
 
     private func startTraining() {
         guard !blocked else { return }
+        // 没麦克风权限:先要权限,这一次不开始训练(用户批完再点一次)。
+        //
+        // 分两条路 —— `requestAccess` 只在**从没问过**时才弹系统对话框;
+        // 用户以前拒过的话它立刻返回 false、一个窗口都不弹,按钮看着就像
+        // 坏了。所以拒过的直接跳系统设置面板。
+        guard micGranted else {
+            if monitor.microphone == .notDetermined {
+                monitor.requestMicrophone()
+            } else {
+                monitor.openSettings(for: .microphone)
+            }
+            return
+        }
         // 上次训练失败(故意的 "got 0s" 太短保护等)后 phase 停在 .failure,
         // VoiceTrainer.start() 的 `guard case .idle` 会拒绝重新起来 → 卡住。
         // 每次点 Start 先 reset 回 idle,让用户能直接重试。
@@ -982,7 +998,7 @@ struct VoiceTrainingCard: View {
                 .font(.system(size: 10))
             Text(text).font(.system(size: 11))
         }
-        .foregroundStyle(Color.orange.opacity(0.85))
+        .foregroundStyle(Color.red.opacity(0.85))
     }
 }
 
