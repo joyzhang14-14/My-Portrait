@@ -121,11 +121,10 @@ struct MemorySettingsView: View {
     let tab: Tab
 
     var body: some View {
-        // dev mode 整页只读 —— 这页写的是 memory / scheduler 两个后台 section,
-        // 而且"Run now"跑的是真实 pipeline(读写 ~/.portrait)。在演示界面里
-        // 点它既看不到效果,又会真的动到你本人的记忆。
+        // dev mode 只读的 .disabled 挂在 pageBody 里 ScrollView **内层**的
+        // VStack 上,不在这里 —— 挂整页会把 ScrollView 一起 disable,macOS 上
+        // 连滚动手势都被禁,页面直接"卡死"(08-09 用户实测)。
         writingStyleModals(pageBody)
-            .disabled(DevMode.isOn)
     }
 
     private var pageBody: some View {
@@ -205,6 +204,10 @@ struct MemorySettingsView: View {
             .padding(.bottom, 40)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // dev mode 整页只读:memory / scheduler 是后台 section,"Run now"
+            // 跑的是真实 pipeline(读写 ~/.portrait)。⚠️ 必须挂在 ScrollView
+            // 内层的 VStack 上 —— 挂整页会连滚动手势一起禁,页面卡死。
+            .disabled(DevMode.isOn)
         }
         .task { reload() }
         // 调度器实时信号 → 刷新本页缓存。后台(定时)触发的 run 不经过本页

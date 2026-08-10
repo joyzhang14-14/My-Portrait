@@ -56,72 +56,77 @@ struct ImportSettingsView: View {
         // dev mode 整页只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
         // 演示模式下点它没有任何合理用途,只会污染你本人的采集库。
         SettingsPage("Import") {
-            SettingsCard(
-                title: "Import from screenpipe",
-                info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
-            ) {
-                if scanning {
-                    scanningRow
-                } else if scan == nil {
-                    notScannedBlock          // 手动模式:还没扫过
-                } else if let s = scan, s.exists {
-                    foundBlock(s)
-                } else {
-                    notFoundBlock
+            Group {
+                SettingsCard(
+                    title: "Import from screenpipe",
+                    info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
+                ) {
+                    if scanning {
+                        scanningRow
+                    } else if scan == nil {
+                        notScannedBlock          // 手动模式:还没扫过
+                    } else if let s = scan, s.exists {
+                        foundBlock(s)
+                    } else {
+                        notFoundBlock
+                    }
+                    if let p = progress, running {
+                        SettingsDivider()
+                        progressBlock(p)
+                    }
+                    if !statusLines.isEmpty {
+                        SettingsDivider()
+                        statusBlock
+                    }
+                    if let r = lastReport {
+                        SettingsDivider()
+                        summaryBlock(r)
+                    }
+                    if let err = errorMessage {
+                        SettingsDivider()
+                        errorBlock(err)
+                    }
                 }
-                if let p = progress, running {
-                    SettingsDivider()
-                    progressBlock(p)
-                }
-                if !statusLines.isEmpty {
-                    SettingsDivider()
-                    statusBlock
-                }
-                if let r = lastReport {
-                    SettingsDivider()
-                    summaryBlock(r)
-                }
-                if let err = errorMessage {
-                    SettingsDivider()
-                    errorBlock(err)
-                }
-            }
 
-            // 两个 CLI 来源并成一张卡 —— 它们做的是同一件事(把你打给
-            // coding agent 的 prompt 收进写作),各自的说明进各自那行的 ⓘ。
-            SettingsCard(title: "Import from CLI AI tools") {
-                cliSourceBlock(
-                    icon: "ClaudeCode",
-                    title: "Claude Code CLI",
-                    info: "Brings in the prompts you typed into Claude Code CLI and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
-                    sessions: ccSessions,
-                    count: ccCount,
-                    lastTs: ccLastTs,
-                    running: ccRunning,
-                    progress: ccProgress,
-                    status: ccStatus,
-                    scanning: ccScanning,
-                    rescanAction: { await rescanClaudeCode() },
-                    importAction: { await runImport(app: "claude-code") }
-                )
-                SettingsDivider()
-                cliSourceBlock(
-                    icon: "Codex",
-                    title: "Codex CLI",
-                    info: "Brings in the prompts you typed into Codex CLI and counts them toward your writing.\n\nOnly your own messages are imported. Importing again won't create duplicates.",
-                    sessions: codexSessions,
-                    count: codexCount,
-                    lastTs: codexLastTs,
-                    running: codexRunning,
-                    progress: codexProgress,
-                    status: codexStatus,
-                    scanning: codexScanning,
-                    rescanAction: { await rescanCodex() },
-                    importAction: { await runImport(app: "codex-cli") }
-                )
+                // 两个 CLI 来源并成一张卡 —— 它们做的是同一件事(把你打给
+                // coding agent 的 prompt 收进写作),各自的说明进各自那行的 ⓘ。
+                SettingsCard(title: "Import from CLI AI tools") {
+                    cliSourceBlock(
+                        icon: "ClaudeCode",
+                        title: "Claude Code CLI",
+                        info: "Brings in the prompts you typed into Claude Code CLI and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
+                        sessions: ccSessions,
+                        count: ccCount,
+                        lastTs: ccLastTs,
+                        running: ccRunning,
+                        progress: ccProgress,
+                        status: ccStatus,
+                        scanning: ccScanning,
+                        rescanAction: { await rescanClaudeCode() },
+                        importAction: { await runImport(app: "claude-code") }
+                    )
+                    SettingsDivider()
+                    cliSourceBlock(
+                        icon: "Codex",
+                        title: "Codex CLI",
+                        info: "Brings in the prompts you typed into Codex CLI and counts them toward your writing.\n\nOnly your own messages are imported. Importing again won't create duplicates.",
+                        sessions: codexSessions,
+                        count: codexCount,
+                        lastTs: codexLastTs,
+                        running: codexRunning,
+                        progress: codexProgress,
+                        status: codexStatus,
+                        scanning: codexScanning,
+                        rescanAction: { await rescanCodex() },
+                        importAction: { await runImport(app: "codex-cli") }
+                    )
+                }
             }
+            // dev mode 只读:必须挂在 SettingsPage(内含 ScrollView)
+            // **里面**的内容上 —— 挂整页会连滚动手势一起禁,页面
+            // 直接卡死(08-09 用户实测,Memory 页同案)。
+            .disabled(DevMode.isOn)
         }
-        .disabled(DevMode.isOn)
         // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
         // 「未扫描」+ Scan 按钮,用户点了才扫(原 auto-scan 开关已删)。
     }
