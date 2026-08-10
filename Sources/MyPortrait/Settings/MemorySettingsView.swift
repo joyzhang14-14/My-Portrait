@@ -11,6 +11,10 @@ struct MemorySettingsView: View {
 
     @State private var attention: [MemoryScheduler.AttentionItem] = []
     @State private var changelog: [ProcessingLogStore.PipelineRunRecord] = []
+    /// 首次扫表是否已回来。**没这个标记就分不清"还在查"和"查完是空的"** ——
+    /// 扫的是同步 sqlite,放后台跑,这期间两个列表都是空数组,直接照空态渲染
+    /// 就会先闪一下 "No pipeline runs recorded yet.",再被真数据顶掉。
+    @State private var changelogLoaded = false
 
     /// 手动触发的 pipeline 阶段（都烧 LLM token）。两个，对齐调度器的两个
     /// scheduler。Rebalance 不在列 —— 程序化的，已挂成 hook 在 rescore 后自动跑。
@@ -263,6 +267,7 @@ struct MemorySettingsView: View {
                 attention = att
                 attentionDbRows = rows
                 changelog = log
+                changelogLoaded = true
             }
         }
         refreshStaging()
@@ -1558,7 +1563,9 @@ struct MemorySettingsView: View {
             title: "Pipeline run history",
             info: "The last 50 memory-pipeline runs — both manual and scheduled, newest first."
         ) {
-            if changelog.isEmpty {
+            if !changelogLoaded {
+                loadingRow("Loading run history…")
+            } else if changelog.isEmpty {
                 Text("No pipeline runs recorded yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -1569,6 +1576,18 @@ struct MemorySettingsView: View {
                 }
             }
         }
+    }
+
+    /// 「正在查」的占位行 —— 转圈 + 一句话,跟空态行同一个字号和位置。
+    @ViewBuilder
+    private func loadingRow(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// outcome → (展示文案, 颜色)。
