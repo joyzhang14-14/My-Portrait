@@ -277,7 +277,8 @@ struct PipelineFlowView: View {
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.6)
                     .foregroundStyle(s.tint.opacity(0.9))
-                Text(n.detail)
+                // 走 markdown —— 说明里的关键词加粗,给不逐字读的人扫。
+                Text(Markdown.inline(n.detail))
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.textPrimary.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
@@ -374,7 +375,7 @@ extension PipelineFlow {
                 title: "Captured day",
                 kind: .source,
                 chip: "~/.portrait",
-                detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing events. This is the only input — nothing is invented later.",
+                detail: "One UTC day of raw capture: screenshots and their OCR text, audio transcripts with speakers, and your typing. **This is the only input** — nothing is invented later.",
                 pos: CGPoint(x: 0.5, y: 0.05)
             ),
             Node(
@@ -382,7 +383,7 @@ extension PipelineFlow {
                 title: "Build events",
                 kind: .llm,
                 chip: "main model",
-                detail: "Reads the whole day's timeline and clusters it into discrete events — one file per event under events/<day>/. This is where a scroll of raw activity turns into \"what actually happened\".\n\nA day is only picked up once it's actually over — UTC midnight plus a 10-minute grace period, so transcripts and OCR that are still finishing up land in time. Days that aren't ready are skipped and retried on the next tick (every 15 minutes).",
+                detail: "Reads the whole day and clusters it into events — **one Markdown file per event**, written to `~/.portrait/events/<day>/`.\n\nA day is only picked up once it is over: **UTC midnight plus 10 minutes**, so transcripts and OCR that are still finishing land in time. Days that aren't ready are retried every 15 minutes.",
                 pos: CGPoint(x: 0.5, y: 0.196)
             ),
             Node(
@@ -390,7 +391,7 @@ extension PipelineFlow {
                 title: "Merge repeats",
                 kind: .llm,
                 chip: "main model",
-                detail: "While building, the model also sees your recent events as merge candidates. A cluster that's really the same thing again — you came back to the same work, the same trip planning, the same game — doesn't become a duplicate file: it merges into the existing event.\n\nMerging bumps the event's occurrence count by one and attaches the new day's frames. Repeats are a strong signal — an event seen on more days decays slower, so recurring things naturally outlive one-offs. Title and summary stay as first written.",
+                detail: "While building, the model also sees your recent events. A cluster that is the same thing again — same work, same trip planning, same game — **merges into the existing event** instead of becoming a second file.\n\nA merge adds one to the event's occurrence count and attaches the new day's frames. **Events seen on more days decay slower**, so recurring things outlive one-offs. Title and summary stay as first written.",
                 pos: CGPoint(x: 0.5, y: 0.341)
             ),
             Node(
@@ -398,14 +399,14 @@ extension PipelineFlow {
                 title: "Score impact",
                 kind: .llm,
                 chip: "main model",
-                detail: "Every event gets an impact score — how much this mattered to you. That score is what later decides which events survive in your memory and how big they show up in the Neural Graph.",
+                detail: "Every event gets an impact score — **how much it mattered to you**. That score decides which events survive in your memory, and how big they show up in the Neural Graph.",
                 pos: CGPoint(x: 0.5, y: 0.487)
             ),
             Node(
                 id: "weight",
                 title: "Weights + daily budget",
                 kind: .deterministic,
-                detail: "Two pure algorithms, no AI:\n\n• Weights — every event decays over time (exponential half-life), recomputed across the whole tree.\n\n• Daily budget — a busy day can't flood your memory. If a day's total impact exceeds the cap it's scaled back down; quiet days are left alone. Peak events above the protection threshold are never scaled.",
+                detail: "Two plain algorithms, **no AI**.\n\n• **Weights** — every event decays over time (exponential half-life), recomputed across the whole tree.\n\n• **Daily budget** — a busy day can't flood your memory. If a day's total impact goes over the cap it is scaled back down; quiet days are left alone. Peak events above the protection threshold are never scaled.",
                 pos: CGPoint(x: 0.5, y: 0.632)
             ),
             Node(
@@ -413,21 +414,21 @@ extension PipelineFlow {
                 title: "Group into folders",
                 kind: .llm,
                 chip: "light model",
-                detail: "Sorts events into project folders (events/_folders/*.json) — \"My Portrait\", \"UCI application\", and so on. Uses the light model because the decision is narrow: does this event belong in an existing folder, or does it need a new one?\n\nThis is the last step of the run.",
+                detail: "Sorts events into project folders, stored as `~/.portrait/events/_folders/*.json`. Uses the **light model** because the decision is narrow: does this event go in a folder that already exists, or does it need a new one?\n\n**Last step of the run.**",
                 pos: CGPoint(x: 0.5, y: 0.778)
             ),
             Node(
                 id: "distill",
                 title: "Portraits Distiller",
                 kind: .downstream,
-                detail: "Once events land, the portrait distiller is marked pending — it turns events into long-term portrait entries (experiences, social, and so on) on its own schedule.",
+                detail: "Once events land, the portrait distiller is **marked pending**. It turns events into long-term portrait entries — experiences, social, and so on — on its own schedule.",
                 pos: CGPoint(x: 0.27, y: 0.93)
             ),
             Node(
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
-                detail: "Each processed day is also marked pending for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
+                detail: "Each processed day is also **marked pending** for the personality refresher, which re-derives your personality tags from that day's events, the rest of the portrait, and OCR.",
                 pos: CGPoint(x: 0.73, y: 0.93)
             ),
         ],
