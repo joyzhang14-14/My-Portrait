@@ -600,6 +600,115 @@ def write_chat_db():
     con.close()
 
 
+# writing_style_review.json —— Writing Style Distiller 页「待审核」的演示内容。
+#
+# 这条链路的待审核数据在**真实 sqlite** 里(writing_style_runs /
+# writing_style_staged),dev mode 不切 DB,只能顶替查询结果。所以内容落成
+# 这个 JSON,app 在 dev mode 下直接读它(DevMode.demoWritingStyleRun 等)。
+#
+# ⚠️ 那条 CHANGED draft 的 existing_slug 指向 PORTRAIT["writing_style"] 里的
+# "Spanish slips in when delighted" —— 详情页 BEFORE 栏读的就是那个 .md。
+# 改那条的标题会让 slug 变、BEFORE 栏空掉,两边要一起改。
+WRITING_STYLE_REVIEW = {
+    "unprocessed_count": 18,
+    "run": {
+        "mode": "manual",
+        "started_at": "2026-08-09 09:14",
+        "duration_seconds": 180,
+        "records_count": 34,
+    },
+    "drafts": [
+        {
+            "action": "create",
+            "slug": "thinks_in_fragments_then_tightens",
+            "title": "Drafts in fragments, then tightens on a second pass",
+            "body":
+                "Alex rarely writes a finished sentence on the first try. Their edit logs show a "
+                "recognisable two-beat rhythm: a fast, comma-spliced first pass that gets the whole "
+                "thought onto the screen, then a slower pass that deletes the scaffolding.\n\n"
+                "A Slack message that shipped as \"Rolling this back — the retry loop double-counts "
+                "on 429s.\" started life as \"so i think what's happening is that when we get a 429 "
+                "we retry but the counter doesn't reset so it counts twice, rolling back for now\". "
+                "The hedges (\"so i think\", \"what's happening is\") are typed and then deleted, "
+                "never revised in place.\n\n"
+                "The pattern holds across apps and audiences, which makes it a habit rather than a "
+                "register: the same delete-the-preamble move shows up in commit messages, in issue "
+                "comments, and in longer notes written in Obsidian.",
+            "source_record_ids": [4821, 4822, 4830, 4844, 4851, 4877],
+        },
+        {
+            "action": "create",
+            "slug": "asks_land_as_offers",
+            "title": "Frames requests as offers rather than asks",
+            "body":
+                "When Alex needs something from a teammate, the sentence almost never contains the "
+                "word \"can you\". Instead the ask is packaged as an offer to absorb the work: "
+                "\"I can take the migration if you'd rather stay on the parser\", \"happy to write "
+                "the repro if that helps\", \"I'll draft something and you can tear it apart\".\n\n"
+                "This is consistent enough to be a voice marker, not politeness noise — across 11 "
+                "messages in this batch there is exactly one direct imperative, and it goes to a "
+                "bot.\n\n"
+                "The same construction disappears in code review, where the register flips to blunt "
+                "and declarative (\"this allocates on every frame\"). The softening is aimed at "
+                "people's time, not at their feelings.",
+            "source_record_ids": [4835, 4841, 4858, 4860, 4869],
+        },
+        {
+            "action": "update",
+            "slug": "spanish_slips_in_when_delighted",
+            "existing_slug": "spanish_slips_in_when_delighted",
+            "title": "Spanish surfaces when delighted or exasperated, never when explaining",
+            "body":
+                "Alex writes to colleagues in English, but the code-switch into Spanish is not "
+                "random — it tracks emotional peaks at both ends. Delight reads as \"qué bueno, it "
+                "finally compiles\" and \"ya está\"; exasperation as \"otra vez\" and \"no me "
+                "digas\" muttered into a commit message nobody was supposed to read.\n\n"
+                "Explanatory writing stays monolingual. In the 34 records reviewed here, not one "
+                "design note, review comment, or documentation paragraph contains Spanish — the "
+                "switch only fires in reactions, and it fires within a second or two of the "
+                "trigger, with no backspacing.\n\n"
+                "This run adds the exasperation half of the pattern; the earlier entry had only "
+                "captured the delight side.",
+            "source_record_ids": [4826, 4839, 4862, 4871],
+        },
+        {
+            "action": "noop",
+            "slug": "terse_commit_subjects",
+            "title": "Commit subjects stay under fifty characters",
+            "body":
+                "Nothing new this round. The existing entry already covers the habit, and the "
+                "seven commits in this batch all fit the pattern without adding nuance.",
+            "source_record_ids": [4833, 4847],
+        },
+    ],
+    # 详情页顶部 "N refs" 弹窗里的原文。id 要跟上面 source_record_ids 对得上,
+    # 对不上的 id 就是"引用了但没编原文"(真实场景里 record 被删也是这样)。
+    "records": [
+        {"id": 4821, "minutes_before": 90, "app": "Slack", "kind": "short_form",
+         "text": "Rolling this back — the retry loop double-counts on 429s.",
+         "context_summary": "Replying in #backend after a deploy alert"},
+        {"id": 4826, "minutes_before": 82, "app": "Terminal", "kind": "other",
+         "text": "qué bueno, it finally compiles",
+         "context_summary": "Typed into a commit message after a long build"},
+        {"id": 4835, "minutes_before": 68, "app": "Slack", "kind": "short_form",
+         "text": "I can take the migration if you'd rather stay on the parser",
+         "context_summary": "DM with a teammate splitting up next sprint"},
+        {"id": 4844, "minutes_before": 55, "app": "Obsidian", "kind": "long_form",
+         "text": "The borrow checker isn't fighting me, it's telling me the lifetime is wrong.",
+         "context_summary": "Evening note while learning Rust"},
+        {"id": 4862, "minutes_before": 30, "app": "Terminal", "kind": "other",
+         "text": "otra vez",
+         "context_summary": "Commit message after the same test failed twice"},
+    ],
+}
+
+
+def write_writing_style_review():
+    path = os.path.join(ROOT, "writing_style_review.json")
+    with open(path, "w") as f:
+        json.dump(WRITING_STYLE_REVIEW, f, indent=2, ensure_ascii=False)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true",
@@ -664,6 +773,7 @@ def main():
             n_portrait += 1
 
     write_chat_db()
+    write_writing_style_review()
 
     print(f"写到 {ROOT}")
     loose = len(LOOSE) + n_loose_from_dropped
@@ -678,6 +788,8 @@ def main():
         print(f"  → 图谱:folder < {GRAPH_HUB_MIN} → {loose} 条未分类**直连主球**")
     print(f"  portrait  {n_portrait} 条 / {len(PORTRAIT)} 个类别")
     print(f"  chat      {len(CHATS)} 段对话")
+    print(f"  writing   writing_style_review.json "
+          f"({len(WRITING_STYLE_REVIEW['drafts'])} 条 draft,可直接手改,不用重 build)")
     print("config.toml 不在这里生成 —— app 首次进 dev mode 时自己从真实 config 拷一份。")
 
 

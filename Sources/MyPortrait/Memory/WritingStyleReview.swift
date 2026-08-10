@@ -33,7 +33,8 @@ enum WritingStyleReview {
     /// 等待审核的 run(正常最多一条 —— distiller 见到 pending 就跳过跑批)。
     static func pendingRuns() async -> [WritingStyleRunRow] {
         if isDemo {
-            return demoDismissed ? [] : [DevMode.demoWritingStyleRun]
+            guard !demoDismissed, let run = DevMode.demoWritingStyleRun else { return [] }
+            return [run]
         }
         guard let store else { return [] }
         return await Task.detached(priority: .userInitiated) {
@@ -43,7 +44,7 @@ enum WritingStyleReview {
 
     /// 还没进过 writing style 的 writing_records 条数(决定 Run 按钮能不能点)。
     static func unprocessedCount() async -> Int {
-        if isDemo { return 18 }
+        if isDemo { return DevMode.demoWritingStyleUnprocessed }
         guard let store else { return 0 }
         return await Task.detached(priority: .userInitiated) {
             (try? store.unprocessedCount()) ?? 0
