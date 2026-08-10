@@ -142,7 +142,7 @@ struct ContentView: View {
                         Rectangle().fill(live ? Color.red.opacity(0.80)
                                               : Color.orange.opacity(0.85))
                         Text(live ? "DEV MODE · THIS PAGE WRITES YOUR REAL DATA"
-                                  : "DEV MODE · read only")
+                                  : "DEV MODE · demo data")
                             .font(.system(size: 15, weight: .bold, design: .monospaced))
                             .foregroundStyle(live ? Color.white.opacity(0.95)
                                                   : Color.black.opacity(0.8))

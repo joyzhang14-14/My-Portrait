@@ -51,19 +51,6 @@ final class ConfigStore {
         DevMode.isOn ? DevMode.rootURL.appendingPathComponent("config.toml") : liveConfigURL
     }
 
-    /// 后台 section:capture / privacy / storage / scheduler / memory。
-    /// dev mode 下把 `dst` 的这几段换成 `src` 的 —— 两个用途:
-    ///   - load 后:换成**真实** config 的值(采集/pipeline 读的就是 current)
-    ///   - mutate 时:换回**改动前**的值 = 丢弃改动(只读语义)
-    /// 不写成 KeyPath 数组是因为各 section 类型不同,拿不到统一的 KeyPath 类型。
-    private static func copyBackendSections(from src: MyPortraitConfig,
-                                            into dst: inout MyPortraitConfig) {
-        dst.capture   = src.capture
-        dst.privacy   = src.privacy
-        dst.storage   = src.storage
-        dst.scheduler = src.scheduler
-        dst.memory    = src.memory
-    }
     private var writeTask: Task<Void, Never>?
     private var watchSource: DispatchSourceFileSystemObject?
     private var watchFD: Int32 = -1
@@ -114,11 +101,6 @@ final class ConfigStore {
     func mutate(_ block: (inout MyPortraitConfig) -> Void) {
         var next = current
         block(&next)
-        // dev mode:后台 section 只读 —— 改动直接丢弃。设置页里这些控件已经
-        // 灰掉,这里是**兜底**:菜单栏开关、快捷键、其它没灰的入口也一样挡住。
-        // 挡住的理由见 DevMode 顶部第 3 条:让 dev 的开关动到真实采集/保留期
-        // 就是在删你自己的数据。
-        if DevMode.isOn { Self.copyBackendSections(from: current, into: &next) }
         guard next != current else { return }
         current = next
         refreshSnapshot()
@@ -292,38 +274,9 @@ final class ConfigStore {
             // Keep `current` as whatever it was (defaults on fresh launch).
             diskFileUnparsed = true
         }
-        overlayLiveBackendSections()
         refreshSnapshot()
     }
 
-    /// dev mode:把刚从 dev config 读进来的后台 section 换成**真实** config 的值。
-    /// 采集线程和 pipeline 读的就是 `current`,让它们看见 dev 的值 = dev 的开关
-    /// 真的动到你本人的数据。真实文件读不出来就保持原样(默认值),不是致命路径。
-    ///
-    /// ⚠️ 真实 config 只在这里读一次(每次 loadFromDisk)。文件监听器挂的是
-    /// **正在写的那个文件**,所以 dev mode 期间外部改真实 config.toml 不会热重载。
-    /// dev mode 本来就是临时状态,重启即取最新,不为此再挂第二个 watcher。
-    private func overlayLiveBackendSections() {
-        guard DevMode.isOn,
-              let raw = try? String(contentsOf: Self.liveConfigURL, encoding: .utf8),
-              let live = try? TOMLDecoder().decode(MyPortraitConfig.self, from: raw)
-        else { return }
-        Self.copyBackendSections(from: live, into: &current)
-        // personalInfo 是跟着 dev 走的 section,但 dev config 是整份拷贝真实
-        // config 来的 —— 不管的话 Personal Info 页会原样显示**你的真实姓名、
-        // 国籍、生日**,录演示视频第一页就泄了。
-        //
-        // 判据用"跟真实那份一模一样"而不是"刚创建":只要还等于真实值,就说明
-        // 是拷过来没动过的,换成演示人物;你在 dev 里改过之后两者不同,这条不再
-        // 触发,改动照常保留。这样已经拷过去的旧 dev config 也能自愈,不用手删。
-        if current.personalInfo == live.personalInfo {
-            current.personalInfo = DevMode.demoPersonalInfo
-            // 落盘,别只改内存 —— 否则 ~/.portrait-dev/config.toml 里躺着的还是
-            // 你的真实姓名生日,而那个目录是**准备拿去演示 / 分享**的。
-            // 写完两者不再相等,下次启动不会重复触发,不构成回环。
-            scheduleWrite()
-        }
-    }
 
     /// Hook for future schema bumps. Today this is identity; once schema
     /// changes shape we transform `decoded` in here based on its version.

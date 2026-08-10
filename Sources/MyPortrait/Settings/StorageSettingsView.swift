@@ -34,9 +34,7 @@ struct StorageSettingsView: View {
                         Button("Open") { config.openPortraitDir() }
                             .font(.system(size: 12, weight: .medium))
                             .help("Open the data folder in Finder")
-                        // dev mode 下 storage 是只读 section,Reset 点了也会被
-                        // ConfigStore 丢弃 —— 直接不显示,省得点了没反应。
-                        if !config.current.storage.dataDirectory.isEmpty, !DevMode.isOn {
+                        if !config.current.storage.dataDirectory.isEmpty {
                             Button("Reset") { config.mutate { $0.storage.dataDirectory = "" } }
                                 .font(.system(size: 11))
                         }
@@ -109,9 +107,6 @@ struct StorageSettingsView: View {
                 breakdownRows(stats.appRows)
             }
 
-            // dev mode 下这三张卡只读 —— storage 属于后台 section,保留期 /
-            // 删除策略 / 手动删除动的都是你本人 ~/.portrait 里的真实数据,
-            // 不能因为在录演示就被点到。
             Group {
                 autoDeleteCard
 
@@ -119,7 +114,6 @@ struct StorageSettingsView: View {
 
                 deleteRecentCard
             }
-            .disabled(DevMode.isOn)
         }
         .task {
             if lastScannedAt == nil { await refresh() }

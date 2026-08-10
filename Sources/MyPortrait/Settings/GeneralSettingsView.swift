@@ -61,7 +61,7 @@ struct GeneralSettingsView: View {
             SettingsRow(
                 DevMode.isOn ? "Currently using demo data" : "Use demo data",
                 description: DevMode.isOn ? DevMode.rootURL.path : nil,
-                info: "Points the app's UI at ~/.portrait-dev — made-up events, portrait and chats for debugging a fresh install or recording a demo. Screen/audio/typing capture and the memory pipeline keep reading and writing your real ~/.portrait the whole time. Capture, privacy, storage, scheduler and memory settings stay on your real config and become read-only.",
+                info: "Points the app's UI at ~/.portrait-dev — made-up events, portrait and chats for debugging a fresh install or recording a demo. Screen/audio/typing capture and the memory pipeline keep writing your real ~/.portrait the whole time. Every settings change you make in dev mode lands in the demo config, not your real one.",
                 icon: "hammer"
             ) {
                 // 一键切换:改标志 → 刷盘 → 立刻重启。

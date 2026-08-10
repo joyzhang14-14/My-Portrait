@@ -217,7 +217,6 @@ struct AudioCaptureSettingsView: View {
         SettingsPage("Audio Capture & Transcript",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
-                .disabled(DevMode.isOn)
         }
     }
 
@@ -643,7 +642,6 @@ struct ScreenCaptureSettingsView: View {
                 screenSection
                 privacySection
             }
-            .disabled(DevMode.isOn)
         }
         .task {
             discoveredApps = await Self.loadDiscoveredApps()
@@ -870,7 +868,6 @@ struct TypingCaptureSettingsView: View {
                 // 07-30:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
                 // 模型,没有 provider / model 可选。config 里那三个键也一并摘了。
             }
-            .disabled(DevMode.isOn)
         }
         .task {
             discovered = await Self.loadDiscovered(services?.typingStore)

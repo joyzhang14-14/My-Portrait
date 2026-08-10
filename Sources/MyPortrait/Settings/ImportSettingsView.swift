@@ -122,10 +122,6 @@ struct ImportSettingsView: View {
                     )
                 }
             }
-            // dev mode 只读:必须挂在 SettingsPage(内含 ScrollView)
-            // **里面**的内容上 —— 挂整页会连滚动手势一起禁,页面
-            // 直接卡死(08-09 用户实测,Memory 页同案)。
-            .disabled(DevMode.isOn)
         }
         // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
         // 「未扫描」+ Scan 按钮,用户点了才扫(原 auto-scan 开关已删)。

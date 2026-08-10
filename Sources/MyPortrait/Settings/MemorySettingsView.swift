@@ -204,10 +204,6 @@ struct MemorySettingsView: View {
             .padding(.bottom, 40)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // dev mode 整页只读:memory / scheduler 是后台 section,"Run now"
-            // 跑的是真实 pipeline(读写 ~/.portrait)。⚠️ 必须挂在 ScrollView
-            // 内层的 VStack 上 —— 挂整页会连滚动手势一起禁,页面卡死。
-            .disabled(DevMode.isOn)
         }
         // 放得下就完全固定,超出才可滚(同 SettingsPage / onboarding)。
         .scrollBounceBehavior(.basedOnSize)
