@@ -45,6 +45,9 @@ struct PipelineFlow {
         let detail: String
         /// 归一化坐标(0…1),(0,0) = 左上。渲染时乘以画布尺寸。
         let pos: CGPoint
+        /// 窄盒子(96pt,只显示标题居左、无图标)—— 给"一行摆六个"的
+        /// 分叉行用(portraits distiller 的六个类别)。
+        var narrow: Bool = false
     }
 
     struct Edge: Identifiable {
@@ -72,6 +75,12 @@ struct PipelineFlowView: View {
     /// 节点盒子尺寸 —— 固定,不随内容伸缩(布局是手排的,伸缩会把连线错开)。
     private static let nodeW: CGFloat = 176
     private static let nodeH: CGFloat = 46
+    /// 窄盒子宽(narrow 节点)。~700pt 画布一行摆得下六个 + 间隙。
+    private static let narrowW: CGFloat = 96
+
+    private static func width(of n: PipelineFlow.Node) -> CGFloat {
+        n.narrow ? narrowW : nodeW
+    }
 
     @State private var openNode: String? = nil
 
@@ -88,7 +97,7 @@ struct PipelineFlowView: View {
                 }
                 ForEach(flow.nodes) { n in
                     nodeBox(n)
-                        .frame(width: Self.nodeW, height: Self.nodeH)
+                        .frame(width: Self.width(of: n), height: Self.nodeH)
                         .position(x: n.pos.x * geo.size.width,
                                   y: n.pos.y * geo.size.height)
                 }
@@ -108,7 +117,7 @@ struct PipelineFlowView: View {
                           kind: PipelineFlow.EdgeKind, label: String?) {
         let ax = a.pos.x * size.width, ay = a.pos.y * size.height
         let bx = b.pos.x * size.width, by = b.pos.y * size.height
-        let halfW = Self.nodeW / 2, halfH = Self.nodeH / 2
+        let halfH = Self.nodeH / 2
         let color = Color.primary.opacity(kind == .trigger ? 0.18 : 0.28)
         let style: StrokeStyle = kind == .trigger
             ? StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [4, 4])
@@ -128,9 +137,9 @@ struct PipelineFlowView: View {
             path.addLine(to: CGPoint(x: bx, y: midY))
             path.addLine(to: tip)
         } else if abs(ay - by) < 0.5 {
-            // 同一行 → 横着连。
-            let p0 = CGPoint(x: ax + halfW, y: ay)
-            tip = CGPoint(x: bx - halfW, y: by)
+            // 同一行 → 横着连。锚点用各自的盒宽(narrow 节点更窄)。
+            let p0 = CGPoint(x: ax + Self.width(of: a) / 2, y: ay)
+            tip = CGPoint(x: bx - Self.width(of: b) / 2, y: by)
             path.move(to: p0)
             path.addLine(to: tip)
             facing = .right
@@ -198,10 +207,14 @@ struct PipelineFlowView: View {
             openNode = (openNode == n.id) ? nil : n.id
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: s.icon)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(s.tint)
-                    .frame(width: 16)
+                // narrow 盒子(96pt)塞不下图标 + 文案,只留标题;性质仍能从
+                // 配色/边框看出,点开浮窗也有完整说明。
+                if !n.narrow {
+                    Image(systemName: s.icon)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(s.tint)
+                        .frame(width: 16)
+                }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(n.title)
                         .font(.system(size: 12, weight: .medium))
@@ -216,7 +229,7 @@ struct PipelineFlowView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, n.narrow ? 8 : 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -437,7 +450,7 @@ extension PipelineFlow {
                 id: "group",
                 title: "Sort into categories",
                 kind: .deterministic,
-                detail: "No AI. Two passes over the disk:\n\n• Every event is filed under the portrait categories it belongs to — social, background, experiences, interests, skills, emotions.\n\n• Existing portrait entries are re-weighted first, so an entry that nothing touched this round still decays with time instead of sitting frozen.\n\nCategories with no events and no existing entries are skipped entirely — no tokens spent on nothing.",
+                detail: "No AI. Two passes over the disk:\n\n• Every event is filed under the portrait categories it belongs to — experiences, social, background, interests, skills.\n\n• Existing portrait entries are re-weighted first, so an entry that nothing touched this round still decays with time instead of sitting frozen.\n\nCategories with no events and no existing entries are skipped entirely — no tokens spent on nothing.",
                 pos: CGPoint(x: 0.5, y: 0.389)
             ),
             Node(
@@ -445,24 +458,61 @@ extension PipelineFlow {
                 title: "Distill each category",
                 kind: .llm,
                 chip: "main model",
-                detail: "One round trip per category. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
-                pos: CGPoint(x: 0.5, y: 0.639)
+                detail: "One round trip per category — each branch below is one of those calls. The model sees that category's events plus the entries already written, and answers with create / update / no change for each one.\n\nThis is the step that turns \"here are 40 things that happened\" into \"this is a person who…\". Results land as Markdown under portrait/<category>/.\n\nPersonality and writing style are deliberately left out — they have their own pipelines and would be overwritten here.",
+                pos: CGPoint(x: 0.5, y: 0.55)
+            ),
+            // 五个类别分支 —— 同一轮 distill 的多路产出(每类一次 LLM 往返)。
+            // narrow 盒子一行摆下;详情各写各的"这一类装什么"。
+            // (emotions 08-10 前端下线,不再展示;pipeline 的彻底移除挂账。)
+            Node(
+                id: "cat_experiences", title: "Experiences", kind: .llm,
+                detail: "Chapters of your life as lived — projects, trips, milestones, hard weeks. Events that tell a story over time end up here.\n\nWritten to portrait/experiences/.",
+                pos: CGPoint(x: 0.10, y: 0.74), narrow: true
+            ),
+            Node(
+                id: "cat_social", title: "Social", kind: .llm,
+                detail: "Who shows up in your life and how — collaborators, friends, communities, how you host and keep in touch.\n\nWritten to portrait/social/.",
+                pos: CGPoint(x: 0.30, y: 0.74), narrow: true
+            ),
+            Node(
+                id: "cat_background", title: "Background", kind: .llm,
+                detail: "The slow-moving facts — where you work and study, where you're from, the long arcs everything else sits on.\n\nWritten to portrait/background/.",
+                pos: CGPoint(x: 0.50, y: 0.74), narrow: true
+            ),
+            Node(
+                id: "cat_interests", title: "Interests", kind: .llm,
+                detail: "What you keep coming back to unprompted — topics, hobbies, rabbit holes. Recurrence is the signal here.\n\nWritten to portrait/interests/.",
+                pos: CGPoint(x: 0.70, y: 0.74), narrow: true
+            ),
+            Node(
+                id: "cat_skills", title: "Skills", kind: .llm,
+                detail: "What you can actually do, with evidence — languages, tools, crafts, and how deep each one goes.\n\nWritten to portrait/skills/.",
+                pos: CGPoint(x: 0.90, y: 0.74), narrow: true
             ),
             Node(
                 id: "archive",
                 title: "Archive faded entries",
                 kind: .deterministic,
                 detail: "No AI. A sweep over the portrait tree right after it was updated: any entry whose weight has dropped below the archive threshold and that hasn't been touched for long enough is moved to the archive.\n\nNothing is deleted — archived entries stay on disk and stop showing up in your portrait. Pinned entries are never archived. Both limits live in Settings → Memory.",
-                pos: CGPoint(x: 0.5, y: 0.889)
+                pos: CGPoint(x: 0.5, y: 0.92)
             ),
         ],
         edges: [
             Edge(from: "events", to: "group",
                  label: "Marked pending whenever new events land"),
             Edge(from: "group", to: "distill"),
-            Edge(from: "distill", to: "archive"),
+            Edge(from: "distill", to: "cat_experiences"),
+            Edge(from: "distill", to: "cat_social"),
+            Edge(from: "distill", to: "cat_background"),
+            Edge(from: "distill", to: "cat_interests"),
+            Edge(from: "distill", to: "cat_skills"),
+            Edge(from: "cat_experiences", to: "archive"),
+            Edge(from: "cat_social", to: "archive"),
+            Edge(from: "cat_background", to: "archive"),
+            Edge(from: "cat_interests", to: "archive"),
+            Edge(from: "cat_skills", to: "archive"),
         ],
-        height: 360
+        height: 520
     )
 }
 
