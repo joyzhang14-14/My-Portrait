@@ -794,14 +794,22 @@ struct VoiceTrainingCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "mic.badge.plus")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.purple.opacity(0.9))
-                Text("Voice Training")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
-                SettingsInfoBadge(text: "Read a short passage aloud for ~30 seconds. My Portrait will briefly turn on your microphone for the training session and turn it back off when it's done.")
+            // 「会发生什么」**不收进 ⓘ** —— 这是全 app 唯一一个点下去就开始
+            // 录音的按钮,用户按之前必须已经知道要读 30 秒、麦克风会开。
+            // 藏在 ⓘ 后面等于让他在不知情的状态下开麦。
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.badge.plus")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.purple.opacity(0.9))
+                    Text("Voice Training")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                }
+                Text("Read a short passage aloud for about 30 seconds. Your microphone turns on for the session and off again when it's done.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {

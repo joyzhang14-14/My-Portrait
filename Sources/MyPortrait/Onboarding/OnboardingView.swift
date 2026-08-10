@@ -936,11 +936,12 @@ private struct SpeakerTrainingStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                StepHeader(
-                    title: "Train your voice (optional)",
-                    info: "My Portrait separates speakers by voiceprint. Read a short passage now and future recordings can label lines as you instead of \"unknown cluster #3\". You can do this any time later from Settings → Speakers."
-                )
-                .padding(.bottom, 6)
+                StepHeader(title: "Train your voice")
+                Text("This is what audio recognition uses to tell your voice apart from everyone else's. You can also do it later in Settings → Speakers.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
 
                 VoiceTrainingCard(existingNames: [])
 
