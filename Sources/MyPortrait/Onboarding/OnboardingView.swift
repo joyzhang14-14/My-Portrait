@@ -980,7 +980,7 @@ private struct FinishStep: View {
             VStack(alignment: .leading, spacing: 8) {
                 FinishHint(icon: "bubble.left.and.bubble.right", text: "Open the chat from the sidebar to ask anything.")
                 FinishHint(icon: "person.text.rectangle", text: "Edit your portrait under Memories at any time.")
-                FinishHint(icon: "lock.shield", text: "Everything you see can be deleted from Settings → Data & Privacy.")
+                FinishHint(icon: "lock.shield", text: "All captured data and analysis are stored locally.")
             }
             .padding(.top, 8)
             Spacer(minLength: 40)
