@@ -374,8 +374,8 @@ extension PipelineFlow {
                 id: "capture",
                 title: "Captured data",
                 kind: .source,
-                chip: "DB",
-                detail: "One UTC day: screenshots + their OCR text, audio transcripts with speakers, your typing. All of it lives in `~/.portrait/portrait.sqlite`.\n\n**The only input.** Nothing is added later.",
+                chip: "~/.portrait/DB",
+                detail: "One UTC day: screenshots + their OCR text, audio transcripts with speakers, your typing. All of it lives in `~/.portrait/DB`.\n\n**The only input.** Nothing is added later.",
                 pos: CGPoint(x: 0.5, y: 0.05)
             ),
             Node(
@@ -616,8 +616,8 @@ extension PipelineFlow {
                 id: "records",
                 title: "Writing events",
                 kind: .source,
-                chip: "DB · rebuilt writing",
-                detail: "**The rebuilt pieces, not the raw keystrokes.** Typing Capture reassembles what you typed into finished writing — the message, the email, the commit note — and keeps it with what you were doing at the time.\n\nStored in `~/.portrait/portrait.sqlite`, table `writing_records`. Each piece is consumed **exactly once**. If you didn't type it, it isn't here.",
+                chip: "~/.portrait/DB · writing records",
+                detail: "**The rebuilt pieces, not the raw keystrokes.** Typing Capture reassembles what you typed into finished writing — the message, the email, the commit note — and keeps it with what you were doing at the time.\n\nStored in `~/.portrait/DB`, table `writing_records`. Each piece is consumed **exactly once**. If you didn't type it, it isn't here.",
                 pos: CGPoint(x: 0.5, y: 0.083)
             ),
             Node(
