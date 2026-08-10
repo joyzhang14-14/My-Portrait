@@ -157,6 +157,10 @@ struct SidebarBackdrop: View {
             }
         }
         .ignoresSafeArea()
+        // 拖窗只认这层底图 —— 窗口的 isMovableByWindowBackground 已经关掉
+        // (见 App.swift),否则按住任意按钮拖动都会把整个窗口拽走。
+        // 盖在底图之上的一切(卡片 / 按钮 / 列表行)因此天然不拖窗。
+        .gesture(WindowDragGesture())
     }
 }
 

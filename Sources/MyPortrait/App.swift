@@ -582,7 +582,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = ""
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        // **关掉背景拖窗**:开着的时候,按住任意按钮/列表行拖动都会把整个
+        // 窗口拽走(AppKit 只看命中视图的 mouseDownCanMoveWindow,SwiftUI
+        // 自绘的按钮没有自己的 NSView 可以说"不")。改成显式指定拖窗区:
+        // AmbientBackground / SidebarBackdrop 两层底图挂 WindowDragGesture,
+        // 页面空白照样能拖;顶部标题栏(红绿灯那一横)是原生的,始终能拖。
+        window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 700, height: 500)
         // NSWindow 背景色跟随 system appearance(light/dark)。light 用接近
         // AmbientBackground 顶端的奶白,dark 仍是纯黑,避免 sidebar 出现一道
