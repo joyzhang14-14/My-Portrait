@@ -2070,6 +2070,8 @@ struct MemorySettingsView: View {
 private struct StagedChangePreview: View {
     let change: MemoryStaging.StagedChange
     @Environment(\.dismiss) private var dismiss
+    /// 默认渲染成人看的样子;原始 markdown(含 frontmatter)收在开关后面。
+    @State private var showRaw = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2081,14 +2083,13 @@ private struct StagedChangePreview: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer()
+                Toggle("Raw", isOn: $showRaw)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.system(size: 10))
                 Button("Done") { dismiss() }
             }
             .padding(12)
-            Divider()
-            Text(change.relativePath)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 12).padding(.vertical, 6)
             Divider()
             if let before = change.beforeText {
                 HStack(spacing: 0) {
@@ -2097,29 +2098,148 @@ private struct StagedChangePreview: View {
                     pane("After", change.afterText)
                 }
             } else {
-                pane("New file", change.afterText)
+                pane(nil, change.afterText)
             }
+            Divider()
+            // 路径挪到底部当脚注 —— 排查时才需要,不该占据第一屏。
+            Text(change.relativePath)
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(.quaternary)
+                .padding(.horizontal, 12).padding(.vertical, 5)
         }
         .frame(width: 860, height: 580)
     }
 
-    private func pane(_ label: String, _ text: String) -> some View {
+    @ViewBuilder
+    private func pane(_ label: String?, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-            Divider()
-            ScrollView {
-                Text(text)
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
+            if let label {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+                    .padding(8)
+                Divider()
+            }
+            ScrollView {
+                if showRaw {
+                    Text(text)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                } else {
+                    readable(EventCardFields(markdown: text))
+                }
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 人看的版式:正文当段落,frontmatter 里真正有意义的几项做成小 chip。
+    @ViewBuilder
+    private func readable(_ f: EventCardFields) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !f.title.isEmpty {
+                Text(f.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !f.body.isEmpty {
+                Text(f.body)
+                    .font(.system(size: 12.5))
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !f.chips.isEmpty {
+                FlowChips(items: f.chips)
+            }
+            if !f.tags.isEmpty {
+                FlowChips(items: f.tags.map { "#" + $0 }, tinted: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+    }
+}
+
+/// 从事件 / 画像 markdown 里挑出给人看的字段。解析失败就整篇当正文 ——
+/// 预览窗不该因为 frontmatter 变形就空白。
+private struct EventCardFields {
+    var title = ""
+    var body = ""
+    var chips: [String] = []
+    var tags: [String] = []
+
+    init(markdown: String) {
+        var fm: [String: String] = [:]
+        var rest = markdown
+        if markdown.hasPrefix("---\n"),
+           let end = markdown.range(of: "\n---\n", range: markdown.index(markdown.startIndex, offsetBy: 3)..<markdown.endIndex) {
+            let block = String(markdown[markdown.index(markdown.startIndex, offsetBy: 4)..<end.lowerBound])
+            rest = String(markdown[end.upperBound...])
+            for line in block.split(separator: "\n", omittingEmptySubsequences: false) {
+                guard let c = line.firstIndex(of: ":") else { continue }
+                let k = String(line[line.startIndex..<c]).trimmingCharacters(in: .whitespaces)
+                var v = String(line[line.index(after: c)...]).trimmingCharacters(in: .whitespaces)
+                if v.hasPrefix("\""), v.hasSuffix("\""), v.count >= 2 { v = String(v.dropFirst().dropLast()) }
+                fm[k] = v
+            }
+        }
+        title = fm["event_title"] ?? ""
+        body = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 正文跟 summary 一样时只留一份(事件文件的常态)。
+        if body.isEmpty { body = fm["event_summary"] ?? "" }
+
+        func list(_ raw: String?) -> [String] {
+            guard var r = raw else { return [] }
+            r = r.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+            return r.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }.filter { !$0.isEmpty }
+        }
+        tags = list(fm["tags"])
+
+        let occ = list(fm["occurrences"])
+        if let d = occ.last ?? fm["created"], !d.isEmpty { chips.append(d) }
+        if occ.count > 1 { chips.append("seen \(occ.count)×") }
+        if let t = fm["type"], !t.isEmpty { chips.append(t) }
+        if let cat = fm["category"], !cat.isEmpty { chips.append(cat) }
+        if let i = fm["impact"], !i.isEmpty { chips.append("impact \(i)") }
+        if let w = fm["weight"], !w.isEmpty { chips.append("weight \(w)") }
+        if fm["pinned"] == "true" { chips.append("pinned") }
+    }
+}
+
+/// 自动换行的小 chip 排 —— 标签数量不定,固定 HStack 会溢出。
+private struct FlowChips: View {
+    let items: [String]
+    var tinted = false
+
+    var body: some View {
+        // 每行最多 5 个,够用且不引入布局依赖(WrappingHStack 那套没必要)。
+        let rows = stride(from: 0, to: items.count, by: 5).map {
+            Array(items[$0..<min($0 + 5, items.count)])
+        }
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 5) {
+                    ForEach(row, id: \.self) { chip($0) }
+                }
+            }
+        }
+    }
+
+    private func chip(_ t: String) -> some View {
+        Text(t)
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(tinted ? Theme.accent.opacity(0.9) : .secondary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(
+                Capsule().fill(tinted ? Theme.accent.opacity(0.12)
+                                      : Color.secondary.opacity(0.12))
+            )
     }
 }
 
