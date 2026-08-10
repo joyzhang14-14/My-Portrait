@@ -334,20 +334,24 @@ private struct PermissionsStep: View {
 
     @ViewBuilder
     private func permRow(_ item: PermissionItem) -> some View {
-        // 说明进 ⓘ 之后整行只剩一行文字,`.top` 会让图标和按钮吊在上沿 ——
-        // 改 `.center`。
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
             Image(systemName: item.icon)
                 .font(.system(size: 18))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .frame(width: 28, height: 28)
-            // 「为什么要这项权限」收进 ⓘ —— 跟设置页 Permissions 卡同款。
-            // ⚠️ 这是本页唯一有争议的一处:这一步的目的就是**说服**用户授权,
-            // 把理由藏起来可能降低授权率。要退回去只是把 info 换回一行灰字。
-            HStack(spacing: 0) {
-                Text(item.title).font(.system(size: 14, weight: .semibold))
-                SettingsInfoBadge(text: item.why)
-                PermissionStatusPill(state: item.state)
+            // 「为什么要这项权限」**这里直接显示,不收进 ⓘ**(08-09 用户定)。
+            // 设置页那张 Permissions 卡是"你给过什么"的对照表,说明收起来没问题;
+            // 这一步的目的是**说服**用户授权,把理由藏到 ⓘ 后面就没人看了。
+            // 文案本体在 PermissionCatalog,两边共用。
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(item.title).font(.system(size: 14, weight: .semibold))
+                    PermissionStatusPill(state: item.state)
+                }
+                Text(item.why)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
