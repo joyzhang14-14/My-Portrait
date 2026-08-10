@@ -199,9 +199,6 @@ struct HomeView: View {
                 Text(Self.greeting())
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary.opacity(0.96))
-                Text("One-click summaries from your screen activity")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
             .padding(.top, 36)
 

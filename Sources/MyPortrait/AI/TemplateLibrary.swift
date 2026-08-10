@@ -18,12 +18,33 @@ final class TemplateLibrary {
     // (not deleted), but the app reads v2 only — users see the new seeds.
     private let key = "MyPortrait.summaryTemplates.v2"
 
+    /// 「已退休的种子清过一次没有」标志。见 removeRetiredFolderSeed。
+    private let retiredSeedsKey = "MyPortrait.summaryTemplates.retiredSeeds.v1"
+
     private init() {
         load()
         if templates.isEmpty {
             templates = Self.seeds
             save()
         }
+        removeRetiredFolderSeed()
+    }
+
+    /// 一次性清掉已退休的 "Folder Suggestions" 种子。
+    ///
+    /// 种子只在**首次**启动时写进 UserDefaults,之后就是用户自己的列表了 ——
+    /// 从 `seeds` 里删掉那一条只对全新安装生效,老用户首页照旧摆着它。
+    ///
+    /// 只删**没被改过**的那一条(标题没变 + prompt 里还有 mp-folders):用户
+    /// 要是把它改成了别的东西,那就是他自己的快捷方式,不能替他删。
+    /// 靠一个标志只跑一次 —— 否则用户之后自己新建一个同名的又会被吃掉。
+    private func removeRetiredFolderSeed() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: retiredSeedsKey) else { return }
+        defaults.set(true, forKey: retiredSeedsKey)
+        let before = templates.count
+        templates.removeAll { $0.title == "Folder Suggestions" && $0.prompt.contains("mp-folders") }
+        if templates.count != before { save() }
     }
 
     // MARK: - CRUD
@@ -126,21 +147,9 @@ final class TemplateLibrary {
                 """,
               window: .today),
 
-        .init(emoji: "🔍", title: "Folder Suggestions",
-              subtitle: "Unclassified events that look like a real project",
-              prompt: """
-                Help me tidy up. Call \
-                `mp-query memories --scope events --start "7d ago"` to scan \
-                the last week of events. Then run \
-                `mp-folders list` to see what folders already exist, and \
-                `mp-folders search-events --unclassified --start "30d ago" \
-                --limit 50` to pull events not yet in any folder. Spot \
-                clusters of **≥3 events** that look like the same project \
-                or initiative. Propose 1-2 new folders (name, description, \
-                event list) and confirm with me before calling \
-                `mp-folders create`.
-                """,
-              window: .none),
+        // (08-10 删掉 "Folder Suggestions" 这条种子:归档到文件夹已经是
+        //  pipeline 自己在做的事,不再需要用户手动点一个快捷方式去问。
+        //  老用户的 UserDefaults 里还留着,由 removeRetiredFolderSeed 清一次。)
     ]
 }
 
