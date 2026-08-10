@@ -57,6 +57,9 @@ struct MemorySettingsView: View {
     @State private var eventsChanges: [MemoryStaging.StagedChange] = []
     @State private var portraitChanges: [MemoryStaging.StagedChange] = []
     @State private var personalityChanges: [MemoryStaging.StagedChange] = []
+    /// portrait 分区 → 用户在 Neural Graph 里改过的颜色(没改过的分区不在表里,
+    /// 由 PortraitCategoryTag 回落到内置色)。
+    @State private var portraitCatColors: [String: String] = [:]
     /// staged 事件按 folder 分组展示用 —— 待审核时读的是 **live 树**里的
     /// folder(归类这一步已经跑完、跟事件一起等审批),所以看到的就是批准后
     /// 会落库的样子。
@@ -247,7 +250,7 @@ struct MemorySettingsView: View {
             Text("\(trigger.title) uses LLM tokens. \(trigger.desc)")
         }
         .sheet(item: $previewChange) { change in
-            StagedChangePreview(change: change)
+            StagedChangePreview(change: change, categoryColors: portraitCatColors)
         }
     }
 
@@ -286,14 +289,16 @@ struct MemorySettingsView: View {
         stagingRefreshTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
-            let (e, p, s, folders) = await Task.detached(priority: .userInitiated) {
+            let (e, p, s, folders, catColors) = await Task.detached(priority: .userInitiated) {
                 (MemoryStaging.changes(.events),
                  MemoryStaging.changes(.portrait),
                  MemoryStaging.changes(.personality),
-                 EventFolderStore.loadAll())
+                 EventFolderStore.loadAll(),
+                 PortraitGraphStyleStore.loadColors())
             }.value
             guard !Task.isCancelled else { return }
             stagedFolders = folders
+            portraitCatColors = catColors
             eventsChanges = e
             portraitChanges = p
             personalityChanges = s
@@ -1316,6 +1321,8 @@ struct MemorySettingsView: View {
                 Text(ch.displayTitle)
                     .font(.system(size: 11))
                     .lineLimit(1)
+                PortraitCategoryTag(relativePath: ch.relativePath,
+                                    userColors: portraitCatColors)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9))
@@ -2078,6 +2085,8 @@ struct MemorySettingsView: View {
 /// 暂存改动的内容预览 —— 改动前 vs 改动后并排。新文件只显示"现文"。
 private struct StagedChangePreview: View {
     let change: MemoryStaging.StagedChange
+    /// portrait 分区的用户自定义色(Neural Graph 里改的那份)。
+    var categoryColors: [String: String] = [:]
     @Environment(\.dismiss) private var dismiss
     /// 默认渲染成人看的样子;原始 markdown(含 frontmatter)收在开关后面。
     @State private var showRaw = false
@@ -2091,6 +2100,8 @@ private struct StagedChangePreview: View {
                 Text(change.displayTitle)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
+                PortraitCategoryTag(relativePath: change.relativePath,
+                                    userColors: categoryColors, prefixed: true)
                 Spacer()
                 Toggle("Raw data", isOn: $showRaw)
                     .toggleStyle(.switch)
@@ -2116,9 +2127,9 @@ private struct StagedChangePreview: View {
                 .foregroundStyle(.quaternary)
                 .padding(.horizontal, 12).padding(.vertical, 5)
         }
-        // 改动预览是 before/after 双栏,600 宽分两栏太挤 → 宽 +20%。
+        // 改动预览是 before/after 双栏,600 宽分两栏太挤 → 宽 +32%。
         // 新文件单栏保持 600。
-        .frame(width: change.beforeText == nil ? 600 : 720, height: 406)
+        .frame(width: change.beforeText == nil ? 600 : 792, height: 406)
     }
 
     @ViewBuilder
@@ -2220,6 +2231,43 @@ private struct EventCardFields {
         if let i = fm["impact"], !i.isEmpty { chips.append("impact \(i)") }
         if let w = fm["weight"], !w.isEmpty { chips.append("weight \(w)") }
         if fm["pinned"] == "true" { chips.append("pinned") }
+    }
+}
+
+/// 标出这条改动落进哪个 portrait 分区。relativePath 的首段就是分区目录名
+/// (`interests/keeps_a_cat_now.md`);对不上内置分区名的(events / personality)
+/// 不显示,所以同一个组件在三条 pipeline 的列表里都能安全复用。
+/// 颜色优先取用户在 Neural Graph 里改过的那份,没改过回落内置色。
+private struct PortraitCategoryTag: View {
+    let relativePath: String
+    var userColors: [String: String] = [:]
+    /// 预览窗标题行里加个 "in" 前缀,读起来是一句话。
+    var prefixed = false
+
+    var body: some View {
+        if let cat = category {
+            let c = color(cat)
+            HStack(spacing: 4) {
+                Circle().fill(c).frame(width: 6, height: 6)
+                Text((prefixed ? "in " : "") + cat.replacingOccurrences(of: "_", with: " "))
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(c)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(c.opacity(0.14)))
+        }
+    }
+
+    private var category: String? {
+        guard let first = relativePath.split(separator: "/").first else { return nil }
+        let name = String(first)
+        return GraphSceneBuilder.portraitCategories.contains { $0.name == name } ? name : nil
+    }
+
+    private func color(_ cat: String) -> Color {
+        let hex = userColors[cat]
+            ?? GraphSceneBuilder.portraitCategories.first { $0.name == cat }?.hex
+        return hex.flatMap(FolderPalette.color(fromHex:)) ?? .secondary
     }
 }
 
