@@ -616,8 +616,8 @@ extension PipelineFlow {
                 id: "records",
                 title: "Writing events",
                 kind: .source,
-                chip: "~/.portrait/portrait.sqlite · writing_records",
-                detail: "**Not events, and not everything you typed.** The pieces Typing Capture reconstructed and kept: the message, the email, the commit note, plus what you were doing at the time.\n\nEach piece is consumed **exactly once**. If you didn't type it, it isn't here.",
+                chip: "~/.portrait/portrait.sqlite · rebuilt writing",
+                detail: "**The rebuilt pieces, not the raw keystrokes.** Typing Capture reassembles what you typed into finished writing — the message, the email, the commit note — and keeps it with what you were doing at the time.\n\nStored in the `writing_records` table. Each piece is consumed **exactly once**. If you didn't type it, it isn't here.",
                 pos: CGPoint(x: 0.5, y: 0.083)
             ),
             Node(
