@@ -2116,7 +2116,9 @@ private struct StagedChangePreview: View {
                 .foregroundStyle(.quaternary)
                 .padding(.horizontal, 12).padding(.vertical, 5)
         }
-        .frame(width: 600, height: 406)
+        // 改动预览是 before/after 双栏,600 宽分两栏太挤 → 宽 +20%。
+        // 新文件单栏保持 600。
+        .frame(width: change.beforeText == nil ? 600 : 720, height: 406)
     }
 
     @ViewBuilder
