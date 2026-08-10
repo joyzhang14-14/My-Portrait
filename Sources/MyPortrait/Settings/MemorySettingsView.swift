@@ -107,6 +107,9 @@ struct MemorySettingsView: View {
     @ObservedObject private var writingStyleUI = WritingStyleUIState.shared
     @State private var writingStyleConfirm: Bool = false
     @State private var writingStylePending: [WritingStyleRunRow] = []
+    /// dev mode 下点过 Approve / Reject 没有?演示 run 是写死的常量,不这样
+    /// 记一笔的话按完按钮列表马上又长回来。切页重置,方便反复看。
+    @State private var devWritingStyleRejected = false
     @State private var writingStyleUnprocessed: Int = 0
     @State private var writingStylePreviewRun: String? = nil
     /// 点击某一行 draft 时打开的 sheet,只显示这一条 draft 详情。
@@ -1757,6 +1760,10 @@ struct MemorySettingsView: View {
     /// 第一次展示 drafts 时按需 fetch(避免每帧重查 DB)。
     private func ensureWritingStyleDraftsLoaded(runId: String) {
         if writingStyleExpandedDrafts[runId] != nil { return }
+        if DevMode.isOn {
+            writingStyleExpandedDrafts[runId] = DevMode.demoWritingStyleDrafts
+            return
+        }
         guard let distiller = WritingStyleDistiller.shared else { return }
         let store = distiller.store
         Task.detached(priority: .userInitiated) {
@@ -1820,6 +1827,13 @@ struct MemorySettingsView: View {
     }
 
     private func refreshWritingStyle() {
+        // dev mode:这条链路的待审核数据在真实 sqlite 里,不跟着 dev 根走 ——
+        // 顶替成写死的演示 run,一个字节都不碰数据库(理由见 DevMode)。
+        if DevMode.isOn {
+            writingStylePending = devWritingStyleRejected ? [] : [DevMode.demoWritingStyleRun]
+            writingStyleUnprocessed = 18
+            return
+        }
         guard let distiller = WritingStyleDistiller.shared else { return }
         let store = distiller.store
         Task.detached(priority: .userInitiated) {
@@ -1858,6 +1872,14 @@ struct MemorySettingsView: View {
 
     @MainActor
     private func approveWritingStyle(runId: String) async {
+        // dev mode 的 run 是假的 —— 只收起列表,不落盘、不标 records。
+        if DevMode.isOn {
+            devWritingStyleRejected = true
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
+            writingStyleUI.statusMessage = "Approved (demo) — nothing was written."
+            refreshWritingStyle()
+            return
+        }
         guard let distiller = WritingStyleDistiller.shared else { return }
         do {
             let n = try distiller.approveStaged(runId: runId)
@@ -1871,6 +1893,13 @@ struct MemorySettingsView: View {
 
     @MainActor
     private func rejectWritingStyle(runId: String) async {
+        if DevMode.isOn {
+            devWritingStyleRejected = true
+            writingStyleExpandedDrafts.removeValue(forKey: runId)
+            writingStyleUI.statusMessage = "Rejected (demo) — nothing was written."
+            refreshWritingStyle()
+            return
+        }
         guard let distiller = WritingStyleDistiller.shared else { return }
         do {
             try distiller.rejectStaged(runId: runId)
@@ -2981,13 +3010,18 @@ private struct WritingStyleDraftDetail: View {
             ? (draft.existingSlug ?? draft.slug)
             : nil
         // Run 元数据
-        if let store = WritingStyleDistiller.shared?.store {
+        if DevMode.isOn {
+            runMeta = DevMode.demoWritingStyleRun
+        } else if let store = WritingStyleDistiller.shared?.store {
             let r = (try? store.fetchRun(runId: runIdLocal)) ?? nil
             runMeta = r
         }
-        // 现有 portrait/writing_style/<slug>.md 的 body
+        // 现有 writing_style/<slug>.md 的 body。**走 uiPortraitDir**(界面根)
+        // 而不是 PortraitPaths —— 后者恒指真实 ~/.portrait,dev mode 下这一栏
+        // 会把真实的 writing style 内容摆进演示画面。
         if let slug = slugLocal {
-            let url = PortraitPaths.categoryDir("writing_style")
+            let url = Storage.uiPortraitDir
+                .appendingPathComponent("writing_style", isDirectory: true)
                 .appendingPathComponent(slug + ".md")
             let body = (try? PortraitFileIO.read(from: url))?.body
             existingBody = body
@@ -3038,7 +3072,11 @@ private struct WritingStyleRefsSheet: View {
         }
         .frame(width: 720, height: 540)
         .task {
-            if let store = WritingStyleDistiller.shared?.store {
+            // dev mode 不查真实 writing_records —— 那是用户的真实聊天原文,
+            // 演示视频里点开 refs 就泄了。
+            if DevMode.isOn {
+                records = DevMode.demoWritingRecords(ids: ids)
+            } else if let store = WritingStyleDistiller.shared?.store {
                 let rows = (try? store.fetchRecordsByIds(ids)) ?? []
                 records = rows
             }

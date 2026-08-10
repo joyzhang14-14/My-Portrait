@@ -428,6 +428,13 @@ PORTRAIT = {
         ("Plain vocabulary, concrete nouns",
          "Avoids abstraction where a specific thing will do. Prefers 'the 200MB sample file' "
          "to 'large inputs'.", 3.4, 75),
+        # DevMode.demoWritingStyleDrafts 里那条 CHANGED draft 的 existingSlug
+        # 指向这一条 —— 详情页 BEFORE 栏读的就是它。改标题会让 slug 变、
+        # BEFORE 栏空掉,两边要一起改。
+        ("Spanish slips in when delighted",
+         "Code-switches into Spanish at moments of delight — 'qué bueno' when a build "
+         "finally passes, 'ya está' when a task closes. Explanatory writing stays "
+         "monolingual English.", 3.8, 45),
     ],
 }
 
