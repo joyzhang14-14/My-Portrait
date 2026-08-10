@@ -222,30 +222,31 @@ struct PipelineFlowView: View {
             openNode = (openNode == n.id) ? nil : n.id
         } label: {
             HStack(spacing: 8) {
-                // narrow 盒子(96pt)塞不下图标 + 文案,只留标题;性质仍能从
-                // 配色/边框看出,点开浮窗也有完整说明。
+                // narrow 盒子(96pt)塞不下图标 + 文案,只留标题**居中**
+                // (08-10 用户);性质仍能从配色/边框看出,点开浮窗有完整说明。
                 if !n.narrow {
                     Image(systemName: s.icon)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(s.tint)
                         .frame(width: 16)
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: n.narrow ? .center : .leading, spacing: 1) {
                     Text(n.title)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.textPrimary.opacity(0.95))
                         .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                        .multilineTextAlignment(n.narrow ? .center : .leading)
                     if let chip = n.chip {
                         Text(chip)
                             .font(.system(size: 9, design: .monospaced))
                             .foregroundStyle(s.tint.opacity(0.95))
                     }
                 }
-                Spacer(minLength: 0)
+                if !n.narrow { Spacer(minLength: 0) }
             }
             .padding(.horizontal, n.narrow ? 8 : 10)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                   alignment: n.narrow ? .center : .leading)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(s.tint.opacity(0.10))
