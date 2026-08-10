@@ -55,7 +55,7 @@ enum PermissionCatalog {
                 id: "microphone",
                 icon: "mic",
                 title: "Microphone",
-                why: "Audio in short chunks, transcribed to text. Makes voice chat part of your portrait.",
+                why: "Captures audio activity, then transcribes it to text. Makes voice chat part of your portrait.",
                 state: state(monitor.microphone),
                 request: { monitor.requestMicrophone() },
                 openSettings: { monitor.openSettings(for: .microphone) }
