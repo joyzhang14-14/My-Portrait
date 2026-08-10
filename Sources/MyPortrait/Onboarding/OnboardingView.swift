@@ -314,7 +314,12 @@ private struct PermissionsStep: View {
                 }
             }
             .padding(.horizontal, 32)
-            .padding(.vertical, 16)
+            // 上留白必须是 24 —— 别的步都是 `.padding(.vertical, 24)`,这里
+            // 为了塞下五行收成 16 的话,标题就比前后两步高 8pt,翻页时肉眼
+            // 能看出标题在跳。省下来的高度全从**下**边扣(24 → 8),
+            // 上沿对齐,总高不变。
+            .padding(.top, 24)
+            .padding(.bottom, 8)
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
