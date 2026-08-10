@@ -303,6 +303,9 @@ private struct ConfigErrorBanner: View {
 struct TagListEditor: View {
     @Binding var tags: [String]
     var placeholder: String = "type to add…"
+    /// chip 前面的 SF Symbol。URL 名单传 "link",让它跟同一张卡里的 app /
+    /// 类别 chip 一眼分得开;自定义词表这种没有天然图标的场合留 nil。
+    var icon: String? = nil
     @State private var draft: String = ""
 
     var body: some View {
@@ -333,30 +336,42 @@ struct TagListEditor: View {
             if !tags.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(tags, id: \.self) { tag in
-                        HStack(spacing: 4) {
-                            Text(tag)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                            Button {
+                        if let icon {
+                            SelectionChip(icon: icon, text: tag) {
                                 tags.removeAll { $0 == tag }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
                             }
-                            .buttonStyle(.bouncyIcon)
+                        } else {
+                            plainChip(tag)
                         }
-                        .padding(.horizontal, 7).padding(.vertical, 3.5)
-                        .background(
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+
+    /// 无图标版 —— 自定义词表那种没有天然图标的列表用。
+    @ViewBuilder
+    private func plainChip(_ tag: String) -> some View {
+        HStack(spacing: 4) {
+            Text(tag)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+            Button {
+                tags.removeAll { $0 == tag }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            }
+            .buttonStyle(.bouncyIcon)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 3.5)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
+        )
     }
 
     private func add() {
@@ -461,25 +476,9 @@ struct IgnoredAppPicker: View {
                         }
                     }
                     ForEach(apps, id: \.self) { app in
-                        HStack(spacing: 4) {
-                            Text(app)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(Theme.textPrimary.opacity(0.85))
-                            Button {
-                                apps.removeAll { $0 == app }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                            }
-                            .buttonStyle(.bouncyIcon)
+                        SelectionChip(icon: "app.fill", text: app) {
+                            apps.removeAll { $0 == app }
                         }
-                        .padding(.horizontal, 7).padding(.vertical, 3.5)
-                        .background(
-                            Capsule()
-                                .fill(.ultraThinMaterial)
-                                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -582,26 +581,9 @@ struct TypingAppPicker: View {
     /// 用户加的条目 —— 可移除。
     @ViewBuilder
     private func editableChip(_ app: String) -> some View {
-        HStack(spacing: 4) {
-            Text(Self.label(app))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary.opacity(0.85))
-            Button {
-                apps.removeAll { $0 == app }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-            }
-            .buttonStyle(.bouncyIcon)
+        SelectionChip(icon: "app.fill", text: Self.label(app), help: app) {
+            apps.removeAll { $0 == app }
         }
-        .padding(.horizontal, 7).padding(.vertical, 3.5)
-        .help(app)
-        .background(
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-        )
     }
 
     /// 硬编码、永远生效的条目 —— 灰显、带锁、不可移除。
@@ -757,12 +739,10 @@ struct PauseAudioListPicker: View {
             if !categories.isEmpty || !apps.isEmpty {
                 FlowLayout(spacing: 6) {
                     ForEach(categories, id: \.self) { c in
-                        chip(icon: "square.grid.2x2.fill", text: AppCategory.label(c), help: c) {
-                            categories.removeAll { $0 == c }
-                        }
+                        CategoryChip(id: c) { categories.removeAll { $0 == c } }
                     }
                     ForEach(apps, id: \.self) { a in
-                        chip(icon: "app.fill", text: appName(a), help: a) {
+                        SelectionChip(icon: "app.fill", text: appName(a), help: a) {
                             apps.removeAll { $0 == a }
                         }
                     }
@@ -817,30 +797,6 @@ struct PauseAudioListPicker: View {
         .background(boxBackground)
     }
 
-    @ViewBuilder
-    private func chip(icon: String, text: String, help: String, remove: @escaping () -> Void) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 8))
-                .foregroundStyle(Theme.textPrimary.opacity(0.5))
-            Text(text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary.opacity(0.85))
-            Button(action: remove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-            }
-            .buttonStyle(.bouncyIcon)
-        }
-        .padding(.horizontal, 7).padding(.vertical, 3.5)
-        .help(help)
-        .background(
-            Capsule().fill(.ultraThinMaterial)
-                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-        )
-    }
-
     private func toggleCategory(_ id: String) {
         if let i = categories.firstIndex(of: id) { categories.remove(at: i) } else { categories.append(id) }
     }
@@ -889,17 +845,25 @@ struct CategoryDropdown: View {
     }
 }
 
-/// 已选类别的 chip —— 带网格图标,跟 app chip 区分开(它们混在同一片里)。
-struct CategoryChip: View {
-    let id: String
+/// 名单里的一枚可移除 chip —— app / 类别 / URL 全走这一个。
+///
+/// 原来屏幕、打字、音频三处各写一份:音频那份带图标,另两份没有,同一件事
+/// 在三张卡上长得不一样。以后要改 chip 样式**只改这里**。
+struct SelectionChip: View {
+    let icon: String
+    let text: String
+    var help: String? = nil
+    /// 非 nil = 上色(类别用浅蓝)。只染图标和底,**文字不染** ——
+    /// 浅蓝字压在浅蓝底上,浅色主题下对比度不够。
+    var tint: Color? = nil
     let remove: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "square.grid.2x2.fill")
+            Image(systemName: icon)
                 .font(.system(size: 8))
-                .foregroundStyle(Theme.textPrimary.opacity(0.5))
-            Text(AppCategory.label(id))
+                .foregroundStyle(tint ?? Theme.textPrimary.opacity(0.5))
+            Text(text)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
             Button(action: remove) {
@@ -910,11 +874,37 @@ struct CategoryChip: View {
             .buttonStyle(.bouncyIcon)
         }
         .padding(.horizontal, 7).padding(.vertical, 3.5)
-        .help(id)
-        .background(
+        .help(help ?? text)
+        .background(background)
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        if let tint {
+            Capsule().fill(tint.opacity(0.16))
+                .overlay(Capsule().stroke(tint.opacity(0.50), lineWidth: 0.7))
+        } else {
             Capsule().fill(.ultraThinMaterial)
                 .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-        )
+        }
+    }
+
+    /// 类别 chip 的浅蓝。类别和 app 混在同一片 chip 里,但"一整类"是比
+    /// "某个 app"宽得多的规则 —— 给个颜色让用户一眼看出哪几条是大范围的。
+    static let categoryTint = Color(red: 0.45, green: 0.72, blue: 1.0)
+}
+
+/// 已选类别的 chip —— 网格图标 + 浅蓝底,跟 app chip 区分开(它们混在同一片里)。
+struct CategoryChip: View {
+    let id: String
+    let remove: () -> Void
+
+    var body: some View {
+        SelectionChip(icon: "square.grid.2x2.fill",
+                      text: AppCategory.label(id),
+                      help: id,
+                      tint: SelectionChip.categoryTint,
+                      remove: remove)
     }
 }
 
@@ -979,22 +969,7 @@ struct PauseCaptureAppPicker: View {
 
     @ViewBuilder
     private func chip(_ name: String, remove: @escaping () -> Void) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "app.fill")
-                .font(.system(size: 8)).foregroundStyle(Theme.textPrimary.opacity(0.5))
-            Text(name)
-                .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.textPrimary.opacity(0.85))
-            Button(action: remove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold)).foregroundStyle(Theme.textPrimary.opacity(0.55))
-            }
-            .buttonStyle(.bouncyIcon)
-        }
-        .padding(.horizontal, 7).padding(.vertical, 3.5)
-        .background(
-            Capsule().fill(.ultraThinMaterial)
-                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.7))
-        )
+        SelectionChip(icon: "app.fill", text: name, remove: remove)
     }
 
     private func toggle(_ name: String) {
@@ -1090,7 +1065,12 @@ struct TypingBlacklistEntryPicker: View {
 
     @ViewBuilder
     private func editableChip(_ e: TypingBlacklistEntry, at idx: Int) -> some View {
+        // 这个 chip 是「app · URL」两段文字,套不进 SelectionChip(单段文本),
+        // 所以手写 —— 但图标 / 字号 / padding 跟它保持一致。
         HStack(spacing: 4) {
+            Image(systemName: "app.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(Theme.textPrimary.opacity(0.5))
             Text(Self.label(e.bundleId))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))

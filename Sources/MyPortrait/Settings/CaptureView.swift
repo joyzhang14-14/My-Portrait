@@ -458,7 +458,8 @@ struct AudioCaptureSettingsView: View {
                         .foregroundStyle(Theme.textPrimary.opacity(0.50))
                         .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                     TagListEditor(tags: config.binding(\.capture.audio.pauseAudioUrls),
-                                  placeholder: "e.g. meet.google.com, zoom.us")
+                                  placeholder: "e.g. meet.google.com, zoom.us",
+                                  icon: "link")
                         .padding(.horizontal, 14).padding(.bottom, 12)
                 }
             }
@@ -676,7 +677,9 @@ struct ScreenCaptureSettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
-                TagListEditor(tags: config.binding(\.privacy.ignoredUrls), placeholder: "e.g. wellsfargo.com, mail.")
+                TagListEditor(tags: config.binding(\.privacy.ignoredUrls),
+                              placeholder: "e.g. wellsfargo.com, mail.",
+                              icon: "link")
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }
@@ -901,7 +904,8 @@ struct TypingCaptureSettingsView: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.typingBlacklistUrls),
-                              placeholder: "e.g. wellsfargo.com, mail.")
+                              placeholder: "e.g. wellsfargo.com, mail.",
+                              icon: "link")
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
         }
