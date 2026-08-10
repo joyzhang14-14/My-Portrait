@@ -102,6 +102,10 @@ struct ConnectionsView: View {
             .frame(maxWidth: 920)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 没展开面板时 tile 网格通常一屏放得下,却仍能橡皮筋式拖动 ——
+        // 看着像下面还有东西。`.basedOnSize` = 内容真超出才允许滚。
+        // 展开面板后内容变高,滚动自动恢复。
+        .scrollBounceBehavior(.basedOnSize)
         .background {
             if showsBackground { SidebarBackdrop().ignoresSafeArea() }
         }

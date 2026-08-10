@@ -315,6 +315,11 @@ private struct PermissionsStep: View {
             .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 五行刚好放得下,却仍然能橡皮筋式地上下拖 —— 看着像内容没显示全。
+        // `.basedOnSize` = 内容真的超出视口才允许滚/回弹,放得下就完全固定。
+        // 比 `.scrollDisabled(true)` 安全:窗口被拉小 / 以后加第六项权限时,
+        // 它自己会恢复成可滚,不会把内容卡死在视口外。
+        .scrollBounceBehavior(.basedOnSize)
         .onAppear {
             monitor.start()
             // 初次进 step 立刻 commit 一次,footer Next/Skip 立刻反映真实状态。
