@@ -240,7 +240,7 @@ private struct WelcomeStep: View {
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
-                .frame(width: 88, height: 88)
+                .frame(width: 132, height: 132)
             Text("Welcome to My Portrait")
                 .font(.system(size: 32, weight: .semibold))
             Text("A private AI memory system. Everything stays on this Mac.")
