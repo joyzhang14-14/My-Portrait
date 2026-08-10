@@ -19,7 +19,7 @@ final class TemplateLibrary {
     private let key = "MyPortrait.summaryTemplates.v2"
 
     /// 「已退休的种子清过一次没有」标志。见 removeRetiredFolderSeed。
-    private let retiredSeedsKey = "MyPortrait.summaryTemplates.retiredSeeds.v1"
+    private let retiredSeedsKey = "MyPortrait.summaryTemplates.retiredSeeds.v2"
 
     private init() {
         load()
@@ -30,20 +30,35 @@ final class TemplateLibrary {
         removeRetiredFolderSeed()
     }
 
-    /// 一次性清掉已退休的 "Folder Suggestions" 种子。
+    /// 已退休的种子:标题 → prompt 里必须出现的特征串。
+    ///
+    /// - Folder Suggestions:归档到文件夹已经由 pipeline 自己做了
+    /// - Standup Update:产出形态是团队站会(Slack / Blockers),不通用
+    /// - My Portrait Update:跟 Portraits Distiller 每天做的事重复,
+    ///   区别只是它不落盘
+    private static let retiredSeeds: [String: String] = [
+        "Folder Suggestions":  "mp-folders",
+        "Standup Update":      "standup update",
+        "My Portrait Update":  "long-term portrait",
+    ]
+
+    /// 一次性清掉已退休的种子。
     ///
     /// 种子只在**首次**启动时写进 UserDefaults,之后就是用户自己的列表了 ——
-    /// 从 `seeds` 里删掉那一条只对全新安装生效,老用户首页照旧摆着它。
+    /// 从 `seeds` 里删掉只对全新安装生效,老用户首页照旧摆着它们。
     ///
-    /// 只删**没被改过**的那一条(标题没变 + prompt 里还有 mp-folders):用户
-    /// 要是把它改成了别的东西,那就是他自己的快捷方式,不能替他删。
+    /// 只删**没被改过**的(标题没变 + prompt 里还留着那句特征串):用户要是把
+    /// 某张卡改成了别的东西,那就是他自己的快捷方式,不能替他删。
     /// 靠一个标志只跑一次 —— 否则用户之后自己新建一个同名的又会被吃掉。
     private func removeRetiredFolderSeed() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: retiredSeedsKey) else { return }
         defaults.set(true, forKey: retiredSeedsKey)
         let before = templates.count
-        templates.removeAll { $0.title == "Folder Suggestions" && $0.prompt.contains("mp-folders") }
+        templates.removeAll { t in
+            guard let marker = Self.retiredSeeds[t.title] else { return false }
+            return t.prompt.lowercased().contains(marker)
+        }
         if templates.count != before { save() }
     }
 
@@ -116,36 +131,6 @@ final class TemplateLibrary {
                 """,
               window: .today),
 
-        .init(emoji: "🏢", title: "Standup Update",
-              subtitle: "Yesterday + today + blockers, ready to paste",
-              prompt: """
-                Write a standup update I can paste into Slack. Pull facts \
-                from `mp-query memories --scope events --start yesterday` \
-                (covers yesterday + today) and \
-                `mp-query writing --start yesterday` (what I actually typed \
-                — way more reliable than OCR for "what did I write about \
-                X"). Format:
-                  *Yesterday:* terse bullets
-                  *Today:* terse bullets
-                  *Blockers:* bullets, or "none"
-                No fluff. No emoji.
-                """,
-              window: .today),
-
-        .init(emoji: "💡", title: "My Portrait Update",
-              subtitle: "What today's events suggest about my long-term profile",
-              prompt: """
-                Compare today's events against my long-term portrait. First \
-                read the portrait: `mp-query memories --scope portrait \
-                --limit 30` (use `mp-query read --path portrait/...` for \
-                anything you want to quote in full). Then read today's \
-                events: `mp-query memories --scope events --start today`. \
-                Surface 2-3 signals from today that either (a) reinforce an \
-                existing portrait concept, or (b) suggest a new concept / \
-                preference / pattern I haven't captured yet. Cite both \
-                portrait file paths and event titles.
-                """,
-              window: .today),
 
         // (08-10 删掉 "Folder Suggestions" 这条种子:归档到文件夹已经是
         //  pipeline 自己在做的事,不再需要用户手动点一个快捷方式去问。
