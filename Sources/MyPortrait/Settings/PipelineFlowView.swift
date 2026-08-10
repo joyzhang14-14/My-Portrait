@@ -543,7 +543,9 @@ extension PipelineFlow {
                 id: "day",
                 title: "Timeline patterns & events",
                 kind: .source,
-                chip: "~/.portrait/events/<day>/",
+                // 两个来源都要标:事件文件给"发生了什么",DB 给同一天的屏幕
+                // 内容(下游 "Check it against your screen" 那一步查的就是它)。
+                chip: "~/.portrait/events/\n~/.portrait/DB",
                 detail: "Rebuilt **day by day**, oldest pending first, up to 7 days per run.\n\nEach day is independent — one that fails is retried later without holding up the rest.",
                 pos: CGPoint(x: 0.5, y: 0.055)
             ),
