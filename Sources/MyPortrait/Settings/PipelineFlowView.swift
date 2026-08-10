@@ -48,9 +48,11 @@ struct PipelineFlow {
         let detail: String
         /// 归一化坐标(0…1),(0,0) = 左上。渲染时乘以画布尺寸。
         let pos: CGPoint
-        /// 窄盒子(96pt,只显示标题居左、无图标)—— 给"一行摆六个"的
-        /// 分叉行用(portraits distiller 的六个类别)。
+        /// 窄盒子(110pt,小图标 + 标题居中)—— 给类别注释列用。
         var narrow: Bool = false
+        /// 自定义 SF Symbol,覆盖 kind 的默认图标。类别注释盒用它显示
+        /// 与 Text 侧栏 PORTRAIT 分区一致的图标(Models.swift 同款)。
+        var icon: String? = nil
     }
 
     struct Edge: Identifiable {
@@ -78,8 +80,8 @@ struct PipelineFlowView: View {
     /// 节点盒子尺寸 —— 固定,不随内容伸缩(布局是手排的,伸缩会把连线错开)。
     private static let nodeW: CGFloat = 176
     private static let nodeH: CGFloat = 46
-    /// 窄盒子宽(narrow 节点)。~700pt 画布一行摆得下六个 + 间隙。
-    private static let narrowW: CGFloat = 96
+    /// 窄盒子宽(narrow 节点)。放得下小图标 + 单行标题。
+    private static let narrowW: CGFloat = 110
 
     private static func width(of n: PipelineFlow.Node) -> CGFloat {
         n.narrow ? narrowW : nodeW
@@ -221,15 +223,13 @@ struct PipelineFlowView: View {
         Button {
             openNode = (openNode == n.id) ? nil : n.id
         } label: {
-            HStack(spacing: 8) {
-                // narrow 盒子(96pt)塞不下图标 + 文案,只留标题**居中**
-                // (08-10 用户);性质仍能从配色/边框看出,点开浮窗有完整说明。
-                if !n.narrow {
-                    Image(systemName: s.icon)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(s.tint)
-                        .frame(width: 16)
-                }
+            HStack(spacing: n.narrow ? 5 : 8) {
+                // narrow 盒子:小一号的图标(与 Text 侧栏 PORTRAIT 分区
+                // 同款,见 Node.icon)+ 标题居中。
+                Image(systemName: n.icon ?? s.icon)
+                    .font(.system(size: n.narrow ? 11 : 12, weight: .medium))
+                    .foregroundStyle(s.tint)
+                    .frame(width: n.narrow ? 13 : 16)
                 VStack(alignment: n.narrow ? .center : .leading, spacing: 1) {
                     Text(n.title)
                         .font(.system(size: 12, weight: .medium))
@@ -266,7 +266,7 @@ struct PipelineFlowView: View {
         ), arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Image(systemName: s.icon)
+                    Image(systemName: n.icon ?? s.icon)
                         .font(.system(size: 11))
                         .foregroundStyle(s.tint)
                     Text(n.title)
@@ -484,27 +484,27 @@ extension PipelineFlow {
             Node(
                 id: "cat_experiences", title: "Experiences", kind: .llm,
                 detail: "Chapters of your life as lived — projects, trips, milestones, hard weeks. Events that tell a story over time end up here.\n\nWritten to portrait/experiences/.",
-                pos: CGPoint(x: 0.80, y: 0.28), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.28), narrow: true, icon: "map.fill"
             ),
             Node(
                 id: "cat_social", title: "Social", kind: .llm,
                 detail: "Who shows up in your life and how — collaborators, friends, communities, how you host and keep in touch.\n\nWritten to portrait/social/.",
-                pos: CGPoint(x: 0.80, y: 0.42), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.42), narrow: true, icon: "person.3.fill"
             ),
             Node(
                 id: "cat_background", title: "Background", kind: .llm,
                 detail: "The slow-moving facts — where you work and study, where you're from, the long arcs everything else sits on.\n\nWritten to portrait/background/.",
-                pos: CGPoint(x: 0.80, y: 0.56), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.56), narrow: true, icon: "books.vertical.fill"
             ),
             Node(
                 id: "cat_interests", title: "Interests", kind: .llm,
                 detail: "What you keep coming back to unprompted — topics, hobbies, rabbit holes. Recurrence is the signal here.\n\nWritten to portrait/interests/.",
-                pos: CGPoint(x: 0.80, y: 0.70), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.70), narrow: true, icon: "sparkles"
             ),
             Node(
                 id: "cat_skills", title: "Skills", kind: .llm,
                 detail: "What you can actually do, with evidence — languages, tools, crafts, and how deep each one goes.\n\nWritten to portrait/skills/.",
-                pos: CGPoint(x: 0.80, y: 0.84), narrow: true
+                pos: CGPoint(x: 0.80, y: 0.84), narrow: true, icon: "wrench.adjustable.fill"
             ),
             Node(
                 id: "archive",
