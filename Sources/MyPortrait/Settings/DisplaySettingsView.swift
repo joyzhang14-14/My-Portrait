@@ -68,15 +68,11 @@ struct DisplaySettingsView: View {
             // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
             // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
             //
-            // ⚠️ 值存在 `general.cronJobHistoryLimit`,**没跟着搬到 display**
-            // —— 搬 config key 会让老用户的设置读不回来。副作用:本页右上角的
-            // Reset 只重置 display section,重置不到这一行;General 页的 Reset
-            // 反而会。
             SettingsCard(title: "Cron Jobs") {
                 SettingsRow("History per cron job",
                             info: "How many recent runs to keep for each cron job.",
                             icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
-                    Picker("", selection: config.binding(\.general.cronJobHistoryLimit)) {
+                    Picker("", selection: config.binding(\.display.cronJobHistoryLimit)) {
                         Text("5").tag(5)
                         Text("10").tag(10)
                         Text("20").tag(20)
@@ -88,7 +84,7 @@ struct DisplaySettingsView: View {
                     .frame(width: 110)
                 }
             }
-            .onChange(of: config.current.general.cronJobHistoryLimit) { _, _ in
+            .onChange(of: config.current.display.cronJobHistoryLimit) { _, _ in
                 CronJobStore.shared.applyHistoryLimit()
             }
         }

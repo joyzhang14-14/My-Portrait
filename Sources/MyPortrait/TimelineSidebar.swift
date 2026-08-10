@@ -383,7 +383,7 @@ struct TimelineSidebar: View {
         } else {
             filtered = base.filter { $0.title.lowercased().contains(q) }
         }
-        let cap = ConfigStore.shared.current.general.cronJobHistoryLimit
+        let cap = ConfigStore.shared.current.display.cronJobHistoryLimit
         if cap > 0, filtered.count > cap {
             return Array(filtered.prefix(cap))
         }

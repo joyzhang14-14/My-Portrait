@@ -61,6 +61,29 @@ struct MyPortraitConfig: Codable, Equatable {
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
         migrateSeedAuthApps()
+        migrateCronHistoryToDisplay(from: c)
+    }
+
+    /// 一次性迁移(08-09):`cron_job_history_limit` 从 `[general]` 搬到
+    /// `[display]` —— 设置项挪到了 Display 页最下面,key 不跟着搬的话,
+    /// 那一页右上角的 Reset 重置不到它,General 页的 Reset 反而会。
+    ///
+    /// 只在 `[display]` 里**没有**这个 key 时才从 `[general]` 取:两边都有
+    /// (只可能发生在迁移当次到保存之间)时以新位置为准,不让旧值倒灌。
+    /// 读完不回写旧 key —— GeneralConfig 已经不再编码它,下次保存自动消失。
+    private mutating func migrateCronHistoryToDisplay(
+        from c: KeyedDecodingContainer<CodingKeys>
+    ) {
+        enum LegacyKeys: String, CodingKey {
+            case cronJobHistoryLimit = "cron_job_history_limit"
+        }
+        // 新位置已经有值 → 什么都不做。
+        if let disp = try? c.nestedContainer(keyedBy: LegacyKeys.self, forKey: .display),
+           disp.contains(.cronJobHistoryLimit) { return }
+        guard let gen = try? c.nestedContainer(keyedBy: LegacyKeys.self, forKey: .general),
+              let old = try? gen.decode(Int.self, forKey: .cronJobHistoryLimit)
+        else { return }
+        display.cronJobHistoryLimit = old
     }
 
     /// 一次性迁移(08-09):把认证界面补进 `privacy.ignored_apps`。
@@ -489,6 +512,13 @@ struct DisplayConfig: Codable, Equatable {
     /// 由读取方回落到默认,不做校验。
     var memoryLastScope:         String = ""
     var memoryLastViewMode:      String = ""
+    /// CronJob 历史记录保留上限 —— sidebar CRON JOB HISTORY 区只显示前 N 条,
+    /// CronJobStore.appendRun 按这个值裁 runs.json。
+    /// 0 = no limit(runs.json 会无限增长,慎选)。
+    /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
+    /// 08-09 从 `[general]` 搬来(设置项挪到 Display 页最下面),
+    /// 老 config 由 `migrateCronHistoryToDisplay` 搬值。
+    var cronJobHistoryLimit:     Int = 20
 
     init() {}
     enum CodingKeys: String, CodingKey {
@@ -505,6 +535,7 @@ struct DisplayConfig: Codable, Equatable {
         case graphHideLinks           = "graph_hide_links"
         case memoryLastScope          = "memory_last_scope"
         case memoryLastViewMode       = "memory_last_view_mode"
+        case cronJobHistoryLimit      = "cron_job_history_limit"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -522,6 +553,7 @@ struct DisplayConfig: Codable, Equatable {
         graphHideLinks          = c.dflt(Bool.self, .graphHideLinks, graphHideLinks)
         memoryLastScope         = c.dflt(String.self, .memoryLastScope, memoryLastScope)
         memoryLastViewMode      = c.dflt(String.self, .memoryLastViewMode, memoryLastViewMode)
+        cronJobHistoryLimit     = c.dflt(Int.self, .cronJobHistoryLimit, cronJobHistoryLimit)
     }
 }
 
@@ -535,11 +567,10 @@ struct GeneralConfig: Codable, Equatable {
     /// 默认 false → 全新安装自动看到 onboarding。Settings → General → Onboarding
     /// 里的 "Show" 按钮不动这个 flag,只临时预览。
     var onboardingCompleted: Bool = false
-    /// CronJob 历史记录保留上限 —— sidebar CRON JOB HISTORY 区只显示前 N 条,
-    /// CronJobStore.appendRun 按这个值裁 runs.json。
-    /// 0 = no limit(runs.json 会无限增长,慎选)。
-    /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
-    var cronJobHistoryLimit: Int = 20
+    // cron_job_history_limit 08-09 搬去 `[display]`(设置项挪到 Display 页
+    // 最下面,右上角 Reset 要跟着 display 走)。老 config 里那一行由
+    // MyPortraitConfig.migrateCronHistoryToDisplay 搬值,读完不回写,下次
+    // 保存自动从文件消失。
     // auto_scan_imports 已下线(07-28 用户):Import 页固定手动模式 ——
     // 每个来源显示「未扫描」+ Scan 按钮,点了才扫。旧 config.toml 里
     // 残留的这个键会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
@@ -548,7 +579,6 @@ struct GeneralConfig: Codable, Equatable {
         case launchAtLogin        = "launch_at_login"
         case autoDownloadUpdates  = "auto_download_updates"
         case onboardingCompleted  = "onboarding_completed"
-        case cronJobHistoryLimit  = "cron_job_history_limit"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -556,7 +586,6 @@ struct GeneralConfig: Codable, Equatable {
         launchAtLogin       = c.dflt(Bool.self, .launchAtLogin, launchAtLogin)
         autoDownloadUpdates = c.dflt(Bool.self, .autoDownloadUpdates, autoDownloadUpdates)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
-        cronJobHistoryLimit = c.dflt(Int.self,  .cronJobHistoryLimit, cronJobHistoryLimit)
     }
 }
 

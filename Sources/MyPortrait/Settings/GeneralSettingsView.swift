@@ -43,8 +43,8 @@ struct GeneralSettingsView: View {
             // TOML 热加载后配置就是死的 —— 已收编进 service 本体)。
             // 检查间隔已写死 10 分钟,不再可配。
 
-            // (Cron Jobs 的「History per cron job」08-09 搬去 Display 页最下面。
-            //  值仍存在 general.cronJobHistoryLimit,没跟着改 config key。)
+            // (Cron Jobs 的「History per cron job」08-09 搬去 Display 页最下面,
+            //  config key 也一并搬到 [display]。)
 
             permissionsCard
 

@@ -15,10 +15,10 @@ final class CronJobStore {
 
     /// Legacy UserDefaults key — only read once for the one-time migration.
     private let legacyKey = "MyPortrait.cronJobs.v1"
-    /// runs.json 留多少条 —— 读 GeneralConfig.cronJobHistoryLimit。0 = 不裁。
-    /// 用户在 Settings → General 改下拉时实时生效(applyHistoryLimit 主动调一次)。
+    /// runs.json 留多少条 —— 读 DisplayConfig.cronJobHistoryLimit。0 = 不裁。
+    /// 用户在 Settings → Display 改下拉时实时生效(applyHistoryLimit 主动调一次)。
     private var runsCap: Int {
-        ConfigStore.shared.current.general.cronJobHistoryLimit
+        ConfigStore.shared.current.display.cronJobHistoryLimit
     }
 
     private init() {
