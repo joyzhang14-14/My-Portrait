@@ -1093,10 +1093,26 @@ struct MemorySettingsView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(open ? 90 : 0))
-                Circle().fill(tint).frame(width: 9, height: 9)
+                // folder 图标(.palette 双色,跟 Text 列表的 FolderDisclosureRow
+                // 一致),不再用抽象圆点。
+                Image(systemName: "folder.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(tint.opacity(0.95), tint.opacity(0.35))
+                    .font(.system(size: 12))
+                    .frame(width: 14)
                 Text(g.folder.name)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
+                // 整个 folder 是这次 run 新建的 —— 判据:里面**没有**一条
+                // 本次之前就存在的事件。这是"AI 开了个新分类"的时刻,比
+                // 单纯 +N 更值得指出来。
+                if g.existing.isEmpty, g.newCount > 0 {
+                    Text("NEW FOLDER")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Capsule().fill(tint.opacity(0.16)))
+                }
                 if g.newCount > 0 {
                     Text("+\(g.newCount)")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -1147,9 +1163,11 @@ struct MemorySettingsView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(open ? 90 : 0))
-                Circle()
-                    .stroke(Color.secondary.opacity(0.5), lineWidth: 1)
-                    .frame(width: 9, height: 9)
+                Image(systemName: "folder.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.gray.opacity(0.85), Color.gray.opacity(0.3))
+                    .font(.system(size: 12))
+                    .frame(width: 14)
                 // 跟 Text 列表的伪 folder、图谱的灰分区球同名 —— 同一个概念
                 // 在三处必须叫同一个名字。
                 Text("Unclassified")
