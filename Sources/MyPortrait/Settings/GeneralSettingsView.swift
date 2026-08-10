@@ -43,27 +43,8 @@ struct GeneralSettingsView: View {
             // TOML 热加载后配置就是死的 —— 已收编进 service 本体)。
             // 检查间隔已写死 10 分钟,不再可配。
 
-            // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
-            // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
-            SettingsCard(title: "Cron Jobs") {
-                SettingsRow("History per cron job",
-                            info: "How many recent runs to keep for each cron job.",
-                            icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
-                    Picker("", selection: config.binding(\.general.cronJobHistoryLimit)) {
-                        Text("5").tag(5)
-                        Text("10").tag(10)
-                        Text("20").tag(20)
-                        Text("50").tag(50)
-                        Text("No limit").tag(0)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 110)
-                }
-            }
-            .onChange(of: config.current.general.cronJobHistoryLimit) { _, _ in
-                CronJobStore.shared.applyHistoryLimit()
-            }
+            // (Cron Jobs 的「History per cron job」08-09 搬去 Display 页最下面。
+            //  值仍存在 general.cronJobHistoryLimit,没跟着改 config key。)
 
             permissionsCard
 
