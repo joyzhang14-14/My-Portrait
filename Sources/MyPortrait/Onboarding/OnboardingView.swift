@@ -242,8 +242,8 @@ private struct WelcomeStep: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 bullet("Captures screen + keyboard + audio with your permission")
-                bullet("Builds a portrait you can read, edit, or delete at any time")
-                bullet("Brings your own AI — ChatGPT, Claude, Gemini, DeepSeek, Ollama")
+                bullet("Builds an external memory and a portrait just for you")
+                bullet("You may read, edit, or delete it at any time — or bring it to your own AI")
             }
             .padding(.top, 8)
             Spacer(minLength: 40)
@@ -568,9 +568,14 @@ private struct ConnectAIStep: View {
             // 直接嵌入现有 ConnectionsView —— 用户点 tile → expand → add 流程
             // 跟 Settings 里完全一致,不重写。**限制只展示 AI/local 两类**,
             // 不出现 Notion/SMTP/Calendar 等。
+            // showsBackground: false —— 外层已经铺了一张 SidebarBackdrop,
+            // 内嵌的再铺一张会在接缝处又起一次渐变 + 又亮一次左上角 glow,
+            // 看着像两块颜色不同的画布拼在一起。
             ConnectionsView(
                 categoryFilter: [.ai, .local],
-                showsHeader: false
+                showsHeader: false,
+                showsBackground: false,
+                searchPlaceholder: "search AI providers…"
             )
             .frame(maxHeight: .infinity)
 
@@ -611,11 +616,14 @@ private struct MemoryProviderStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                StepHeader(
-                    title: "Memory AI model",
-                    info: "Which AI runs the memory pipeline — clustering raw activity into events, scoring importance, distilling your portrait, refreshing personality.\n\nTwo model slots: a main model for heavy tasks, a lighter one for clustering. You can change all of this later in Settings → Memory."
-                )
-                .padding(.bottom, 6)
+                // 这一步的说明**不收进 ⓘ**(08-09 用户):这是全流程里唯一
+                // 需要用户理解"我在选什么"才能选对的一步,藏起来等于让他瞎选。
+                StepHeader(title: "Memory AI model")
+                Text("Which AI runs the analysis pipeline — clustering raw activity into events, scoring importance, distilling your portrait, refreshing personality. Two model slots: a main model for heavy tasks, a lighter one for clustering. You can change all of this later in Settings → Memory.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 6)
 
                 if availableProviders.isEmpty {
                     HStack(alignment: .top, spacing: 10) {

@@ -16,6 +16,14 @@ struct ConnectionsView: View {
     /// 内嵌进 onboarding 时把 "Connections" 标题 + 描述句藏掉,避免跟外层
     /// 标题打架。Settings 里走默认 true。
     var showsHeader: Bool = true
+    /// 画不画自己那层 `SidebarBackdrop`。
+    ///
+    /// **内嵌时必须传 false** —— backdrop 是「顶部渐变 + 左上角径向 glow」,
+    /// 两个叠在一起就等于在页面中间又起一次渐变、又亮一次 glow,接缝处
+    /// 深浅突变,看着像两块画布拼起来的。外层已经铺了一张,这里不用再铺。
+    var showsBackground: Bool = true
+    /// 搜索框占位文字。onboarding 那步只列 AI,叫 "connections" 对不上。
+    var searchPlaceholder: String = "search connections…"
 
     @Environment(AppState.self) private var appState
     @State private var search: String = ""
@@ -88,7 +96,9 @@ struct ConnectionsView: View {
             .frame(maxWidth: 920)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(SidebarBackdrop().ignoresSafeArea())
+        .background {
+            if showsBackground { SidebarBackdrop().ignoresSafeArea() }
+        }
         .task { codexExpiry = ChatGPTOAuth.accessTokenExpiry() }
         // 登录 / 登出后角标要跟着变。connecting 从"某个 id"回到 nil 就是一次
         // 连接动作收尾,借它当信号,不用给 AppState 加观察点。
@@ -103,7 +113,7 @@ struct ConnectionsView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary.opacity(0.5))
-            TextField("search connections…", text: $search)
+            TextField(searchPlaceholder, text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
