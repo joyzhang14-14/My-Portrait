@@ -48,6 +48,9 @@ INTEL.md
 /CLAUDE.md
 /AGENTS.md
 
+# 全量 code review 台账(记录未修的缺陷,不适合公开)
+/code-review/
+
 # ⚠️ Tests/ 整个不上传。
 # 里面的 lab 目录是拿真实采集数据(屏幕 OCR 原文、击键、session、canvas 文本)
 # 做的 gold / fixture,属于隐私数据。2026-07-25 发现它们已经被推到**公开**仓库,
