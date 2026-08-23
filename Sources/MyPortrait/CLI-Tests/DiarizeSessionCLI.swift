@@ -6,12 +6,18 @@ import GRDB
 /// **纯声音离线 diarization 测试工具。** 对一段时间(默认:本地今天)的 wav 段:
 ///   1. 提 CAM++ 声纹(只看声音,完全不用声道/device 信息)
 ///   2. **离线全局聚类**(AHC 平均连接,cosine 阈值自动定人数)—— 取代在线增量
-///   3. 每段用 **AS-norm 校准**的 best-of-N 撞声纹库(Joy/Stan/…)→ 身份
+///   3. 每段用 **AS-norm 校准**的 best-of-N 撞声纹库(本人/对方/…)→ 身份
 ///
-/// 验证:把 device(麦克风=Joy / 系统音频=对方)当 **ground truth 答案**(不参与
+/// 验证:把 device(麦克风=本人 / 系统音频=对方)当 **ground truth 答案**(不参与
 /// 算法),算纯声音判定的准确率 + 混淆。结果写桌面 `diarize_session_result.md`。
 /// 只读,不写库。
 enum DiarizeSessionCLI {
+
+    /// 声纹库里两位说话人的登记名(本人=麦克风侧 / 对方=系统音频侧)。
+    /// 真名不进仓库:跑之前 `export MP_SPEAKER_SELF=<名> MP_SPEAKER_OTHER=<名>`。
+    /// 不设就用「本人/对方」—— 撞库段会全部未匹配,声道/oracle/重登记段不受影响。
+    private static let selfName = ProcessInfo.processInfo.environment["MP_SPEAKER_SELF"] ?? "本人"
+    private static let otherName = ProcessInfo.processInfo.environment["MP_SPEAKER_OTHER"] ?? "对方"
 
     private final class ExitState: @unchecked Sendable { var code: Int32 = 0; var done = false }
     private struct Seg {
@@ -174,7 +180,7 @@ enum DiarizeSessionCLI {
 
                 // 6. 写报告(含 ground-truth 对照)
                 func devTruth(_ d: String) -> String {
-                    d.contains("microphone") ? "Joy(麦)" : (d.contains("system") || d.contains("loopback") ? "Stan(系统)" : "?")
+                    d.contains("microphone") ? "\(selfName)(麦)" : (d.contains("system") || d.contains("loopback") ? "\(otherName)(系统)" : "?")
                 }
                 var md = "# 纯声音 diarization 测试结果\n\n"
                 md += "- 范围起点: \(Date(timeIntervalSince1970: Double(rangeStartMs)/1000))\n"
@@ -183,7 +189,7 @@ enum DiarizeSessionCLI {
 
                 // 6a. 无监督聚类 × 声道纯度(每个簇里 麦/系统 各多少)
                 md += "## A. 无监督聚类 vs 声道答案(纯声音自己分出几个人 + 是否对上声道)\n\n"
-                md += "| 簇 | 段数 | 麦克风(应=Joy) | 系统(应=Stan) | 主导身份(AS-norm撞库) |\n|---|---|---|---|---|\n"
+                md += "| 簇 | 段数 | 麦克风(应=\(selfName)) | 系统(应=\(otherName)) | 主导身份(AS-norm撞库) |\n|---|---|---|---|---|\n"
                 let clusterIds = Set(labels).sorted()
                 for c in clusterIds {
                     let members = valid.filter { clusterOf[$0] == c }
@@ -205,16 +211,16 @@ enum DiarizeSessionCLI {
                     let asn = segIdent[gi]!.name
                     conf[truth, default: [:]][asn, default: 0] += 1
                     if asn == "未匹配" { unk += 1 }
-                    else if (truth.contains("Joy") && asn == "Joy") || (truth.contains("Stan") && asn == "Stan") { correct += 1 }
+                    else if (truth.contains(selfName) && asn == selfName) || (truth.contains(otherName) && asn == otherName) { correct += 1 }
                     else { wrong += 1 }
                 }
                 let decided = correct + wrong
                 md += "- 正确 \(correct) | 标错 \(wrong) | 未匹配 \(unk)\n"
                 md += "- **判了的里准确率: \(decided > 0 ? String(format: "%.0f%%", 100*Double(correct)/Double(decided)) : "n/a")**\n\n"
-                md += "混淆(行=声道答案, 列=纯声音判定):\n\n| 答案＼判定 | Joy | Stan | 未匹配 |\n|---|---|---|---|\n"
-                for truth in ["Joy(麦)", "Stan(系统)"] {
+                md += "混淆(行=声道答案, 列=纯声音判定):\n\n| 答案＼判定 | \(selfName) | \(otherName) | 未匹配 |\n|---|---|---|---|\n"
+                for truth in ["\(selfName)(麦)", "\(otherName)(系统)"] {
                     let row = conf[truth] ?? [:]
-                    md += "| \(truth) | \(row["Joy"] ?? 0) | \(row["Stan"] ?? 0) | \(row["未匹配"] ?? 0) |\n"
+                    md += "| \(truth) | \(row[selfName] ?? 0) | \(row[otherName] ?? 0) | \(row["未匹配"] ?? 0) |\n"
                 }
 
                 // 6c. 逐段明细
@@ -245,11 +251,11 @@ enum DiarizeSessionCLI {
                 let cross = meanPair(micE, sysE, same: false)
                 md += "\n## D. 声道纠缠度(声纹相似度:越接近=越分不开)\n\n"
                 md += "| | 平均 cosine |\n|---|---|\n"
-                md += "| 麦内部(Joy 自己)| \(String(format: "%.3f", intraMic)) |\n"
-                md += "| 系统内部(Stan 自己)| \(String(format: "%.3f", intraSys)) |\n"
-                md += "| **跨声道(Joy↔Stan)** | **\(String(format: "%.3f", cross))** |\n\n"
+                md += "| 麦内部(\(selfName) 自己)| \(String(format: "%.3f", intraMic)) |\n"
+                md += "| 系统内部(\(otherName) 自己)| \(String(format: "%.3f", intraSys)) |\n"
+                md += "| **跨声道(\(selfName)↔\(otherName))** | **\(String(format: "%.3f", cross))** |\n\n"
                 // 决定性:用今天自己的数据当标准(oracle 中心),最近中心分类准确率上限。
-                // 若连这个都≈50%,说明今天的音频里 Joy/Stan 根本没有可分信号(硬上限)。
+                // 若连这个都≈50%,说明今天的音频里本人/对方根本没有可分信号(硬上限)。
                 func centroid(_ A: [[Float]]) -> [Float]? {
                     guard let d = A.first?.count, d > 0 else { return nil }
                     var s = [Float](repeating: 0, count: d)
@@ -262,9 +268,9 @@ enum DiarizeSessionCLI {
                     var oracleCorrect = 0
                     for gi in valid {
                         let e = embs[gi]!
-                        let toJoy = VectorMath.cosineSimilarity(e, jc), toStan = VectorMath.cosineSimilarity(e, sc)
-                        let pred = toJoy >= toStan ? "Joy" : "Stan"
-                        if (segs[gi].device.contains("microphone") && pred == "Joy") || (!segs[gi].device.contains("microphone") && pred == "Stan") { oracleCorrect += 1 }
+                        let toSelf = VectorMath.cosineSimilarity(e, jc), toOther = VectorMath.cosineSimilarity(e, sc)
+                        let pred = toSelf >= toOther ? selfName : otherName
+                        if (segs[gi].device.contains("microphone") && pred == selfName) || (!segs[gi].device.contains("microphone") && pred == otherName) { oracleCorrect += 1 }
                     }
                     oracleAcc = Double(oracleCorrect) / Double(valid.count)
                     md += "**今天自己数据当标准(oracle 中心)最近中心分类:\(oracleCorrect)/\(valid.count) = \(String(format: "%.0f%%", 100*oracleAcc))** —— 这是今天这段音频的理论可分上限。\n\n"
@@ -277,12 +283,12 @@ enum DiarizeSessionCLI {
                 let gP = String(format: "%.0f%%", 100*galleryAcc)
                 md += "\n## E. 结论与建议\n\n"
                 if oracleAcc >= 0.72 {
-                    md += "**今天这段音频里 Joy/Stan 有可分信号(oracle 上限 \(oP))—— 不是无解、不是串音、不是糊成一团。**\n\n"
-                    md += "瓶颈是**声纹库**:用今天自己的数据当标准能分到 \(oP),但撞现有库只有 \(gP)。差的这 \(String(format: "%.0f", 100*(oracleAcc-galleryAcc))) 个点 = **库的域不匹配** —— 你登记的 Joy/Stan 档案跟今天的音频(尤其 Stan 的通话音)来源条件不同,撞不上。\n\n"
+                    md += "**今天这段音频里 \(selfName)/\(otherName) 有可分信号(oracle 上限 \(oP))—— 不是无解、不是串音、不是糊成一团。**\n\n"
+                    md += "瓶颈是**声纹库**:用今天自己的数据当标准能分到 \(oP),但撞现有库只有 \(gP)。差的这 \(String(format: "%.0f", 100*(oracleAcc-galleryAcc))) 个点 = **库的域不匹配** —— 登记的 \(selfName)/\(otherName) 档案跟今天的音频(尤其 \(otherName) 的通话音)来源条件不同,撞不上。\n\n"
                     md += "**修法(可落地,按性价比):**\n"
-                    md += "1. **用代表性真实音重新登记 Joy / Stan**,尤其 Stan 从**真实通话音**多条件登记 —— 让库匹配上「今天这种」域。这是把 \(gP) 拉向 \(oP) 的关键。\n"
+                    md += "1. **用代表性真实音重新登记 \(selfName) / \(otherName)**,尤其 \(otherName) 从**真实通话音**多条件登记 —— 让库匹配上「今天这种」域。这是把 \(gP) 拉向 \(oP) 的关键。\n"
                     md += "2. 同一说话回合的**短段先合并**成 ≥3s 再提声纹(中位才 1.6s,短句声纹不可靠)。\n"
-                    md += "3. AS-norm 阈值按域校准 + 平衡两人样本数(现在 Joy 样本远多于 Stan,best-of-N 偏向 Joy)。\n\n"
+                    md += "3. AS-norm 阈值按域校准 + 平衡两人样本数(现在 \(selfName) 样本远多于 \(otherName),best-of-N 偏向 \(selfName))。\n\n"
                     md += "**老实说上限:\(oP) 本身是「可用但不完美」** —— 通话音被编码降质,CAM++(VoxCeleb 宽带训练)在窄带通话音上吃亏。要再往上得换**抗窄带/电话域**的声纹模型 + 短段合并。但先把库的域对齐,就能从 \(gP) 大幅回血。\n"
                 } else {
                     md += "连 oracle 上限都只有 \(oP) —— 今天这段音频确实缺乏可分信号(编码降质/采集太差),换库也救不回多少,得从采集质量入手。\n"
@@ -293,18 +299,18 @@ enum DiarizeSessionCLI {
                 if reenroll {
                     let enrollIdx = valid.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }
                     let testIdx = valid.enumerated().filter { $0.offset % 2 == 1 }.map { $0.element }
-                    let joyP = enrollIdx.filter { segs[$0].device.contains("microphone") }.map { embs[$0]! }
-                    let stanP = enrollIdx.filter { !segs[$0].device.contains("microphone") }.map { embs[$0]! }
+                    let selfP = enrollIdx.filter { segs[$0].device.contains("microphone") }.map { embs[$0]! }
+                    let otherP = enrollIdx.filter { !segs[$0].device.contains("microphone") }.map { embs[$0]! }
                     let coh = enrollIdx.map { embs[$0]! }
-                    let (jmu, jsd) = joyP.isEmpty ? (0, 1) : topKStats(of: joyP[medoid(joyP)], against: coh)
-                    let (smu, ssd) = stanP.isEmpty ? (0, 1) : topKStats(of: stanP[medoid(stanP)], against: coh)
+                    let (jmu, jsd) = selfP.isEmpty ? (0, 1) : topKStats(of: selfP[medoid(selfP)], against: coh)
+                    let (smu, ssd) = otherP.isEmpty ? (0, 1) : topKStats(of: otherP[medoid(otherP)], against: coh)
                     func id2(_ e: [Float]) -> String {
                         let (tmu, tsd) = topKStats(of: e, against: coh)
-                        let rj = joyP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
-                        let rs = stanP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
+                        let rj = selfP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
+                        let rs = otherP.map { VectorMath.cosineSimilarity(e, $0) }.max() ?? -2
                         let aj = 0.5 * ((rj - tmu)/max(tsd,1e-4) + (rj - jmu)/max(jsd,1e-4))
                         let as_ = 0.5 * ((rs - tmu)/max(tsd,1e-4) + (rs - smu)/max(ssd,1e-4))
-                        return aj >= as_ ? "Joy" : "Stan"
+                        return aj >= as_ ? selfName : otherName
                     }
                     // 质心(平均)匹配:嘈杂音上比 best-of-N 稳。
                     func mean(_ A: [[Float]]) -> [Float]? {
@@ -314,16 +320,16 @@ enum DiarizeSessionCLI {
                         for i in 0..<d { s[i] /= Float(A.count) }
                         VectorMath.l2Normalize(&s); return s
                     }
-                    let jCen = mean(joyP), sCen = mean(stanP)
+                    let jCen = mean(selfP), sCen = mean(otherP)
                     func idCen(_ e: [Float]) -> String {
                         let rj = jCen.map { VectorMath.cosineSimilarity(e, $0) } ?? -2
                         let rs = sCen.map { VectorMath.cosineSimilarity(e, $0) } ?? -2
-                        return rj >= rs ? "Joy" : "Stan"
+                        return rj >= rs ? selfName : otherName
                     }
                     var cN = 0, wN = 0, cC = 0, wC = 0
                     var cf: [String: [String: Int]] = [:]
                     for gi in testIdx {
-                        let truth = segs[gi].device.contains("microphone") ? "Joy" : "Stan"
+                        let truth = segs[gi].device.contains("microphone") ? selfName : otherName
                         if id2(embs[gi]!) == truth { cN += 1 } else { wN += 1 }
                         let pc = idCen(embs[gi]!)
                         cf[truth, default: [:]][pc, default: 0] += 1
@@ -332,14 +338,14 @@ enum DiarizeSessionCLI {
                     let accN = (cN+wN) > 0 ? Double(cN)/Double(cN+wN) : 0
                     let accC = (cC+wC) > 0 ? Double(cC)/Double(cC+wC) : 0
                     md += "\n## F. 域内重登记测试(今天通话音自己登记自己,交替分半,无泄漏)\n\n"
-                    md += "登记: Joy \(joyP.count) 条 / Stan \(stanP.count) 条;测试 \(testIdx.count) 条。\n\n"
+                    md += "登记: \(selfName) \(selfP.count) 条 / \(otherName) \(otherP.count) 条;测试 \(testIdx.count) 条。\n\n"
                     md += "| 匹配法 | 准确率 |\n|---|---|\n"
                     md += "| 撞旧库(best-of-N)| \(String(format: "%.0f%%", 100*galleryAcc)) |\n"
                     md += "| 重登记 best-of-N | \(String(format: "%.0f%%", 100*accN)) |\n"
                     md += "| **重登记 质心(平均)** | **\(String(format: "%.0f%%", 100*accC))** |\n"
                     md += "| oracle 上限 | \(String(format: "%.0f%%", 100*oracleAcc)) |\n\n"
-                    md += "质心匹配混淆 | 答案＼判定 | Joy | Stan |\n|---|---|---|\n"
-                    for t in ["Joy", "Stan"] { let r = cf[t] ?? [:]; md += "| \(t) | \(r["Joy"] ?? 0) | \(r["Stan"] ?? 0) |\n" }
+                    md += "质心匹配混淆 | 答案＼判定 | \(selfName) | \(otherName) |\n|---|---|---|\n"
+                    for t in [selfName, otherName] { let r = cf[t] ?? [:]; md += "| \(t) | \(r[selfName] ?? 0) | \(r[otherName] ?? 0) |\n" }
                     print("[reenroll] best-of-N \(String(format: "%.0f%%", 100*accN)) | 质心 \(String(format: "%.0f%%", 100*accC)) | 旧库 \(String(format: "%.0f%%", 100*galleryAcc)) | oracle \(String(format: "%.0f%%", 100*oracleAcc))")
                 }
 

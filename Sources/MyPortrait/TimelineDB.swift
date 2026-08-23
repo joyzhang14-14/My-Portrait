@@ -971,10 +971,10 @@ struct TimelineDB: Sendable {
             // 1) 找所有同名(case-insensitive,排除 hallucination)。
             //    历史 bug:有时 diarization 自动建的 speaker 在用户改名前先被
             //    rename,name 时机错位 → 上次 upsert 没命中老条目,又 INSERT
-            //    一条新的,造成两个 "Joy"。这里取所有同名,**保留 id 最小**
+            //    一条新的,造成两个同名簇。这里取所有同名,**保留 id 最小**
             //    (= 最老 = sample 累计最多的那条)作为 keeper,后面的 dupe
             //    合并进 keeper 后删掉,保证 voice training 之后只有一条同名。
-            // 同名只在**同一模型**内 dedup —— 英文 Joy 和中文 Joy 是两套独立声纹,不合并。
+            // 同名只在**同一模型**内 dedup —— 同一名字在英文/中文模型下是两套独立声纹,不合并。
             let duplicateIds = try Int64.fetchAll(db, sql: """
                 SELECT id FROM speakers
                 WHERE LOWER(name) = LOWER(:name)
@@ -1214,7 +1214,7 @@ struct TimelineDB: Sendable {
     }
 
     /// 各 speaker 的质心向量（id → centroid）。给 "Organize with AI" 的声纹护栏用：
-    /// 同名簇只有质心 cosine 够高才合并，挡住"名同声不同"(如 #20 名叫 Joy 实为 Stan)。
+    /// 同名簇只有质心 cosine 够高才合并，挡住"名同声不同"(如 #20 挂本人的名实为对方)。
     func speakerCentroids() -> [Int64: [Float]] {
         guard exists else { return [:] }
         do {

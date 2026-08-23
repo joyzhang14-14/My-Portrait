@@ -414,7 +414,7 @@ actor PortraitDBImpl: PortraitDB {
     /// 余弦相似度阈值。> 此值判定同一说话人（对齐 screenpipe 的 0.45）。
     private static let speakerMatchThreshold: Float = 0.45
     /// 判别裕度:命中者必须比「最强异名候选」高出这么多,否则判 ambiguous —— 防
-    /// Joy/Stan 声纹接近时把边界段标反(宁可留空也别认错)。
+    /// 本人/对方声纹接近时把边界段标反(宁可留空也别认错)。
     private static let speakerMargin: Float = 0.10
     /// 每个说话人最多保留的样本向量数。
     private static let maxEmbeddingsPerSpeaker = 10

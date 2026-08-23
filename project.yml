@@ -183,7 +183,7 @@ targets:
         #
         # 历史注释曾说"自签名证书 macOS TCC 对 Screen Recording 主动拒绝
         # (auth_value 卡 0)"—— 经 My-Orphies(MyOrphiesDev 自签 cert)实测,
-        # **这条不成立**(可能早期 macOS 14.x 有过 bug 已修),Joy 现在
+        # **这条不成立**(可能早期 macOS 14.x 有过 bug 已修),我现在
         # 本地 Signing.local.xcconfig 走 MyPortraitDev 自签 cert + Manual
         # 签,跟 release dmg 共享 TCC 权限。
         # DEVELOPMENT_TEAM 由 Support/Signing.xcconfig 提供(默认 VYHNX2Y2AL,

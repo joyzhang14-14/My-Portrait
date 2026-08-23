@@ -863,7 +863,7 @@ struct IntegrationIcon: View {
     @State private var realIcon: NSImage? = nil
 
     /// `Image(named:)` + SwiftUI 在某些 macOS / 构建配置下加载 asset 不稳:
-    /// Stan 反馈过 v1.0.0 的 Codex / OpenAI / Gemini / Perplexity / DeepSeek
+    /// v1.0.0 收到反馈:Codex / OpenAI / Gemini / Perplexity / DeepSeek
     /// 全是空白方块,即使 Assets.car 验证过有完整数据。换 `NSImage(named:)`
     /// **直接走 AppKit**,绕过 SwiftUI 的 template-rendering-intent 解析,
     /// 还能在加载失败时拿到 nil 让 view 显式 fallback 到 letter,不会再渲

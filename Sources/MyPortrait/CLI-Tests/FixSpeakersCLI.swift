@@ -4,8 +4,8 @@ import GRDB
 /// 一次性数据修复 CLI：`--fix-speakers`。按声纹 cosine 分析整理被 bug 版本打乱的
 /// 说话人簇（这些 id 来自人工 cosine 分析 + 用户确认，hardcode）。
 ///
-///   真 Joy = {#10, #13(训练), #18, #19}（彼此 cosine 0.75–0.92）→ 合进训练的 #13
-///   Stan   = {#15, #20}（#20 被误标 Joy，实为 Stan：#20↔#15 = 0.82，#20↔真Joy ≈ 0.24）
+///   真本人 = {#10, #13(训练), #18, #19}（彼此 cosine 0.75–0.92）→ 合进训练的 #13
+///   对方   = {#15, #20}（#20 被误标本人，实为对方：#20↔#15 = 0.82，#20↔真本人 ≈ 0.24）
 ///            → 取消 #15 hallucination，#20 合进 #15
 ///   #17    = 污染/混音簇（质心对谁都 ~0.4）→ 标 hallucination 排除匹配池
 ///
@@ -80,21 +80,21 @@ enum FixSpeakersCLI {
             printState("BEFORE")
             print("")
 
-            // 1. 真 Joy 合进训练的 #13
+            // 1. 真本人合进训练的 #13
             var moved = 0
             for m in [Int64(10), 18, 19] { moved += try mergeOne(keep: 13, merge: m) }
-            print("真 Joy {10,18,19} → #13：移动 \(moved) 段转录")
-            // 2. Stan：取消 #15 hallucination，#20(误标Joy) 合进 #15
+            print("真本人 {10,18,19} → #13：移动 \(moved) 段转录")
+            // 2. 对方：取消 #15 hallucination，#20(误标本人) 合进 #15
             try setHallucination(15, 0)
             let stanMoved = try mergeOne(keep: 15, merge: 20)
-            print("Stan：#15 取消 hallucination；#20 → #15：移动 \(stanMoved) 段")
+            print("对方：#15 取消 hallucination；#20 → #15：移动 \(stanMoved) 段")
             // 3. #17 污染簇 → 排除
             try setHallucination(17, 1)
             print("#17 污染簇 → 标 hallucination（排除匹配池）")
             print("")
 
             printState("AFTER")
-            print("\n✅ 完成。匹配池(hall=0)现在应为 Joy#13 + Stan#15。")
+            print("\n✅ 完成。匹配池(hall=0)现在应为 本人#13 + 对方#15。")
         } catch {
             FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
             exit(1)
@@ -102,10 +102,10 @@ enum FixSpeakersCLI {
         exit(0)
     }
 
-    /// 后续纠正(`--consolidate-joy`):试听确认那些被聚成"别人"的簇其实都是 Joy
-    /// (只是嘈杂/远场)。把所有非训练、非噪声测试的簇**合并进训练的 Joy#13**(转录 +
-    /// 样本向量都搬过去,样本进 Joy 的 fallback 池让它更耐噪、减少将来再碎),删掉这些簇。
-    /// matchSpeaker 是质心优先,Joy 的干净质心不被这些样本带偏(质心 merge 时不重算)。
+    /// 后续纠正(`--consolidate-self`):试听确认那些被聚成"别人"的簇其实都是本人
+    /// (只是嘈杂/远场)。把所有非训练、非噪声测试的簇**合并进训练的 本人#13**(转录 +
+    /// 样本向量都搬过去,样本进本人的 fallback 池让它更耐噪、减少将来再碎),删掉这些簇。
+    /// matchSpeaker 是质心优先,本人的干净质心不被这些样本带偏(质心 merge 时不重算)。
     /// 动态扫描当前所有 hall=0 且非训练的簇(不再 hardcode id),稳健。
     static func consolidateNoisyJoy() {
         let base = Storage.rootURL
@@ -141,7 +141,7 @@ enum FixSpeakersCLI {
             }
             printState("BEFORE"); print("")
 
-            // keep = 训练过的 speaker(应只有一个 = Joy);targets = 其余所有 hall=0 非训练簇。
+            // keep = 训练过的 speaker(应只有一个 = 本人);targets = 其余所有 hall=0 非训练簇。
             // 动态扫描,不 hardcode id(app 会不断重聚出新的嘈杂簇)。
             let keepId: Int64
             let targets: [(Int64, String)]
@@ -169,7 +169,7 @@ enum FixSpeakersCLI {
                 print("  #\(mid) \(name) → #\(keepId):归并 \(moved) 段")
             }
             print(""); printState("AFTER")
-            print("\n✅ 纠正完成。匹配池(hall=0)现在应只剩干净的 Joy#13。")
+            print("\n✅ 纠正完成。匹配池(hall=0)现在应只剩干净的 本人#13。")
         } catch {
             FileHandle.standardError.write("ERROR: \(error)\n".data(using: .utf8)!)
             exit(1)

@@ -9,7 +9,7 @@ import SQLite3
 ///   mp-query search        --start "1h ago" [--q "..."] [--app "Chrome"] [--limit 10]
 ///   mp-query activity-summary --start "1h ago"
 ///   mp-query memories      --q "..." [--limit 20]
-///   mp-query audio         --start "1h ago" [--speaker "Joy"]
+///   mp-query audio         --start "1h ago" [--speaker "Alice"]
 ///
 /// 时间格式:
 ///   - 绝对:`2026-05-27T15:00:00Z` 或 `2026-05-27 15:00:00`(本地时区)
@@ -560,7 +560,7 @@ enum MPQueryCLI {
           mp-query search --start "today" --q "deadline" --content ocr
           mp-query memories --q "preference" --scope portrait
           mp-query read --path portrait/personality/curiosity.md
-          mp-query audio --start "30m ago" --speaker "Joy"
+          mp-query audio --start "30m ago" --speaker "Alice"
         """
         FileHandle.standardError.write(Data((usage + "\n").utf8))
     }

@@ -1985,7 +1985,7 @@ struct MemorySettingsView: View {
             // 右沿 + 内 padding 都对齐。
             // 原来用 DatePicker(.hourAndMinute) 出来的是 stepperField
             // 风格(内嵌小输入框 + 外挂上下箭头),宽度跟同一行 Frequency
-            // Picker 视觉对不齐,Stan 复现"time 右侧选项框左右 padding
+            // Picker 视觉对不齐,收到的反馈"time 右侧选项框左右 padding
             // 不一致"就是这条。改成 menu 后两行控件一模一样。
             HStack(spacing: 4) {
                 Picker("", selection: hourBinding(dateBinding)) {

@@ -113,8 +113,8 @@ struct MyPortraitApp: App {
             FixSpeakersCLI.run()
             // run() exits the process internally.
         }
-        // 纠正:把所有检测簇合并进训练的 Joy(确认这批数据基本全是本人时用)。
-        if args.contains("--consolidate-joy") {
+        // 纠正:把所有检测簇合并进训练的本人簇(确认这批数据基本全是本人时用)。
+        if args.contains("--consolidate-self") {
             FixSpeakersCLI.consolidateNoisyJoy()
             // 内部 exit。
         }

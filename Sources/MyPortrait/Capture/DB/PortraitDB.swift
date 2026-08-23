@@ -107,7 +107,7 @@ protocol PortraitDB: Sendable {
     // MARK: - 说话人识别（speaker diarization）
 
     /// 找匹配的说话人。`embedding` 须已 L2 归一化。质心余弦 > 阈值才算候选;
-    /// 命中需明显比「最强异名候选」更近(裕度),否则判 `.ambiguous`(防 Joy/Stan
+    /// 命中需明显比「最强异名候选」更近(裕度),否则判 `.ambiguous`(防本人/对方
     /// 声纹接近时把边界段标反)。详见 `SpeakerMatch`。
     /// `model` = 当前 embedding 模型 id（`en_campplus`/`zh_campplus`/...）—— 只跟
     /// 同一模型产的声纹比对(不同模型向量空间不兼容)。
