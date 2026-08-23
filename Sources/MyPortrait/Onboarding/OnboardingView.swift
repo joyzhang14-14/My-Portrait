@@ -653,7 +653,7 @@ private struct MemoryProviderStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 这一步的说明**不收进 ⓘ**(08-09):这是全流程里唯一
+                // 这一步的说明**不收进 ⓘ**(08-09 update):这是全流程里唯一
                 // 需要用户理解"我在选什么"才能选对的一步,藏起来等于让他瞎选。
                 StepHeader(title: "Choose AI model for pipelines")
                 Text(Markdown.inline("Turns your captured activity into **events and a portrait**. **Main model** for the heavy passes, **light model** for the frequent cheap ones."))
@@ -696,7 +696,7 @@ private struct MemoryProviderStep: View {
     /// provider 配置已 per-pipeline(SchedulerConfig)。onboarding 只让用户选一次,
     /// **同一个选择 seed 进全部 4 个 pipeline**(event/portrait/personality/
     /// writingStyle);用户之后可在 Settings 里给每个 pipeline 单独改。
-    /// 07-30:writingCapture 从这里移除 —— 它不跑模型了,没有 provider 可 seed。
+    /// 07-30 update:writingCapture 从这里移除 —— 它不跑模型了,没有 provider 可 seed。
     private static let pipelineKPs: [WritableKeyPath<MyPortraitConfig, SchedulerConfig>] = [
         \.scheduler.event, \.scheduler.portrait, \.scheduler.personality,
         \.scheduler.writingStyle,
@@ -844,7 +844,7 @@ private struct SchedulerStep: View {
                     title: "Personality refresh",
                     info: "Re-reads events and portrait to update your **personality tags**.",
                     config: \.scheduler.personality)
-                // 07-30:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
+                // 07-30 update:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
                 // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
                 schedulerCard(
                     title: "Writing style",

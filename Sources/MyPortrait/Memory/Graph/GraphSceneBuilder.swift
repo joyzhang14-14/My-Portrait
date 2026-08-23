@@ -140,7 +140,7 @@ enum GraphSceneBuilder {
         }
 
         // hub 列表(真 folder + 虚拟 Unclassified),叶数降序定圆弧顺序。
-        // folder 存活门(07-10 定稿):气泡内核心球(weight≥beltWeightMax,
+        // folder 存活门(07-10 update):气泡内核心球(weight≥beltWeightMax,
         // 有连线)不足 folderMinCoreEvents(3)个的 folder 不上画布 —— weight
         // 衰减成陨石后核心数自然减少,衰减殆尽的 folder 消失;其全部剩余
         // event(核心+陨石)并入 Unclassified(灰)继续显示,数据不动。
@@ -265,7 +265,7 @@ enum GraphSceneBuilder {
         // 日期映射 × 气泡尺度(叶少则全家线等比缩短);hub→主球弹簧
         // rest = 主球半径 + 气泡半径 + 缝(气泡贴主球排布,角度由
         // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
-        // 陨石带只在 Events 画布(07-03 定稿)。
+        // 陨石带只在 Events 画布(07-03 update)。
         let beltEnabled = zone == .events
         // 单环重构:全场唯一一个陨石环,**所有 belt 家共享全局层基线**
         // (每层径向起点由最大 belt 家 = specs 降序首个有陨石的家产出,
@@ -282,7 +282,7 @@ enum GraphSceneBuilder {
             (rootSpec.map { [(spec: $0, isRoot: true)] } ?? []) + specs.map { (spec: $0, isRoot: false) }
         for (spec, isRoot) in workList {
             let r = isRoot ? GraphConstants.mainRadius : hubRadius(spec)
-            // 陨石带(07-03):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
+            // 陨石带(07-03 update):weight<1.5 从气泡拿掉(气泡按剩余叶算,变小),
             // 移到气泡外侧背主球方向的弧带;hub 球径/连接强度仍按全员算。
             // 主球组不分带 —— 用户要的是"都连接主球",低 weight 也照连。
             let beltMembers = (beltEnabled && !isRoot)
@@ -342,7 +342,7 @@ enum GraphSceneBuilder {
                                        springStrength: GraphConstants.hubSpringStrength))
             }
 
-            // 线长 = 排名 + 日期间隔压缩映射(07-02 定稿,保留)× 气泡尺度:
+            // 线长 = 排名 + 日期间隔压缩映射(07-02 update,保留)× 气泡尺度:
             // 家内按 last_occurred 升序,相邻线长差 = 1 + ln(1+日期差) 槽
             //(差 1 天可见,差 1 月更长但压缩,绝不相等);最新贴 hub
             //(floor 比例),最旧顶到气泡边缘 —— 整家等比随气泡缩放。
@@ -369,7 +369,7 @@ enum GraphSceneBuilder {
                 let m = coreMembers[mi]
                 let idx = nodes.count
                 let lr = leafRadius(m)
-                // 排列随机性(07-02 反馈):日期映射之上叠 ±jitter 的确定性
+                // 排列随机性(07-02 update):日期映射之上叠 ±jitter 的确定性
                 // 抖动(路径哈希,不是随机数 —— 同数据每次打开布局一致),
                 // 打破同心圆环的机械感;clamp 保证不出气泡边缘。
                 // 径向按 √ 映射(07-02 扁圆反馈):圆盘面积 ∝ 半径²,线性
@@ -389,7 +389,7 @@ enum GraphSceneBuilder {
                                        halfWidthB: GraphConstants.leafEdgeEndWidth(ballRadius: r)))
             }
 
-            // 陨石带节点(07-03):三层圈按 weight 分档(最外=最低),每层
+            // 陨石带节点(07-03 update):三层圈按 weight 分档(最外=最低),每层
             // 弧内槽位 = 均匀 + 路径哈希抖动(确定性);弧宽随内容长到上限,
             // 超容量靠碰撞力挤成局部双排。无连接线(kind 仍是 eventLeaf,
             // hover/浮窗/拖拽与普通球完全一致),颜色随自家 folder。
@@ -400,7 +400,7 @@ enum GraphSceneBuilder {
                           : m.weight < GraphConstants.beltTier1Max ? 1 : 0
                     tiers[t].append(m)
                 }
-                // 扇形云家位(07-03 三稿):层内→外串接(高 weight 在前),
+                // 扇形云家位(07-03 update):层内→外串接(高 weight 在前),
                 // 弧度先展开再往外延长 —— 小球自然落在外缘,分类是趋势
                 // 不是分带,无空隙。
                 var flat: [(m: ScannedFile, t: Int)] = []

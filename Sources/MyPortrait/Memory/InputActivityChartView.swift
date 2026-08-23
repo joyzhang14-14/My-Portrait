@@ -44,7 +44,7 @@ struct InputActivityChartView: View {
     /// 当前高亮的 record(定位后 ~2s 淡出)。
     @State private var highlightedId: Int64? = nil
     /// wr chip 跳转的独占展示:非 nil 时 records 列表**只显示这一条**
-    /// (07-10 定稿"只展示那一张")。用户任何选中操作/切天即清除恢复。
+    /// (07-10 update "只展示那一张")。用户任何选中操作/切天即清除恢复。
     @State private var focusId: Int64? = nil
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
@@ -63,7 +63,7 @@ struct InputActivityChartView: View {
     @State private var reloadGen = 0
     @Environment(\.colorScheme) private var colorScheme
 
-    // dev mode 不读真实打字库(08-10):演示里不能出现真实击键。
+    // dev mode 不读真实打字库(08-10 update):演示里不能出现真实击键。
     // dev 目录没有 portrait.sqlite → 返回 nil,页面走空态。
     var body: some View {
         VStack(spacing: 0) {
@@ -109,7 +109,7 @@ struct InputActivityChartView: View {
     }
 
     /// records 就绪后:**把目标 record 的时间段设为图表选中窗口**(等同手动
-    /// 框选那段;07-10 定稿"目标段设为画布中心")—— records 列表随选中
+    /// 框选那段;07-10 update "目标段设为画布中心")—— records 列表随选中
     /// 过滤到该窗口,目标卡片直接在台前,不再依赖全天长列表的 LazyVStack
     /// 滚动(懒加载下 scrollTo 不可靠,实测滚不到)。再展开 + 高亮。
     /// 目标不在当前 records(天没对上/reload 未完)则不动,留待下一次 reload
@@ -566,7 +566,7 @@ struct MinuteBuckets: Sendable {
 
     /// 选中窗口视觉外扩(分钟)。曲线画的是**平滑值**(±smoothRadius)+ 样条圆角,
     /// 比 raw 活动边缘多探出 ~3min;带子贴 raw 边收,曲线尾巴就总露在带外
-    /// ("总是差一捏捏",2026-06-04 实测:raw 末键 02:11,平滑曲线到 02:13 才归零)。
+    /// ("总是差一捏捏",2026-06-04 update 实测:raw 末键 02:11,平滑曲线到 02:13 才归零)。
     /// 提交窗口两端各外扩此值盖住裙边;外扩分钟 raw=0,keys 计数不变。
     static let visualPad = smoothRadius + 1
 

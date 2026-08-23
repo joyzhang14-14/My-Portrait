@@ -154,7 +154,7 @@ enum MPFoldersCLI {
             validated.append(rel)
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
-        // 自动建 folder 也在创建时随机固化一色(07-10 定稿:随机色生成
+        // 自动建 folder 也在创建时随机固化一色(07-10 update:随机色生成
         // 后永不变;原来 CLI 建的 folder colorHex=nil,落进每次启动漂移的
         // hashValue 默认色 = 颜色冲突的历史遗留根因之一)。
         let used = Set(EventFolderStore.loadAll().compactMap(\.colorHex))

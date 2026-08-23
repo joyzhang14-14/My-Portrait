@@ -259,7 +259,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
-        // 08-01:版本号行和 "Open ~/.portrait/" 都删了(没人用)。
+        // 08-01 update:版本号行和 "Open ~/.portrait/" 都删了(没人用)。
         // 数据目录的入口仍在 Settings → Storage 的 Data directory 卡片上。
 
         menu.addItem(devModeBanner)
@@ -280,7 +280,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         statusItem.isVisible = visible
     }
 
-    // 08-01:setCustomIconPath / customIconPath 删掉 —— 菜单栏图标现在是三盏
+    // 08-01 update:setCustomIconPath / customIconPath 删掉 —— 菜单栏图标现在是三盏
     // 实时采集灯,不再允许换成静态图(换了灯就没了,这个入口在 Display 页也已删)。
 
     private func refreshIcon() {
@@ -405,7 +405,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         (NSApp.delegate as? AppDelegate)?.showMainWindow()
     }
 
-    // 08-01:openPortraitDir 随菜单项一起删 —— 已无调用方。
+    // 08-01 update:openPortraitDir 随菜单项一起删 —— 已无调用方。
     // ConfigStore.openPortraitDir() 本体还在,Storage 页那个 Open 按钮在用。
 
     @objc private func quit() {

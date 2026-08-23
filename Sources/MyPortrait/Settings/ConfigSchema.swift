@@ -15,7 +15,7 @@ import Foundation
 /// support `keyEncodingStrategy`). Missing keys are tolerated via custom
 /// `init(from:)` that falls back to default-init values.
 struct MyPortraitConfig: Codable, Equatable {
-    // 3(08-09):认证界面补进 privacy.ignored_apps —— 见 migrateSeedAuthApps。
+    // 3(08-09 update):认证界面补进 privacy.ignored_apps —— 见 migrateSeedAuthApps。
     static let currentSchemaVersion = 3
 
     var schemaVersion: Int   = currentSchemaVersion
@@ -64,7 +64,7 @@ struct MyPortraitConfig: Codable, Equatable {
         migrateCronHistoryToDisplay(from: c)
     }
 
-    /// 一次性迁移(08-09):`cron_job_history_limit` 从 `[general]` 搬到
+    /// 一次性迁移(08-09 update):`cron_job_history_limit` 从 `[general]` 搬到
     /// `[display]` —— 设置项挪到了 Display 页最下面,key 不跟着搬的话,
     /// 那一页右上角的 Reset 重置不到它,General 页的 Reset 反而会。
     ///
@@ -86,7 +86,7 @@ struct MyPortraitConfig: Codable, Equatable {
         display.cronJobHistoryLimit = old
     }
 
-    /// 一次性迁移(08-09):把认证界面补进 `privacy.ignored_apps`。
+    /// 一次性迁移(08-09 update):把认证界面补进 `privacy.ignored_apps`。
     ///
     /// 新装用户走 `PrivacyConfig.ignoredApps` 的默认值就有了;**老用户的
     /// config 里已经存了这个数组**,默认值对他们不生效,所以这里补一次。
@@ -103,7 +103,7 @@ struct MyPortraitConfig: Codable, Equatable {
         }
     }
 
-    /// 一次性迁移(08-06):portrait / writing style 这两条 pipeline 全程只有
+    /// 一次性迁移(08-06 update):portrait / writing style 这两条 pipeline 全程只有
     /// 一个 LLM 调用,Settings 里那两个 "Light model" 下拉从来没人读。
     ///
     /// ⚠️ **writing style 读的一直是 light 那档**(`resolvedModelLight`),
@@ -401,7 +401,7 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    // 07-30:writingCapture 整块从 scheduler 配置里摘掉 —— typing capture 从零
+    // 07-30 update:writingCapture 整块从 scheduler 配置里摘掉 —— typing capture 从零
     // 重写,新逻辑不跑模型,既不需要 provider/model 也不需要定时批处理。
     // 旧 config.toml 里残留的 [scheduler.writing_capture] 会被忽略
     //(dflt 解码只认 CodingKeys 里列出的键)。
@@ -434,7 +434,7 @@ struct SchedulerSettings: Codable, Equatable {
 
 // MARK: - Display
 
-/// 通用的 5 档速度等级(07-11:Apple 风,不显示数值)。图谱里有两个独立
+/// 通用的 5 档速度等级(07-11 update:Apple 风,不显示数值)。图谱里有两个独立
 /// 设置复用它,各取各的倍率映射(medium=1.0=各自的现状手感):
 ///  - `display.graphAnimationSpeed` → `animationScale`(物理动画)
 ///  - `display.graphPulseSpeed`     → `pulseScale`(神经脉冲,纯渲染)
@@ -503,7 +503,7 @@ struct DisplayConfig: Codable, Equatable {
     var graphAnimationSpeed:     SpeedLevel = .medium
     /// 神经脉冲速度(点 hub 的冲击波 + 抵达点亮)。默认中等=当前手感。
     var graphPulseSpeed:         SpeedLevel = .medium
-    /// 极简观感(07-11):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
+    /// 极简观感(07-11 update):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
     /// 级联,球仍按原时序逐个亮起(连锁激活保留),只是传播过程不可见。
     var graphHideLinks:          Bool = false
     /// Memories 上次停在哪个 scope / 视图形态 —— 每次切换写回,下次进来直接
@@ -571,7 +571,7 @@ struct GeneralConfig: Codable, Equatable {
     // 最下面,右上角 Reset 要跟着 display 走)。老 config 里那一行由
     // MyPortraitConfig.migrateCronHistoryToDisplay 搬值,读完不回写,下次
     // 保存自动从文件消失。
-    // auto_scan_imports 已下线(07-28):Import 页固定手动模式 ——
+    // auto_scan_imports 已下线(07-28 update):Import 页固定手动模式 ——
     // 每个来源显示「未扫描」+ Scan 按钮,点了才扫。旧 config.toml 里
     // 残留的这个键会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
     init() {}

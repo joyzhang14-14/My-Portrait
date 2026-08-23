@@ -40,7 +40,7 @@ public struct GraphNode: Identifiable, Sendable {
     /// 成圆,圆径由内容面积决定 —— 叶多圆大、叶少圆小。仅非主球 hub
     /// 有值。物理保证:气泡间/气泡与主球绝不重叠,叶子不出自家圆。
     public var hubBubbleRadius: Double? = nil
-    /// 陨石带层号(07-03 新需求):weight<1.5 的 event 不进气泡,
+    /// 陨石带层号(07-03 update):weight<1.5 的 event 不进气泡,
     /// 松散漂在自家气泡外围(偏背主球侧)。0=最内层(1~1.5)/
     /// 1=中层(0.5~1)/2=最外层(0~0.5);nil=普通节点。无连接线。
     /// 07-03 二稿:不绑定隐形圈 —— 圈只施加吸引力,拖拽可冲散,

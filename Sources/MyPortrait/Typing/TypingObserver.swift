@@ -535,7 +535,7 @@ final class TypingObserver {
     /// 触发发送,不 spam)。研究参照:macism 称 CJK race 完全稳定要 ~150ms。
     private static let submitRaceDelaysMs: [UInt64] = Array(stride(from: 5, through: 200, by: 5))
 
-    /// 延长窗(2026-07-31 方案):读到「IME 中间态」(含汉字+ASCII 拼音尾巴)
+    /// 延长窗(2026-07-31 update):读到「IME 中间态」(含汉字+ASCII 拼音尾巴)
     /// 就把摇读延长到 1000ms 硬上限,步长放宽到 20ms 控开销(最多再读 40 次)。
     /// 依据:Electron 的 AX 树滞后但**保序**(ev3598 实证「敌人」到了「是谁」也会
     /// 到,只是更晚),多等就能等到落定值。停止条件同步改:**读到空不再立即收口**——

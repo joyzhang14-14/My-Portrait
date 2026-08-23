@@ -4,7 +4,7 @@ import Foundation
 /// 而后台采集与 pipeline 继续读写真实的 `~/.portrait`。用来调"新用户第一次
 /// 打开"的观感、以及录演示视频而不暴露真实数据。
 ///
-/// 三条铁律(08-09 定,改这个文件前先读):
+/// 三条铁律(08-09 update,改这个文件前先读):
 ///
 /// 1. **capture 永远写 `~/.portrait`** —— dev mode 期间一帧都不能少。
 /// 2. **pipeline 定时任务永远读写 `~/.portrait`** —— 它产出的是真实记忆。
@@ -15,7 +15,7 @@ import Foundation
 ///    这条线画在配置项上而不是调用方上,是因为后者要人工判断 ~85 处读取点,
 ///    漏一处(比如 storage.retentionDays)就是真删数据。
 enum DevMode {
-    /// `~/.portrait-dev` —— 演示数据根。**不进 git**(08-09 定):
+    /// `~/.portrait-dev` —— 演示数据根。**不进 git**(08-09 update):
     /// 生成脚本在 `Scripts/` 里进版本控制,数据本身随时可重新生成。
     static var rootURL: URL {
         FileManager.default.homeDirectoryForCurrentUser

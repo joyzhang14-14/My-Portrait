@@ -238,7 +238,7 @@ struct TimelineDB: Sendable {
 
         for chunk in chunks {
             let placeholders = chunk.map { _ in "?" }.joined(separator: ",")
-            // 2026-08-04:老帧的 full_text 可能是 AX 控件树(v43 之前 OCRService 的
+            // 2026-08-04 update:老帧的 full_text 可能是 AX 控件树(v43 之前 OCRService 的
             // AX 快路留下的,54,899 帧),`ocr_backfill_text` 是事后 Vision 补跑的
             // 真实屏幕文字 —— 有补跑就优先用它。写侧只追加不覆盖,详见 Schema v43。
             let sql = """

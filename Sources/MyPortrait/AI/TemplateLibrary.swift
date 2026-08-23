@@ -221,7 +221,7 @@ final class TemplateLibrary {
               window: .today),
 
 
-        // (08-10 删掉 "Folder Suggestions" 这条种子:归档到文件夹已经是
+        // (08-10 update 删掉 "Folder Suggestions" 这条种子:归档到文件夹已经是
         //  pipeline 自己在做的事,不再需要用户手动点一个快捷方式去问。
         //  老用户的 UserDefaults 里还留着,由 removeRetiredFolderSeed 清一次。)
     ]

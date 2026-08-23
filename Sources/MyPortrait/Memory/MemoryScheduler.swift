@@ -71,7 +71,7 @@ final class MemoryScheduler {
 
     /// 每次 event-processing 跑最多处理几个未处理日(最老的先跑)。
     ///
-    /// 2026-08-05:原来是 config `memory.event_day_cap` + Settings 里一个滑块,
+    /// 2026-08-05 update:原来是 config `memory.event_day_cap` + Settings 里一个滑块,
     /// 现在硬编码 7 天,字段和那张卡都删了。**可能之后会改回可配** ——
     /// 恢复方式见 ConfigSchema 里 event_day_cap 那条注释。
     private let dayCap: Int = 7
@@ -594,7 +594,7 @@ final class MemoryScheduler {
             tier1Ran = true
         }
 
-        // 07-30:写作采集的定时触发**整个拿掉**。typing capture 从零重写,新逻辑
+        // 07-30 update:写作采集的定时触发**整个拿掉**。typing capture 从零重写,新逻辑
         // 不跑模型,也就不需要「挑个夜里定时批处理」这套 —— 定时器存在的理由
         // (攒一天、半夜烧 token)没有了。runWritingCaptureJob() 保留但已无
         // 调用方,新逻辑要定时的话在这里重新挂。
@@ -688,7 +688,7 @@ final class MemoryScheduler {
     /// 已经有 pending_review / processing → backlog 内部自带 guard 跳过,不会
     /// 重复跑。
     func runWritingCaptureJob() async {
-        // 07-30:这套 pass 处理停用(见 WritingCaptureWorker.typingRebuildV1Enabled)。
+        // 07-30 update:这套 pass 处理停用(见 WritingCaptureWorker.typingRebuildV1Enabled)。
         // 在这里就返回 —— 不然每个 tick 都会走到 runBacklog 抛错的 catch 分支,
         // 弹一次失败通知 + 记一条 failure,纯噪音。
         guard WritingCaptureWorker.typingRebuildV1Enabled else {
@@ -1653,7 +1653,7 @@ final class MemoryScheduler {
     }
 
     // dismissDay 已删除 —— 它把失败阶段直接标 complete,那天从此永不重跑。
-    // 2026-07-25:OAuth refresh 连炸 4 天,attention 行只有 Dismiss 一个按钮,
+    // 2026-07-25 update:OAuth refresh 连炸 4 天,attention 行只有 Dismiss 一个按钮,
     // 点完 5 天数据被静默丢弃。现在 attention 行只有 "Retry now"(resetDay),
     // 没有"放弃这一天"这个选项 —— 每天都必须跑到。别加回来。
 

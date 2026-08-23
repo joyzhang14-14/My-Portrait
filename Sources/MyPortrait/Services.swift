@@ -502,7 +502,7 @@ final class Services {
         coordinator.setIgnoredApps(Set(p.ignoredApps))
         coordinator.setIgnoredUrlPatterns(p.ignoredUrls)
         coordinator.setIgnoredCategories(p.ignoredCategories)
-        // (07-21:masking 永远开、incognito 跳帧永久关,两条接线已删。)
+        // (07-21 update:masking 永远开、incognito 跳帧永久关,两条接线已删。)
         // 名单写死在 DRMGate,用户不可改;这里只按总开关决定推固定名单还是空。
         coordinator.setPauseCaptureList(
             apps: p.pauseForProtectedVideo ? DRMGate.pausedApps : [],
@@ -528,7 +528,7 @@ final class Services {
     }
 
     /// 把 ConfigStore.capture.screen 的两个跳帧开关(锁屏/最低亮度)推给
-    /// coordinator。(07-21:原 pushOCRBooster 改造 —— booster 开关删除永远开。)
+    /// coordinator。(07-21 update:原 pushOCRBooster 改造 —— booster 开关删除永远开。)
     private func pushCaptureGates() {
         let s = ConfigStore.shared.current.capture.screen
         let locked = s.pauseWhenLocked

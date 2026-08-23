@@ -29,7 +29,7 @@ struct StorageSettingsView: View {
                     icon: "folder"
                 ) {
                     HStack(spacing: 6) {
-                        // 07-28:原 "Change" 换成 "Open" —— 接管被删掉的
+                        // 07-28 update:原 "Change" 换成 "Open" —— 接管被删掉的
                         // 每页右上角 "Open ~/.portrait" 按钮的入口。
                         Button("Open") { config.openPortraitDir() }
                             .font(.system(size: 12, weight: .medium))
@@ -583,7 +583,7 @@ private struct AutoDeleteModeRow: View {
                         .foregroundStyle(isActive ? Color.white.opacity(0.95) : Theme.textPrimary.opacity(0.75))
                 }
                 .frame(width: 30, height: 30)
-                // 灰字 subtitle 删了(2026-08-05)。AutoDeleteMode.subtitle 还在,
+                // 灰字 subtitle 删了(2026-08-05 update)。AutoDeleteMode.subtitle 还在,
                 // 想加回来直接放这儿。
                 HStack(spacing: 6) {
                     Text(mode.label)

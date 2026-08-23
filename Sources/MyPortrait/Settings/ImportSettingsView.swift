@@ -22,7 +22,7 @@ struct ImportSettingsView: View {
     @State private var config = ConfigStore.shared
 
     @State private var scan: ScreenpipeImporter.ScanResult? = nil
-    /// 固定手动模式(07-28 删掉 auto-scan 开关):初始「未扫描」,
+    /// 固定手动模式(07-28 update 删掉 auto-scan 开关):初始「未扫描」,
     /// 不闪一下 Scanning…,等用户点 Scan。
     @State private var scanning: Bool = false
     @State private var running: Bool = false

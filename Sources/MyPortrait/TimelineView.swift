@@ -85,7 +85,7 @@ struct TimelineView: View {
                 onRefresh: { reload() }
             )
             // 内容本身被标题栏安全区(~28pt)垫着起步,这里只是控件到安全区
-            // 的留白(07-21 微调:12 再往下 5px = 17)。
+            // 的留白(07-21 update:12 再往下 5px = 17)。
             //
             // 08-09 再往下 11 = 28:截图在槽里**贴底**,槽位的富余全堆在它上面,
             // 于是「URL 条 → 截图顶边」比「截图底边 → app 信息行」宽出一大截,
@@ -123,7 +123,7 @@ struct TimelineView: View {
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 07-21:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
+        // 07-21 update:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
         // .dark)`(理由"展示屏幕录像,黑底凸显画面")。但用户切 light 后整个
         // Timeline 仍是黑的,跟侧栏割裂。现在改成跟侧栏同一个 SidebarBackdrop
         // (light 奶白→浅薰衣草 / dark 近黑+紫 glow),两侧观感统一。
@@ -491,7 +491,7 @@ private struct FramePreview: View {
     let frame: TimelineFrame
     var body: some View {
         // spacing 10 = 截图底边到信息行的距离;信息行 .padding(.bottom, 10)
-        // = 信息行到时间轴(彩色条区)的距离 —— 两个间距相等(07-21 定稿)。
+        // = 信息行到时间轴(彩色条区)的距离 —— 两个间距相等(07-21 update)。
         // 截图在槽内**贴底**(.overlay(alignment: .bottom)):scaledToFit 居中
         // 的话槽位有富余时死空间对半分到上下,"截图到信息行"的距离会随窗口
         // 比例浮动,贴底后这个距离恒等于 spacing,上面的富余全归日期栏下方。
@@ -507,7 +507,7 @@ private struct FramePreview: View {
                     // 直接放 scaledToFill 的图会**上报超过槽位的布局高度**
                     // (clipped 只裁画面不裁布局),把整列顶出面板:日期栏被
                     // 顶进标题栏 ~30pt,空数据天没图不溢出,栏就"沉下去"。
-                    // 07-21:去掉 RoundedRectangle 圆角裁切 —— 8pt 圆角会把
+                    // 07-21 update:去掉 RoundedRectangle 圆角裁切 —— 8pt 圆角会把
                     // 截图四个角的真实像素物理切掉("边角有截断"),
                     // 截图必须逐像素完整。描边 overlay 是槽位尺寸不是图的
                     // 尺寸,图不满槽时悬空,一并去掉。
@@ -534,7 +534,7 @@ private struct FramePreview: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 07-21:60→16→8。scaledToFit 的图基本都是被宽度卡住的,横向留白
+            // 07-21 update:60→16→8。scaledToFit 的图基本都是被宽度卡住的,横向留白
             // 收窄后图在宽、高两个方向一起等比变大("截图等比例增大/再放大一点")。
             .padding(.horizontal, 8)
             .padding(.top, 6)

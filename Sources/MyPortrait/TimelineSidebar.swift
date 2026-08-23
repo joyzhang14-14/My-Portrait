@@ -78,7 +78,7 @@ struct TimelineSidebar: View {
                         recentsSection
                     } else if selection == .memories {
                         // text/Neural Graph 模式切换钮:独立小卡,放 scope 卡上方。
-                        // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 反馈),钮本身不变。
+                        // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 update),钮本身不变。
                         memoryViewModeCard
                         memoryScopeSection
                     } else if selection == .settings {
@@ -391,7 +391,7 @@ struct TimelineSidebar: View {
     }
 
     /// text/Neural Graph 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
-    ///(07-01 反馈:卡缩小,钮不变)。
+    ///(07-01 update:卡缩小,钮不变)。
     private var memoryViewModeCard: some View {
         let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
         let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
@@ -452,7 +452,7 @@ struct TimelineSidebar: View {
                 Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
                 scopeHeader("PORTRAIT")
                 VStack(spacing: 2) {
-                    // emotions 前端下线(08-10):入口不再显示。目录、
+                    // emotions 前端下线(08-10 update):入口不再显示。目录、
                     // pipeline(distillCategories)与 dev 种子数据都还在 ——
                     // 彻底移除是挂账的后续任务,别在这里顺手删数据。
                     ForEach(PortraitPaths.seedCategories.filter { $0 != "emotions" },

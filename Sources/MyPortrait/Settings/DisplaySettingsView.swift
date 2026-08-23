@@ -145,7 +145,7 @@ private struct AppCustomizeCard: View {
                     fileName: "dock.png"
                 )
 
-                // 08-01:菜单栏图标自定义槽位删掉 —— 图标现在是三盏实时采集灯
+                // 08-01 update:菜单栏图标自定义槽位删掉 —— 图标现在是三盏实时采集灯
                 // (紫屏幕/黄音频/蓝打字),换成一张静态图会把灯整个盖掉,
                 // 那盏"用来自证没在记"的灯就失效了。
 
@@ -216,7 +216,7 @@ private struct AppCustomizeCard: View {
 /// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,绕开
 /// LaunchServices。
 ///
-/// **等旧进程真的没了再拉新的**(08-09):原来是固定 `sleep 1`,而
+/// **等旧进程真的没了再拉新的**(08-09 update):原来是固定 `sleep 1`,而
 /// `NSApp.terminate` 的收尾(flush config、关 sqlite、停采集)不保证一秒内做完
 /// —— 超时就会新旧两个窗口同屏,观感很糟。改成轮询 `kill -0`(只探测进程存在
 /// 性,不发任何信号),旧窗口消失后新窗口才出现。10 秒封顶,免得 terminate 被

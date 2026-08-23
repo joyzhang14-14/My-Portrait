@@ -860,7 +860,7 @@ def main():
     print(f"写到 {ROOT}")
     loose = len(LOOSE) + n_loose_from_dropped
     print(f"  events    {n_events} 条 / {n_folders} 个 folder + {loose} 条未分类")
-    # 图谱口径 = GraphConstants.unclassifiedHubMinFolders(08-09 三稿,现为 2):
+    # 图谱口径 = GraphConstants.unclassifiedHubMinFolders(08-09 update,现为 2):
     # 存活 folder >= 2 才立灰分区球,不够就直连主球。
     # Text 列表仍是三档(0 平铺 / 1-2 粗线 / >=3 收成组),两边有意不同。
     GRAPH_HUB_MIN = 2

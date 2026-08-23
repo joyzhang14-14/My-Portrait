@@ -13,7 +13,7 @@ public enum GraphConstants {
 
     // MARK: 连接线
 
-    /// 边的画法。2026-07-01 反馈:锥形在实机上卡且视觉不明显,先用纯线;
+    /// 边的画法。2026-07-01 update:锥形在实机上卡且视觉不明显,先用纯线;
     /// taperedFill 代码保留,改这一行即可切回。
     public static let edgeStyle: GraphEdgeStyle = .line
     /// 纯线模式线宽(屏幕 pt,不随 zoom —— Obsidian 式等粗)
@@ -21,8 +21,8 @@ public enum GraphConstants {
 
     // MARK: 连接线(橡皮筋:两端粗中间细,taperedFill 模式用)
 
-    /// 端点半宽 = 所连球的半径(2026-07-01 定稿:神经末端粗度=球半径)。
-    /// hub↔主球的边上限(07-02 反馈:15 太粗,降 10;07-03 再降 7);
+    /// 端点半宽 = 所连球的半径(2026-07-01 update:神经末端粗度=球半径)。
+    /// hub↔主球的边上限(07-02 update:15 太粗,降 10;07-03 再降 7);
     /// **末端球的边整条上限 7**(07-01 二次反馈:末端连接减细)。
     public static let edgeEndWidthMax: Double = 7
     public static let leafEdgeEndWidthMax: Double = 7
@@ -42,16 +42,16 @@ public enum GraphConstants {
     // MARK: 球半径(世界单位)
 
     public static let mainRadius: Double = 44
-    /// 分区球(portrait 画布,统一大小;07-02 反馈再缩:27→22)
+    /// 分区球(portrait 画布,统一大小;07-02 update 再缩:27→22)
     public static let categoryRadius: Double = 22
     /// folder 球 = f0 + kf·√count,clamp 到 [f0, folderRadiusMax]
-    /// 07-02 反馈:上下限双降(14/36 → 10/28)
+    /// 07-02 update:上下限双降(14/36 → 10/28)
     public static let folderRadiusBase: Double = 10
     public static let folderRadiusScale: Double = 1.4
     public static let folderRadiusMax: Double = 28
     /// event 球 = clamp(e0 + ke·currentWeight, min, max),上限不超过最小
-    /// folder 球。07-02 反馈:末端球下限两连降(4→2.5→1.5),上限不变。
-    /// 07-03:"大部分球一样大,不好判断重要性" —— 实测 968 事件里
+    /// folder 球。07-02 update:末端球下限两连降(4→2.5→1.5),上限不变。
+    /// 07-03 update:"大部分球一样大,不好判断重要性" —— 实测 968 事件里
     /// 气泡内(w≥1.5)89% 挤在 w=1.5~2.5,旧斜率 0.9 这段半径只差 0.9pt。
     /// 斜率 0.9→1.7→**2.4**、基数 1.5→0.9→**0.2**(两次加码"更分明"):
     /// 主力段 w=1.5~2.5 半径 3.8→6.2,面积差 1.7x→2.2x→2.7x,相邻半档
@@ -69,7 +69,7 @@ public enum GraphConstants {
 
     /// 分区球 → 主球:常数
     public static let categoryStrength: Double = 20
-    /// folder → 主球:自加权平均(Σw²/Σw)之外再加的基数(07-02:10→5)
+    /// folder → 主球:自加权平均(Σw²/Σw)之外再加的基数(07-02 update:10→5)
     public static let folderStrengthBase: Double = 5
     /// event → hub:occurrences.count 的截断上限
     public static let eventStrengthMax: Double = 15
@@ -90,7 +90,7 @@ public enum GraphConstants {
     public static let bubbleGap: Double = 12
     /// 气泡间软碰撞刚度(圆与圆绝不重叠的速度域推开;硬解算兜底)
     public static let bubbleCollideStrength: Float = 0.5
-    /// 缓分限速(07-08:"两个隐形球重叠,松手会直接弹开 —— 改成
+    /// 缓分限速(07-08 update:"两个隐形球重叠,松手会直接弹开 —— 改成
     /// 松手后慢慢移开"):成型后(!beltForming)且重叠 > DeepOverlap 时,
     /// 速度域推挤的重叠项封顶(×k 后 = 每 tick 速度增量上限)+ 位置硬
     /// 解算每轮纠正封顶(×3 轮 = 每 tick 位置纠正上限)→ 深重叠慢慢
@@ -102,7 +102,7 @@ public enum GraphConstants {
     public static let bubbleEaseVelCap: Float = 2
     public static let bubbleEasePosCap: Float = 0.5
     public static let bubbleEaseDeepOverlap: Float = 10
-    /// 家族帧携带比例(07-03:"拖 folder/分区球时叶子全因加速度
+    /// 家族帧携带比例(07-03 update:"拖 folder/分区球时叶子全因加速度
     /// 甩到后面,线要硬一点"→"被推动时会失效,需要全局生效"):**任何**
     /// hub 每 tick 的净位移(拖/被推/回弹/反推力,不问来源)按此比例直接
     /// 带给自家圈内叶,残余由弹簧回弹 —— 等效加硬 hub-叶连线;位置域
@@ -111,12 +111,12 @@ public enum GraphConstants {
     public static let familyCarry: Float = 0.9
     /// 线长档位:最新的叶贴 hub(此比例×最大线长),最旧顶到气泡边缘
     public static let bubbleRestFloor: Double = 0.25
-    /// 线长抖动幅度(07-02 反馈:均匀排列之上加一点排列随机性,别太
+    /// 线长抖动幅度(07-02 update:均匀排列之上加一点排列随机性,别太
     /// 机械):每叶 ±此比例,由文件路径哈希决定 —— **确定性**,同一份
     /// 数据每次打开布局一致(真随机会破坏会话缓存/可复现性)。
     public static let bubbleRestJitter: Double = 0.12
 
-    // MARK: 陨石带(07-03 新需求:weight<1.5 的 event 不进气泡,
+    // MARK: 陨石带(07-03 update:weight<1.5 的 event 不进气泡,
     // 挂在自家气泡外侧、背主球方向的弧带上;三层圈,无连接线,颜色
     // 随自家 folder;交互与普通 event 球完全一致。仅 Events 画布)
 
@@ -127,12 +127,12 @@ public enum GraphConstants {
     /// (核心+陨石)并入 Unclassified 继续显示。weight 衰减成陨石后核心数
     /// 自然减少,衰减殆尽的 folder 就消失。
     ///
-    /// ⚠️ 三处共用这一个门,改这里三处一起变(07-28 定的口径统一):
+    /// ⚠️ 三处共用这一个门,改这里三处一起变(07-28 update:口径统一):
     ///   1. Neural Graph —— GraphSceneBuilder.buildEvents(不上画布)
     ///   2. Text 列表   —— MemoriesView.makeFolderSplit(不成组)
     ///   3. 生产 pipeline —— EventClassifier(不创建新 folder)
     public static let folderMinCoreEvents: Int = 5
-    /// Unclassified 成区门 —— **Text 列表专用**(08-09 定的三档):
+    /// Unclassified 成区门 —— **Text 列表专用**(08-09 update:三档):
     /// 0 个 folder 纯平铺 / 1–2 个粗灰线隔开 / ≥3 个收成灰色 Unclassified 组。
     ///
     /// ⚠️ 图谱**不用**这个门,它有自己的 `unclassifiedHubMinFolders`。
@@ -172,7 +172,7 @@ public enum GraphConstants {
     /// 监督死区上富余(上限 = margin+此值 = 80):covered 区间内环一动
     /// 不动;罩不住(余量<10,嵌入)才长、太松(>80)才缩,各一次 lerp。
     public static let ringSlack: Float = 35
-    /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 两次
+    /// 扇形云弧半宽上限(rad ≈172°,以背主球方向为中心;07-03 update 两次
     /// 加码:1.92→2.6→3.0"弧线角度更大"——接近全圆,朝主球死角与邻圆
     /// 由动态裁剪守住):弧度随数量先展开到此上限,再往外延长
     /// (BeltLayout.homes)。真实可用弧由引擎**每 tick 动态裁剪**
@@ -192,16 +192,16 @@ public enum GraphConstants {
     /// hub 方位(实测"一动全聚中心"),别加回来
     public static let beltSpring: Float = 0.06
 
-    // MARK: 影子引擎(07-08 定稿:预判 folder 终局,环提前就位)
+    // MARK: 影子引擎(07-08 update:预判 folder 终局,环提前就位)
 
     /// 影子累计步数封顶(病态不收敛兜底 → 交结果收工,不再烧 CPU)
     public static let shadowTickCap: Int = 3000
 
-    // MARK: 开局揭幕(07-08:陨石开局先聚中心再展开不美观 —— 等
+    // MARK: 开局揭幕(07-08 update:陨石开局先聚中心再展开不美观 —— 等
     // 找到位置后再显示,透明度一点一点拉高;只适用于开局 init/explode,
     // 拖动松手不藏。隐藏期 hover/点击/拖起全部无效)
 
-    /// 缓滑胡萝卜(07-08 "陨石动画幅度有点大,缓和一点;只用圆心/
+    /// 缓滑胡萝卜(07-08 update "陨石动画幅度有点大,缓和一点;只用圆心/
     /// 半径/θ 的形式动"):目标太远时,槽位弹簧本 tick 只追"沿弧 ≤ArcCap、
     /// 径向 ≤RadialCap"的近端假目标 → 匀速贴弧缓滑,不再朝远目标大甩。
     /// 只作用于成型后(!beltForming)的调整移动,开局绽放不限(揭幕前
@@ -216,13 +216,13 @@ public enum GraphConstants {
     /// 无兜底 = 永久空白+无交互)
     public static let beltRevealTimeoutTicks: UInt64 = 600
 
-    // MARK: 视角取景(07-09:开局/松手视角跟隐形环走,占比适中)
+    // MARK: 视角取景(07-09 update:开局/松手视角跟隐形环走,占比适中)
 
     /// 取景占比:隐形环**基准直径**占视口较短边的比例。0.72 → 环占约
     /// 七成,四周留呼吸边(外圈陨石在基准环外还有径向偏移,故不取满);
     /// 越大越贴边,越小越缩。开局固定、松手缓移都以此为目标。
     public static let cameraFrameFill: Double = 0.72
-    /// 点 folder 球聚焦该 folder 视图(07-09):以隐形圆(气泡)心为
+    /// 点 folder 球聚焦该 folder 视图(07-09 update):以隐形圆(气泡)心为
     /// 画布中心、气泡直径占视口较短边此比例。比环取景大(0.82,无外圈
     /// 陨石要留边,气泡叶群贴满更聚焦);越大越贴边。
     public static let cameraFolderFill: Double = 0.82
@@ -236,7 +236,7 @@ public enum GraphConstants {
 
     // MARK: 物理(d3-force 语义;P0 实测 1.9ms/tick@5000,后台线程)
 
-    /// 斥力电荷(负=互斥),分角色(07-02 确诊:主球斥力+跨圆叶叶
+    /// 斥力电荷(负=互斥),分角色(07-02 update:主球斥力+跨圆叶叶
     /// 斥力把整家叶子压到背面半圆,圈只用一半):
     /// - hub:保持,负责 hub 间松散感
     public static let manyBodyStrength: Float = -15
@@ -252,16 +252,16 @@ public enum GraphConstants {
     /// 且限 40 叶,大家云团仍偏半边:质心偏移实测 34%)。
     /// 0.15:不乘 alpha 后恒定生效,0.3 会过冲抖动
     public static let familySpreadStrength: Float = 0.2
-    /// hub 绕主球的角向均布力(08-09:"folder 球全偏向主球一边")。
+    /// hub 绕主球的角向均布力(08-09 update:"folder 球全偏向主球一边")。
     /// 同 familySpread 的邻居中点弛豫,圆心换成原点、成员换成 hub。
     /// 比家内那个小一档:hub 拖着整个气泡,惯性大,推猛了会甩过头。
     public static let hubAngularStrength: Float = 0.08
-    /// 角向力只在 hub 数 ≤ 此值时生效(08-09 实测定的分界):
+    /// 角向力只在 hub 数 ≤ 此值时生效(08-09 update 实测定的分界):
     /// 少 hub 时收敛快、没出过事;多 hub(实测 12)时陨石环 + 气泡碰撞
     /// 不断喂扰动,而中点弛豫不约束整体绝对角度 —— 合力矩残余养出
     /// 无阻尼公转,整圈 hub 疯转(621c65f6 全量生效版的翻车根因)。
     /// 多 hub 场景本来也不需要它:球多了碰撞自然摊满一圈。
-    /// 4→5(08-09 实测):4 folder + 灰球 = 5 hub 正好压过 4 的门,
+    /// 4→5(08-09 update 实测):4 folder + 灰球 = 5 hub 正好压过 4 的门,
     /// 只靠等角出生不够匀 —— 放进力的辖区。真实数据 12 hub 仍在门外。
     public static let hubAngularMaxHubs: Int = 5
     /// Barnes-Hut 精度 θ²(d3 默认 θ=0.9;收紧到 0.5 成本翻倍,别动)
@@ -282,7 +282,7 @@ public enum GraphConstants {
     public static let dragAlphaTarget: Float = 0.3
     /// park 静止阈值(净位移窗):每 parkQuietWindow tick 与参考位置比一次,
     /// 全场最大净移动 < 此值(世界 pt)才算静止 —— 纯时间冷却会把"从远处
-    /// 回弹的球"半路冻住(07-02 实测:拉远松手,回来路上突然停)。
+    /// 回弹的球"半路冻住(07-02 update 实测:拉远松手,回来路上突然停)。
     /// ⚠️ 不能用逐 tick 速度:冷却后恒定力(碰撞/匀布)有 ~0.3pt/tick 原地
     /// 微抖 + 家级慢环流(实测全场最大 3.4~4.1pt/0.5s),永不归零。
     /// 9 = 实测稳态 ×1.5 余量再放宽(07-03 陨石带:家级慢环流被陨石的
@@ -293,7 +293,7 @@ public enum GraphConstants {
     public static let parkNetMove: Float = 13
     /// 净位移窗长(tick;30 = 0.5s@60Hz)
     public static let parkQuietWindow: Int = 30
-    /// 缓停衰减(07-03 反馈:静止判定后一刀冻结太突兀):冷透+静止后每
+    /// 缓停衰减(07-03 update:静止判定后一刀冻结太突兀):冷透+静止后每
     /// tick 位移 × 此值,~1.6s 从全速指数滑到 0(先快后慢,像摩擦力),
     /// 速度真正到 0 才 park;<0.02 归零。
     public static let brakeDecay: Float = 0.96
@@ -303,7 +303,7 @@ public enum GraphConstants {
     /// 物理线程定步频率(60 = d3/Obsidian 的 rAF 同款;120 视觉无差但
     /// 背景 CPU 翻倍,07-01 拖拽卡顿优化降回 60)
     public static let physicsHz: Double = 60
-    /// 开场炸开:初始位置挤在中心这个半径内(07-02:30→12,绽放更猛)
+    /// 开场炸开:初始位置挤在中心这个半径内(07-02 update:30→12,绽放更猛)
     public static let explosionRadius: Float = 12
     /// 主球碰撞硬约束的额外间隙:任何球不得进入 主球半径+自身半径+此值
     ///(斥力是点电荷模型不认半径,没这条低 weight 小球会叠在主球上)
@@ -324,26 +324,26 @@ public enum GraphConstants {
     // MARK: 交互动画
 
     /// 神经脉冲沿边传播速度(世界 pt/s;07-02 三次反馈:700 仍偏快,再降;
-    /// 07-11:再降低一倍,冲击波更慢 450→225)。**主球**用它(2 跳级联);
+    /// 07-11 update:再降低一倍,冲击波更慢 450→225)。**主球**用它(2 跳级联);
     /// folder/分区球改自适应,见 pulseHubTravelSeconds。
     public static let pulseSpeed: Double = 225
     /// folder/分区球脉冲的**行程时间**(秒):速度 = 该球连线平均长度 / 此值,
     /// 使脉冲恰好用这么久走完一条平均长度的边 —— 不论 folder 大小、连线长短,
-    /// 点亮自家球的观感时长一致(07-11 设计;1.5 偏慢 → 1)。
+    /// 点亮自家球的观感时长一致(07-11 update;1.5 偏慢 → 1)。
     public static let pulseHubTravelSeconds: Double = 1
-    /// 脉冲抵达末端球 → 点亮闪一下(07-11)。白光峰值不透明度 + 淡出时长
+    /// 脉冲抵达末端球 → 点亮闪一下(07-11 update)。白光峰值不透明度 + 淡出时长
     /// (秒,线性衰减到 0)。⚠️ 改大时长要同步 GraphRootView 的脉冲清空定时
     /// (清早了闪光会被切断:pulses 空 → 不再重绘且 drawBalls 读不到抵达时刻)。
     public static let pulseArriveFlashPeak: Double = 0.85
     public static let pulseArriveFlashSec: Double = 0.45
-    /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 反馈:只有主球 bounce 两次)
+    /// 级联跳数:主球 2 跳,其它 hub 只 1 跳(07-01 update:只有主球 bounce 两次)
     public static let pulseMaxDepthMain: Int = 2
     public static let pulseMaxDepthOther: Int = 1
     /// 脉冲形态 = ||| 三条垂直于连线的细白杠,沿行进方向间隔(屏幕 pt)
-    /// 07-11:三杠间距收到 1,几乎重合成一条粗线(5→3.5→1)
+    /// 07-11 update:三杠间距收到 1,几乎重合成一条粗线(5→3.5→1)
     public static let pulseTickCount: Int = 3
     public static let pulseTickSpacing: Double = 1
-    /// 杠长 = 连线的**实际渲染粗细**×此倍数。07-02 反馈定稿:=1,
+    /// 杠长 = 连线的**实际渲染粗细**×此倍数。07-02 update 定稿:=1,
     /// 杠长与线宽完全贴合(此前 ×3 仍被指出"没有完美贴合")
     public static let pulseTickLengthScale: Double = 1
     public static let pulseTickStrokeWidth: Double = 1.2

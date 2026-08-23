@@ -983,7 +983,7 @@ struct MemoriesView: View {
             slug = "\(slug)-\(n)"
         }
         do {
-            // 没手选色 → 创建时随机固化一色(07-10:随机色生成后永不变;
+            // 没手选色 → 创建时随机固化一色(07-10 update:随机色生成后永不变;
             // 不再留 nil 走"每次启动漂移"的默认色)。
             let used = Set(EventFolderStore.loadAll().compactMap(\.colorHex))
             let f = EventFolder(slug: slug, name: name, description: "",
@@ -1223,7 +1223,7 @@ enum FolderPalette {
     private static let ringBri = 0.86
     private static let ringSteps = 72          // 每 5° 一个候选
 
-    /// 创建时固化一色(07-10 定稿"随机色生成之后就不会变"):结果由调用方
+    /// 创建时固化一色(07-10 update "随机色生成之后就不会变"):结果由调用方
     /// 写进 colorHex 落盘、此后永不变。
     ///
     /// 算法(07-21 改):**色环候选 + OKLab 最大化最小距离**(max-min,
@@ -1338,7 +1338,7 @@ enum FolderPalette {
 }
 
 /// 系统取色板(NSColorPanel:光谱/色轮/滑杆,即"炫彩调色盘")桥接:
-/// 右键 Custom… 打开,持续回传 hex(07-10 "9 个预设不够,要 spectrum")。
+/// 右键 Custom… 打开,持续回传 hex(07-10 update "9 个预设不够,要 spectrum")。
 /// 单例复用共享面板;换 folder 重开时旧回调被顶掉(target/action 覆盖)。
 /// @MainActor:NSColorPanel 主线程隔离,action 回调也由 AppKit 在主线程发。
 @MainActor
@@ -1459,7 +1459,7 @@ private struct FolderDisclosureRow: View {
                     // 右键菜单:改名 / 改颜色(预设色板)/ 删除。右键时蓝框框住标题行。
                     .contextHighlight(cornerRadius: 8) {
                         Button("Rename…") { renameDraft = title; renaming = true }
-                        // 光谱取色(07-10 定稿:点开直接 spectrum,无子菜单;
+                        // 光谱取色(07-10 update:点开直接 spectrum,无子菜单;
                         // Default 项已删——创建时就随机固化了颜色,无"默认"可回)。
                         // 系统 NSColorPanel 持续回调防抖 0.25s 再落盘 —— onSetColor
                         // 会整列表 reload,拖光谱逐 tick 提交会打爆。
@@ -1699,7 +1699,7 @@ private struct NewFolderSheet: View {
                 Text("Color (optional)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
-                // 内嵌光谱(07-10 定稿"不要 9 色,直接 spectrum 嵌入"):
+                // 内嵌光谱(07-10 update "不要 9 色,直接 spectrum 嵌入"):
                 // 点/拖即选;不选 = 创建时随机固化一色。
                 SpectrumPicker(hex: $hex)
                 HStack(spacing: 8) {
@@ -1734,7 +1734,7 @@ private struct NewFolderSheet: View {
     }
 }
 
-/// 内嵌光谱取色(07-10 定稿"不要 9 色,直接 spectrum 嵌入"):x=色相,
+/// 内嵌光谱取色(07-10 update "不要 9 色,直接 spectrum 嵌入"):x=色相,
 /// y=上半掺白(亮)→中线纯色→下半掺黑(暗),同 NSColorPanel Spectrum 页
 /// 观感。点/拖即选,写 "#RRGGBB" 进 binding。
 private struct SpectrumPicker: View {

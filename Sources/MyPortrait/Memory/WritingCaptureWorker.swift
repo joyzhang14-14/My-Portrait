@@ -52,7 +52,7 @@ final class WritingCaptureWorker {
 
     let store: WritingCaptureStore
 
-    /// 07-30:pass1Override / pass3Override 两个注入点随云端 agent 一起删掉
+    /// 07-30 update:pass1Override / pass3Override 两个注入点随云端 agent 一起删掉
     /// (两个调用方 Services / WritingCaptureCLI 都只传 store,从没用过 override)。
     init(store: WritingCaptureStore) {
         self.store = store
@@ -173,7 +173,7 @@ final class WritingCaptureWorker {
         }
 
         // 3. Pass 1(整天 OCR → context timeline)**已断**。
-        // 07-30:写作采集这条云端路整个下线,给新的本地化 pass1-4
+        // 07-30 update:写作采集这条云端路整个下线,给新的本地化 pass1-4
         // 腾位置(新逻辑不需要模型)。context timeline 暂时空 —— 下游只拿它
         // 给 record 填 contextSummary,本来就允许 nil。
         let contextTimeline: [WritingCaptureContextSegment] = []
@@ -310,7 +310,7 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// 07-30:typing capture 从零重写了,**这一整套 pass 处理停用** ——
+    /// 07-30 update:typing capture 从零重写了,**这一整套 pass 处理停用** ——
     /// Step 0 切分 / 路由 / edit_log 过滤 / staged 写入全部不再跑。
     ///
     /// 停的只是「处理」。**采集入库照跑** —— TypingObserver → `typing_events`
@@ -1231,7 +1231,7 @@ final class WritingCaptureWorker {
         return ((0.80 + 0.19 * ratio) * 100).rounded() / 100
     }
 
-    // ⚠️ 07-30 删掉了 `dumpAxCleanupIfEnabled` —— 它把 AX-cleanup 的真实输入
+    // ⚠️ 07-30 update 删掉了 `dumpAxCleanupIfEnabled` —— 它把 AX-cleanup 的真实输入
     // (unifiedExtract 切好的单条消息 + 击键)和云端输出 dump 成 JSON 到
     // `~/.portrait/llm_dump/`(靠 `~/.portrait/llm_dump.on` 开关),原本是给本地
     // 小模型做公平复测用的。它的入参类型是云端 agent 的 Item / Fix,随 agent

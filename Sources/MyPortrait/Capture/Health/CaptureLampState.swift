@@ -75,7 +75,7 @@ final class CaptureLampState: ObservableObject {
             // `NSWorkspace.shared.frontmostApplication` —— 通知投递的那一刻
             // 那个系统属性**还没 settle**,查到的常常是上一个 app。症状:切到
             // 微信,灯还停在 Terminal 的状态,得再切第三个 app 才更新,而且
-            // 时灵时不灵(08-01 实测)。
+            // 时灵时不灵(08-01 update 实测)。
             // 先把三个标量取出来再进 MainActor —— Notification / NSRunningApplication
             // 都不是 Sendable,整个传进去编译器会报 data race。
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication

@@ -129,7 +129,7 @@ struct MemorySettingsView: View {
     var body: some View {
         // dev mode 只读的 .disabled 挂在 pageBody 里 ScrollView **内层**的
         // VStack 上,不在这里 —— 挂整页会把 ScrollView 一起 disable,macOS 上
-        // 连滚动手势都被禁,页面直接"卡死"(08-09 实测)。
+        // 连滚动手势都被禁,页面直接"卡死"(08-09 update 实测)。
         writingStyleModals(pageBody)
     }
 
@@ -2337,7 +2337,7 @@ struct WritingPipelineSection: View {
     @State private var writingCaptureExpandedRecords: [String: [StagedRecordRow]] = [:]
     @State private var writingCaptureExpandedError: [String: String] = [:]
 
-    // 07-30:Auto-run 开关 + Run now 整张卡片删掉 —— typing capture 从零重写,
+    // 07-30 update:Auto-run 开关 + Run now 整张卡片删掉 —— typing capture 从零重写,
     // 旧 pipeline 已停用(WritingCaptureWorker.typingRebuildV1Enabled),定时
     // 触发也从 scheduler 拿掉了。**Pending review 保留** —— 库里已有的 staged
     // 记录还得让用户 Approve / Reject 掉。
@@ -2374,7 +2374,7 @@ struct WritingPipelineSection: View {
 
     // MARK: 组件
 
-    // 07-30:autoRunRow / runningIndicator / writingCaptureBlock /
+    // 07-30 update:autoRunRow / runningIndicator / writingCaptureBlock /
     // stopWritingCapture 四个成员随 Run now 卡片一起删掉 —— 没有调用方了。
 
 
@@ -2556,7 +2556,7 @@ struct WritingPipelineSection: View {
         }
     }
 
-    // 07-30:runWritingCapture() 随 Run now 按钮一起删 —— 唯一调用方是
+    // 07-30 update:runWritingCapture() 随 Run now 按钮一起删 —— 唯一调用方是
     // 那个确认弹窗。旧 pipeline 已停用,不再有「手动触发一次」这回事。
 
 }

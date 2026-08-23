@@ -478,7 +478,7 @@ extension PipelineFlow {
                 detail: "**One round trip per category** — listed on the right. The model sees that category's events plus the entries already written, and answers **create / update / no change** per entry.\n\nResults land as Markdown at `~/.portrait/portrait/<category>/`.\n\nPersonality and writing style are excluded on purpose — they have their own pipelines and would be overwritten here.",
                 pos: CGPoint(x: 0.30, y: 0.60)
             ),
-            // 五个类别 —— 挂在右侧的**注释列**(08-10 三稿):不是流程的
+            // 五个类别 —— 挂在右侧的**注释列**(08-10 update):不是流程的
             // 步骤,是"distill 都分成哪些 portrait"的展开说明,所以 note 虚线
             // 从 distill 侧向引出、**不接回 archive**。主干整体左移让位。
             // (emotions 08-10 前端下线,不再展示;pipeline 的彻底移除挂账。)

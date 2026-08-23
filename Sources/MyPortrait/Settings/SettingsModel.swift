@@ -30,7 +30,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
-        // speakers 子项已折进 Audio Capture 页面尾部(2026-05-26)。
+        // speakers 子项已折进 Audio Capture 页面尾部(2026-05-26 update)。
         case storage, imports
     }
 

@@ -24,7 +24,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var nodeRadius: [Float]
     /// 分角色斥力电荷(主球/hub/叶不同强度,07-02 半边圆确诊)。
     private var nodeCharge: [Float]
-    /// 家籍(叶=自家 hub 节点下标;主球/hub=-1):07-02 定稿"正常时
+    /// 家籍(叶=自家 hub 节点下标;主球/hub=-1):07-02 update "正常时
     /// 只受自家 folder 球和兄弟球影响,排除外部影响"—— 碰撞力按家隔离。
     private var nodeFamily: [Int32]
     /// 向心力开关(1=hub,0=叶/主球):向心是"每节点→原点"的弹簧,对叶
@@ -49,7 +49,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     ///(= 自家气泡半径 − 叶半径 − 缝;叶子绝不出自家隐形圆)。
     private var leafIndices: [Int32] = [], leafOwnHub: [Int32] = []
     private var leafMaxDist: [Float] = []
-    /// 家内角向匀布(07-02):按家分组的叶(仅 2..maxCount 的稀疏家)。
+    /// 家内角向匀布(07-02 update):按家分组的叶(仅 2..maxCount 的稀疏家)。
     /// familyLeaf 连续存放,familyRange = (hub 节点下标, 起止)。
     private var familyLeaf: [Int32] = []
     private var familyRange: [(hub: Int32, lo: Int, hi: Int)] = []
@@ -141,13 +141,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var alpha: Float = 1
     private var alphaTarget: Float = 0
     /// 静止判定(simLock 保护):alpha 是纯时间冷却,不看球到没到位 ——
-    /// 只看 alpha 会把"从远处回弹的球"半路冻住(07-02 实测:拉远松手,
+    /// 只看 alpha 会把"从远处回弹的球"半路冻住(07-02 update 实测:拉远松手,
     /// 回来路上突然停)。⚠️ 不能用逐 tick 速度:冷却后碰撞/匀布等恒定力
     /// 有 ~0.3pt/tick 原地微抖 + 家级慢环流,永不归零 —— 用净位移窗
     /// (每 0.5s 与参考位置比一次),原地抖/慢环流放行,真位移才算动。
     private var quietRef: [SIMD2<Float>] = []
     private var quietFlag = false
-    /// 缓停比例(07-03 反馈:静止判定后一刀冻结太突兀):冷透+静止后
+    /// 缓停比例(07-03 update:静止判定后一刀冻结太突兀):冷透+静止后
     /// 位移按此比例逐 tick 指数衰减(×brakeDecay,~1.6s 滑到 0),速度
     /// 一点点变慢到 0 才 park;任何 reheat 立即回 1。
     private var brake: Float = 1
@@ -182,7 +182,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var famDelta: [SIMD2<Float>] = []
     /// tick 计数(拖拽降载:重力学隔 tick 跑)。
     private var tickCount: UInt64 = 0
-    /// 叶子出生角的整体相位(随种子变,07-02:随机种子每次开花不同)。
+    /// 叶子出生角的整体相位(随种子变,07-02 update:随机种子每次开花不同)。
     private var seedPhase: Float = 0
     /// 拖拽钉住:index → 目标位置(每次 drag move 更新;d3 的 fx/fy 语义)。
     /// 主球恒钉原点,不进这个表(单独处理)。
@@ -200,11 +200,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var dragSweep: [(index: Int32, x: Float)] = []
     /// 挂号的 alphaTarget(dragLock 保护):beginDrag/endDrag 不再抢
     /// simLock —— 收敛中 tick 握锁 20~40ms(Debug),主线程"抓球那一下"
-    /// 会顿一拍(07-02 实测);physics 线程下个循环自取自用。
+    /// 会顿一拍(07-02 update 实测);physics 线程下个循环自取自用。
     private var pendingAlphaTarget: Float? = nil
     private let dragLock = NSLock()
 
-    // MARK: - 影子引擎(07-08 定稿:"预判 folder 球最终会飘到哪,
+    // MARK: - 影子引擎(07-08 update:"预判 folder 球最终会飘到哪,
     // 环提前到此位置,而不是跟着实时调整")
 
     /// 同一 GraphScene 构造的第二个完整引擎实例:克隆主引擎当刻
@@ -228,7 +228,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// ready 结果对应的拖拽克隆位(非预热任务为 nil)。
     /// 与 shadowResult 同由 shadowLock 保护,不与在途任务的位置混用。
     private var shadowReadyClonePos: SIMD2<Float>? = nil
-    /// 拖拽预热(07-08 "延迟优化到极致"):拖拽中每隔一段按"假设
+    /// 拖拽预热(07-08 update "延迟优化到极致"):拖拽中每隔一段按"假设
     /// 此刻松手"克隆预算;松手位置与最近预算克隆位够近 → 结果现成,
     /// 零延迟直飞。以下三个只在物理线程读写(无锁)。
     private var shadowClonePosPending: SIMD2<Float>? = nil
@@ -249,7 +249,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 场景留存(重建影子用;updateScene 同步换新)。
     private var sceneRef: GraphScene
 
-    // MARK: - 开局揭幕(07-08:陨石开局先聚中心再展开不美观 ——
+    // MARK: - 开局揭幕(07-08 update:陨石开局先聚中心再展开不美观 ——
     // 等找到位置后再显示,透明度一点一点拉高;**只适用于开局**)
 
     /// 陨石渲染透明度乘子 0…1(simLock 保护)。init/explode(开局的
@@ -369,7 +369,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         t.name = "graph-physics"
         // .userInitiated(不是 .userInteractive):tick 重载(Debug 30Hz
         // 饱和)时不许抢主线程的渲染/手势 —— 被拖球由渲染端钉指针,
-        // 物理慢半拍只影响邻居跟随,主线程掉帧才是"卡"(07-02 实测)。
+        // 物理慢半拍只影响邻居跟随,主线程掉帧才是"卡"(07-02 update 实测)。
         t.qualityOfService = .userInitiated
         t.start()
     }
@@ -541,7 +541,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         }
     }
 
-    /// hub 出生角 = 绕主球等角环(08-09:"folder 球全偏向主球一边")。
+    /// hub 出生角 = 绕主球等角环(08-09 update:"folder 球全偏向主球一边")。
     ///
     /// hub 的夹角在物理里**只由气泡碰撞涌现** —— 气泡一旦互不重叠就没有
     /// 任何力再管角度,炸开时随机糊在一侧就永远留在一侧。上一版试过加
@@ -562,7 +562,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 叶子出生角 = 黄金角均匀绕自家 hub(d3 phyllotaxis 同思路)。
-    /// 07-02 反馈:有的家只用半边圆 —— 角向扩散靠球间斥力,收敛前铺
+    /// 07-02 update:有的家只用半边圆 —— 角向扩散靠球间斥力,收敛前铺
     /// 不满一圈;出生即均匀,物理只需保持。半径小起步(圈的 1/3),
     /// 绽放感由弹簧给出。确定性:同数据同布局。
     private func seedLeafAngles() {
@@ -577,13 +577,13 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             let hubIdx = Int(hub)
             // 家族错相 + 种子相位(随机种子 → 每次开花方位不同)
             let a = golden * Float(j) + Float(hubIdx) * 0.7 + seedPhase
-            // 0.1×圈半径出生(07-02:展开效果再强烈一点)—— 贴着 hub 喷出
+            // 0.1×圈半径出生(07-02 update:展开效果再强烈一点)—— 贴着 hub 喷出
             let maxD = leafMaxDist[li]
             let r = maxD > 0 ? max(maxD * 0.1, nodeRadius[hubIdx] + 3)
                              : nodeRadius[hubIdx] + 8
             pos[leaf] = pos[hubIdx] + SIMD2<Float>(cos(a), sin(a)) * r
         }
-        // 陨石出生(07-03):出生角 = 各自槽位方向(hub 当前极角 + 槽位
+        // 陨石出生(07-03 update):出生角 = 各自槽位方向(hub 当前极角 + 槽位
         // 偏移),半径 = (自家气泡 + 环偏移)的 40%(生得太贴 hub 会穿越
         // 整片叶群一路碰撞;40% 处起飞冲出去更顺)。开场保留喷出绽放
         // 效果(拍板:"先排位"只用于松手后)。
@@ -696,7 +696,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 if !readyHit && !pendingHit {
                     beltPredDirty = true
                 }
-                // 克隆位一次性使用(07-11):本次松手评完 HIT/MISS 即作废。
+                // 克隆位一次性使用(07-11 update):本次松手评完 HIT/MISS 即作废。
                 // 命中后的正常消费走 shadowReady 通道,与 clonePending 无关;
                 // 不清则残留位跨拖存活 —— 下一次不触发预热的拖拽(叶拖/
                 // 短挪 <30pt)松手若恰落在旧克隆位 60pt 内,会假命中一个早已
@@ -767,12 +767,12 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     settleTeamPrev[j] = pos[Int(settleTeamIdx[j])]
                 }
             }
-            // 本帧基线 tick 数 = 1 mandatory + 高温期子步(07-03 "让图像更早
+            // 本帧基线 tick 数 = 1 mandatory + 高温期子步(07-03 update "让图像更早
             // 归位":alpha 还热的收敛段每帧多跑一步 —— 同一部电影快放,动力学/终局
             // 布局/park 判定(阈值全按 tick 计,对子步透明)分毫不变,只是墙钟减半。
             // 拖拽中不启用:交互热路径保持每帧一步的实时手感与 tick 预算)。
             let baseTicks = (!dragging && alpha > 0.02) ? 2 : 1
-            // 开局隐身期墙钟快放/减速(07-11 "点亮速度没变化"):陨石"多久才
+            // 开局隐身期墙钟快放/减速(07-11 update "点亮速度没变化"):陨石"多久才
             // 冒出来"由**整图沉降到静止冷透**(揭幕门)决定,这整段是隐身的 ——
             // 只缩放淡入 step 改不动它(实测无感)。故按 animationSpeedScale 缩放本帧
             // tick 数:同一串确定性 tick,动力学/终局布局逐位不变,只压缩(或拉长)
@@ -858,7 +858,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     /// 那一个 mandatory tick = 总 1…5×)。冷尾巴 belt 匀速滑 ~1.4pt/tick;
     /// 临近静止(残余 < ~0.45pt/tick,接近 parkNetMove/窗)→ 收回 0 自然减速
     /// (ease-out)。0.3pt/tick 死区起步,每 0.3 提一档。
-    /// 上限 4(总 5×,07-11 "激进一点、多加一段档"):残余 ≥1.5pt/tick
+    /// 上限 4(总 5×,07-11 update "激进一点、多加一段档"):残余 ≥1.5pt/tick
     /// (移动最快=距离最远的陨石)再多快放一档。上限只影响长尾归位速度,
     /// 快放动力学中性不改落点。
     private func extraSettleTicks(residualPerTick r: Float) -> Int {
@@ -869,7 +869,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private func tick() {
         guard n > 0 else { alpha = 0; return }
         tickCount &+= 1
-        // 拖拽降载(07-02 实测:Debug 下满力学 tick 超预算一倍 → 30Hz
+        // 拖拽降载(07-02 update 实测:Debug 下满力学 tick 超预算一倍 → 30Hz
         // 饱和,physics 线程抢核致主线程卡顿):拖拽中重力学(建树/斥力/
         // 碰撞)隔 tick 跑,轻 tick 只跑弹簧/墙/约束 —— 邻居跟随本就是
         // 惯性动画,视觉无差,CPU 近半。
@@ -883,7 +883,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         bubblePass()
         if heavy { familySpreadPass() }   // 匀布是慢整形力,拖拽中隔 tick 足够
         if heavy { hubAngularPass() }     // 同上;≤4 hub 才生效,门槛见常量注释
-        // 碰撞每 tick 跑(07-02:不重叠是最基本要求)—— 轻 tick 复用上个
+        // 碰撞每 tick 跑(07-02 update:不重叠是最基本要求)—— 轻 tick 复用上个
         // tick 的树(位置只差一步,剪枝留了 pad 余量),省掉建树大头。
         collidePass()
         dampPortraitFamilyRotation()
@@ -919,7 +919,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 自然 park —— 开场/收敛全程都是物理,本身即丝滑。
     }
 
-    /// 陨石带回位弹簧(07-03):每颗陨石有确定性槽位 = 自家 hub 极角
+    /// 陨石带回位弹簧(07-03 update):每颗陨石有确定性槽位 = 自家 hub 极角
     /// (主球钉原点,hub 极角即背主球方向)+ 槽位角偏移、半径 = 环半径。
     /// hub 移动/绕主球转时槽位实时跟着走 —— 弧带永远背对主球。被拖颗
     /// 不加(拖拽钉住覆盖速度,加了也白算,与叶弹簧同理无须豁免)。
@@ -1084,7 +1084,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     }
                 }
             }
-            // 环结算(07-08 定稿"等停再变"):环的可见变化只剩
+            // 环结算(07-08 update "等停再变"):环的可见变化只剩
             // **停稳校验**这一处(布局停稳/冷透兜底时按实时圆集走
             // ringCovered 死区,covered 零动、越界调一次)—— 松手后环
             // 纹丝不动,folder 飘到位停稳后才平滑调一次。影子只喂 carve
@@ -1112,7 +1112,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                         + GraphConstants.ringPredMargin
                 }
             }
-            // 环**硬切**(07-08 "动的时候一步到位":环是隐形的,lerp
+            // 环**硬切**(07-08 update "动的时候一步到位":环是隐形的,lerp
             // 平滑毫无意义 —— lerp 期间陨石目标跟着环每帧漂移;平滑感
             // 由陨石的极坐标弹簧提供,目标必须从锁定那刻就是最终值)
             ringC = ringTargetC
@@ -1184,7 +1184,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     base = (lo + hi) / 2
                     slope = (hi - lo) / (2 * fw)
                 }
-                // 积压微调(07-03 拍板:"有积压就再往反方向转一点")
+                // 积压微调(07-03 update:"有积压就再往反方向转一点")
                 let lossR = max(0, fw - hi)
                 let lossL = max(0, fw + lo)
                 base += min(max((lossL - lossR) * 0.08, -0.12), 0.12)
@@ -1192,7 +1192,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                 beltFamSlope[s] = slope
             }
             let carrying = beltForming   // ① 生成态才携带;③ 松手后纯弹簧
-            // 待命(07-08 "可接受延迟,动则一步到位"+"出场跳两次"):
+            // 待命(07-08 update "可接受延迟,动则一步到位"+"出场跳两次"):
             // 影子结果未到时陨石零力待命 —— 不朝占位/临时目标起跑,等
             // 终局锁定后一次性直飞/绽放,全程不改道。**开场也待命**
             // (原先临时环+ready 正式环 = 环钉两次 → 陨石先朝临时弧位
@@ -1262,7 +1262,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                         while dth < -.pi { dth += 2 * .pi }
                         var dr = simd_length(relT) - rCur
                         var arc = rCur * dth
-                        // 缓滑胡萝卜(07-08 "幅度有点大":只在成型后的
+                        // 缓滑胡萝卜(07-08 update "幅度有点大":只在成型后的
                         // 调整移动限距 —— 远目标只追近端假目标,匀速贴弧
                         // 缓滑;顺带距离增益 boost 因 dLen 被封顶自动≈1,
                         // 起飞窗口 ×2.5 仍在但速度有界,快起步不大甩)
@@ -1326,7 +1326,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 挡板/弧方位占位:ready 前用**当刻实时位置**(几帧窗口)。
         // 无条件刷新 —— 不能留拖拽前的旧终局,混合帧的弧方位会朝旧
         // 方向飞一两帧(实测首帧毛刺 pol 偏 2+rad)。
-        // ⚠️ 放在忙拒 return 之前(07-11):恢复"每次 spawn 调用必刷占位"
+        // ⚠️ 放在忙拒 return 之前(07-11 update):恢复"每次 spawn 调用必刷占位"
         // 不变量 —— 串行化后忙拒分支若不刷,拖拽中 beltPredPos 会滞留
         // 上次 spawn 的旧位置(实测 ~70pt)一帧,carve/弧方位混合帧吃到
         // 过期占位。成功路径同 tick 同值,语义不变。
@@ -1563,7 +1563,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         return (SIMD2<Float>(Float(bestC.x), Float(bestC.y)), Float(bestR))
     }
 
-    /// 预加载隐形环(07-09 "随机种子预加载:打开界面前就知道该去哪"):
+    /// 预加载隐形环(07-09 update "随机种子预加载:打开界面前就知道该去哪"):
     /// 给定种子,起一个**不带线程、不发影子**的 headless 影子实例,自身
     /// 全速 tick 到收敛,按主引擎 explode 后钉环的**同一公式**算出隐形环
     /// (encR + beltGap + ringPredMargin)。reload 在后台 Task 里显示界面
@@ -1686,7 +1686,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         for ii in 0..<h {
             guard hubBubbleR[ii] > 0 else { continue }
             let i = Int(hubIndices[ii])
-            // 拖拽中被拖 hub 碰撞箱=球本身(07-08:"想玩拖动时蓝球
+            // 拖拽中被拖 hub 碰撞箱=球本身(07-08 update:"想玩拖动时蓝球
             // 穿插在灰球丛中"):隐形圆对它全关(不推别家、不被推、不挡
             // 主球),球级碰撞(forceCollide+扫掠胶囊)让它在别家叶丛里
             // 排开穿行;松手 di 消失即恢复圆级,重叠由硬解算平滑分开
@@ -1858,7 +1858,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         }}}}}}}
     }
 
-    /// ⚠️ 只有 hub 接收斥力(07-02 定稿:"小球不应受主球和其他
+    /// ⚠️ 只有 hub 接收斥力(07-02 update:"小球不应受主球和其他
     /// folder 球引力影响,这是关键点")—— 叶子的一切定位来自自家系统
     ///(径向弹簧/家内碰撞/家内匀布/圈内夹钳),隔空电荷只会把整团云
     /// 拽偏(F1/F2 质心偏移 23~27% 的最后来源)。接收方 962→~11,
@@ -1968,7 +1968,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             vel[di] = .zero
         }
         // 主球碰撞硬约束:斥力是点电荷不认半径,低 weight 小球会在中心区
-        // 平衡叠在主球上(2026-07-01 实测反馈)。径向推出,含被拖球。
+        // 平衡叠在主球上(2026-07-01 update 实测)。径向推出,含被拖球。
         if n > 1 {
             let mainR = nodeRadius[0]
             let pad = GraphConstants.mainCollisionPadding
@@ -2018,7 +2018,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
                     for jj in (ii + 1)..<hubIndices.count {
                         guard hubBubbleR[jj] > 0 else { continue }
                         let i = Int(hubIndices[ii]), j = Int(hubIndices[jj])
-                        // 拖拽碰撞箱=球本身(07-08):被拖 hub 的圆不解算 ——
+                        // 拖拽碰撞箱=球本身(07-08 update):被拖 hub 的圆不解算 ——
                         // 推土机改球级穿行;松手恢复,重叠对称推开
                         if i == di || j == di { continue }
                         let d = P[j] - P[i]
@@ -2048,7 +2048,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             }
             }
         }
-        // 末端球与**自家** hub 硬碰撞(07-02 定稿:排除外部影响 —— 外家
+        // 末端球与**自家** hub 硬碰撞(07-02 update:排除外部影响 —— 外家
         // hub 由气泡隔离保证够不着,不再对叶施加任何力)。推叶不推 hub。
         if !leafIndices.isEmpty {
             let pad = GraphConstants.mainCollisionPadding
@@ -2133,7 +2133,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         // 带给自家圈内叶,残余由弹簧回弹。被拖 hub 走同一条路(原拖拽
         // 特例已删,避免双重携带)。陨石不带(三态另有携带/弹簧机制)。
         familyCarryPass()
-        // 拖拽硬清障 v2(07-02:速度再快也不叠):
+        // 拖拽硬清障 v2(07-02 update:速度再快也不叠):
         //   ① 扫掠胶囊 —— 沿「上 tick 钉位 → 本 tick 钉位」线段全程清障,
         //     高速时一 tick 跳几十 pt,点清障会隧穿跳过中间的球;
         //   ② 邻域堆积松解 —— 被推出的球压进旁边球里,速度域阻力追不上,
@@ -2303,7 +2303,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             let cMag = simd_length(cVec)          // 0=角向均匀,→1=全挤一边
             let cAng = atan2(cVec.y, cVec.x)
             let evenGap = 2 * Float.pi / Float(count)
-            // 大家(07-02 反馈:叶多的 folder 反而铺不匀):均分角随叶数
+            // 大家(07-02 update:叶多的 folder 反而铺不匀):均分角随叶数
             // 变小,邻居间隙差同步变小 → 力趋零。改按**相对失衡**放大
             //(除以均分角,封顶 8×),大家的失衡与小家同力度回正。
             let relBoost = min(1 + 0.03 / evenGap, 8)
@@ -2385,7 +2385,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         }
     }
 
-    /// 家分组 → **径向分层**(07-02 定稿:长线球堆一边、短线球堆
+    /// 家分组 → **径向分层**(07-02 update:长线球堆一边、短线球堆
     /// 另一边时,角向再均匀整体也显得偏 —— 每一段长度各自做均匀分布):
     /// 每家按线长分位切 1~5 层(≥16 叶才分层),familyRange 的每条 =
     /// 一层,匀布力在层内独立生效 → 每一圈各自均匀。
@@ -2396,7 +2396,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             restOf[Int32(e.a)] = Float(e.restLength)
         }
         var byHub: [Int32: [Int32]] = [:]
-        // 陨石不参与匀布(07-03):弧带槽位由 beltPass 弹簧管。
+        // 陨石不参与匀布(07-03 update):弧带槽位由 beltPass 弹簧管。
         // hubIndex == 0 = 直接挂主球的叶(folder 不够 3 个时的 ungrouped),
         // 一样要匀布 —— 否则主球那圈叶会堆成一坨。
         for node in scene.nodes
@@ -2452,7 +2452,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             cStackCX.withUnsafeMutableBufferPointer { SX in
             cStackCY.withUnsafeMutableBufferPointer { SY in
             cStackHalf.withUnsafeMutableBufferPointer { SH in
-                // 家隔离只在**常态**(07-02 定稿:重叠必须被阻力挡住,
+                // 家隔离只在**常态**(07-02 update:重叠必须被阻力挡住,
                 // 拖拽扰动期跨家也互为阻力;常态下气泡不相交,隔离无损)
                 let isolate = alphaTarget == 0
                 for i in 0..<n {
@@ -2522,7 +2522,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     }
 
     /// 分角色斥力电荷:主球小(硬碰撞管不叠)、hub 中、叶小(圈内间距
-    /// 归碰撞力管)—— 07-02 确诊:主球/跨圆叶叶电荷太大把整家叶子压到
+    /// 归碰撞力管)—— 07-02 update:主球/跨圆叶叶电荷太大把整家叶子压到
     /// 背面半圆。
     private static func chargeArray(scene: GraphScene) -> [Float] {
         scene.nodes.map { node in
@@ -2605,7 +2605,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
 
     /// 全部末端球 + 各自所属 hub(主球=0)+ 圈内硬上限
     ///(= 自家气泡半径 − 叶半径 − 1;自家 hub 无气泡时 ≤0 = 不夹)。
-    /// 陨石不算(07-03):它们在圈外,圈内夹钳/叶-hub 硬碰撞都不适用。
+    /// 陨石不算(07-03 update):它们在圈外,圈内夹钳/叶-hub 硬碰撞都不适用。
     private static func leafArrays(scene: GraphScene) -> ([Int32], [Int32], [Float]) {
         var l: [Int32] = [], h: [Int32] = [], m: [Float] = []
         for node in scene.nodes where !node.kind.isHub && node.beltTier == nil {

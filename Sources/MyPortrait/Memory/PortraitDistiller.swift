@@ -688,7 +688,7 @@ final class PortraitDistiller {
         cleanup()
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // 1. 现有 portrait:1 个旧 derived(2026-01-01),旧 derived 块
+        // 1. 现有 portrait:1 个旧 derived(2026-01-01 update),旧 derived 块
         var existing = PortraitFile(
             created: Date(),
             body: "Old prose.\n\n**Derived from events:**\n- [[2026-01-01/old_event.md]]\n",

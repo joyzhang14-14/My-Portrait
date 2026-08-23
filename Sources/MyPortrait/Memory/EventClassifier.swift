@@ -7,7 +7,7 @@ import GraphPhysics
 /// 跑法:
 ///   1. 收集"未分组" events(在 events/*/*.md 但不在任何 folder.events 里),
 ///      **只取核心事件**(currentWeight ≥ beltWeightMax) —— 陨石级的碎事件
-///      不喂 LLM,省 token 且不让它们凑数开 folder(07-28)
+///      不喂 LLM,省 token 且不让它们凑数开 folder(07-28 update)
 ///   2. 喂给 LLM:[已有 folders] + [未分组 events title+summary+tags]
 ///   3. LLM 返回: 已有 folder 的 append、新 folder 的 create(≥ folderMinCoreEvents
 ///      个核心事件才创建)、其余留 ungrouped(下次跑可能凑够)
@@ -24,7 +24,7 @@ final class EventClassifier {
     let batchCap: Int
     /// LLM 创建新 folder 的最小事件数。少于这个数留 ungrouped,等下次凑齐。
     /// 候选已在 scanAllEvents 里滤成核心事件(weight ≥ beltWeightMax),所以
-    /// 这个数就是"至少 N 个 1.5 权重以上的事件才开 folder"(07-28),
+    /// 这个数就是"至少 N 个 1.5 权重以上的事件才开 folder"(07-28 update),
     /// 与 Graph / Text 两处的存活门共用 GraphConstants.folderMinCoreEvents。
     let minEventsForNewFolder: Int
 
@@ -330,7 +330,7 @@ final class EventClassifier {
         let fm = FileManager.default
         let root = Storage.eventsDir
         guard let dayDirs = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
-        // 只喂核心事件(07-28):陨石级(weight < beltWeightMax)的碎事件
+        // 只喂核心事件(07-28 update):陨石级(weight < beltWeightMax)的碎事件
         // 不进 LLM —— 省 token,也堵住"一堆碎事件凑够数开 folder"。口径与
         // Graph / Text 两处的 currentWeight 完全一致(同一个 EMA 懒衰减)。
         let ema = WeightEMA(

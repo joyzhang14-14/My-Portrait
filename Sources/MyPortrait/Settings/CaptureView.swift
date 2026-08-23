@@ -651,7 +651,7 @@ struct ScreenCaptureSettingsView: View {
     /// 原 PrivacyView 整组 cards 搬来。Screen Capture 同一物理通道,
     /// 用户体感"屏幕能看到的内容怎么过滤"也属于 capture 配置范畴。
     @ViewBuilder private var privacySection: some View {
-        // (07-21 删掉 "Capture rules" 卡:incognito 跳帧永久关(要屏蔽的内容
+        // (07-21 update 删掉 "Capture rules" 卡:incognito 跳帧永久关(要屏蔽的内容
         //  走下面两张名单)、mask 永远开(行为说明写进两张名单的脚注)。)
         SettingsCard(
             // App 名单和 URL 名单行为完全一样(窗口抠掉、帧照拍),合成一张卡,
@@ -865,7 +865,7 @@ struct TypingCaptureSettingsView: View {
                 // 停用重写,这里只剩 Pending review(处理旧 staged 记录)。
                 // (writing style 是 portrait 侧 pipeline,留在 Memory 页。)
                 WritingPipelineSection()
-                // 07-30:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
+                // 07-30 update:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
                 // 模型,没有 provider / model 可选。config 里那三个键也一并摘了。
             }
         }

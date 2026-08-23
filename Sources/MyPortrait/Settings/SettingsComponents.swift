@@ -560,7 +560,7 @@ struct TypingAppPicker: View {
     var categories: Binding<[String]>? = nil
 
     /// bundle id 最后一段是无意义通用词的 app —— 直接给名字。
-    /// (07-30:`com.bitwarden.desktop` 显示成 "desktop",在黑名单列表里
+    /// (07-30 update:`com.bitwarden.desktop` 显示成 "desktop",在黑名单列表里
     ///  看着像个没用的条目,差点被当垃圾从密码管理器黑名单里删掉。)
     static let displayNames: [String: String] = [
         "com.bitwarden.desktop": "Bitwarden",

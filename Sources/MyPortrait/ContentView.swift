@@ -130,7 +130,7 @@ struct ContentView: View {
 
     /// 标题栏警示条本体 —— mainContent 的注释里有形态/实现的完整来龙去脉
     ///(零高锚点 + background 里 ZStack ignoresSafeArea 向上扩进标题栏)。
-    /// 抽成组件是因为 onboarding 分支也要挂(08-09)。
+    /// 抽成组件是因为 onboarding 分支也要挂(08-09 update)。
     private struct DevModeTitlebarBanner: View {
         let live: Bool
         var body: some View {
@@ -226,7 +226,7 @@ struct ContentView: View {
             }
             ScheduleRunner.shared.start()
 
-            // 存量 folder 颜色一次性固化(07-10:没设色的 folder 此前每次
+            // 存量 folder 颜色一次性固化(07-10 update:没设色的 folder 此前每次
             // 启动换色,详见 EventFolderStore.migrateAssignColors)。幂等。
             EventFolderStore.migrateAssignColors()
 

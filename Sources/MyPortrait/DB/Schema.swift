@@ -1068,7 +1068,7 @@ enum DBSchema {
                 "CREATE INDEX idx_mouse_log_app ON mouse_log(bundle_id, ts_ms)")
         }
 
-        // 老帧 OCR 补跑列(2026-08-04)。
+        // 老帧 OCR 补跑列(2026-08-04 update)。
         //
         // 背景:2026-08-04 之前 OCRService 有 AX 快路 —— 非终端非浏览器 app 若 AX
         // 文本 ≥20 字就直接当 full_text,跳过 Vision。实测该假设在多数 app 上不成立
