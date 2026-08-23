@@ -361,7 +361,7 @@ private struct PermissionsStep: View {
                 .font(.system(size: 18))
                 .foregroundStyle(Theme.textPrimary.opacity(0.85))
                 .frame(width: 28, height: 28)
-            // 「为什么要这项权限」**这里直接显示,不收进 ⓘ**(08-09 用户定)。
+            // 「为什么要这项权限」**这里直接显示,不收进 ⓘ**(08-09 update)。
             // 设置页那张 Permissions 卡是"你给过什么"的对照表,说明收起来没问题;
             // 这一步的目的是**说服**用户授权,把理由藏到 ⓘ 后面就没人看了。
             // 文案本体在 PermissionCatalog,两边共用。
@@ -653,7 +653,7 @@ private struct MemoryProviderStep: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 这一步的说明**不收进 ⓘ**(08-09 用户):这是全流程里唯一
+                // 这一步的说明**不收进 ⓘ**(08-09):这是全流程里唯一
                 // 需要用户理解"我在选什么"才能选对的一步,藏起来等于让他瞎选。
                 StepHeader(title: "Choose AI model for pipelines")
                 Text(Markdown.inline("Turns your captured activity into **events and a portrait**. **Main model** for the heavy passes, **light model** for the frequent cheap ones."))

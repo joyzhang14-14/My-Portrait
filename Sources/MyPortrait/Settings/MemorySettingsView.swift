@@ -129,7 +129,7 @@ struct MemorySettingsView: View {
     var body: some View {
         // dev mode 只读的 .disabled 挂在 pageBody 里 ScrollView **内层**的
         // VStack 上,不在这里 —— 挂整页会把 ScrollView 一起 disable,macOS 上
-        // 连滚动手势都被禁,页面直接"卡死"(08-09 用户实测)。
+        // 连滚动手势都被禁,页面直接"卡死"(08-09 实测)。
         writingStyleModals(pageBody)
     }
 

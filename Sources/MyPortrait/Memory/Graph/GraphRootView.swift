@@ -84,7 +84,7 @@ struct GraphRootView: View {
 
     // 浮窗(末端球点击)
     @State private var floatNodeId: Int? = nil
-    /// 浮窗渐显(07-10 用户"视角变完后渐进出现,不要太慢"):开卡片先隐,
+    /// 浮窗渐显(07-10 "视角变完后渐进出现,不要太慢"):开卡片先隐,
     /// 等相机取景收官(cameraTracking 落 false)再 0.22s 淡入;取景等物理
     /// 沉降太久时 1.5s 兜底先显示。⚠️ 在**设置 floatNodeId 的入口**同步置
     /// false(onChange 在渲染后才跑,只靠它换球时会闪一帧上个状态)。
@@ -112,12 +112,12 @@ struct GraphRootView: View {
     /// 相机任务代际:旧任务被取消后可能正从 sleep 返回,只允许最新任务
     /// 收尾/落终点,避免连续点球时旧任务插回旧视角造成一帧卡跳。
     @State private var cameraRunID: UInt64 = 0
-    /// 预加载环(07-09 用户"随机种子预加载:打开界面前就知道该去哪"):
+    /// 预加载环(07-09 "随机种子预加载:打开界面前就知道该去哪"):
     /// reload 在显示前 headless 跑出本轮随机种子的最终隐形环,开局固定
     /// 取景直接用它 —— 保留随机布局的变化又不闪(免掉切回时环心乱跳)。
     /// nil = portrait 无环 / 尚未加载。松手缓移不用它(用引擎实时环)。
     @State private var preloadedRing: (center: SIMD2<Float>, radius: Float)? = nil
-    /// 主球自定义照片(07-11 用户):从磁盘加载,Settings 改了发通知即重载。
+    /// 主球自定义照片(07-11):从磁盘加载,Settings 改了发通知即重载。
     @State private var mainBallImage: NSImage? = nil
     /// 观察 config:脉冲速度档位改了要即时反映到渲染(闪光时长)与下次点击。
     @State private var config = ConfigStore.shared
@@ -162,7 +162,7 @@ struct GraphRootView: View {
                                     mainBallImage: mainBallImage,
                                     onTapNode: handleTap,
                                     onNodeDragEnded: {
-                                        // 拖球松手 = 回总览:先关卡片(07-11 用户
+                                        // 拖球松手 = 回总览:先关卡片(07-11
                                         // "切回主视图过程中和完成后都不许有卡片";
                                         // 点空白回总览那条本就关,这条曾漏)。
                                         floatNodeId = nil
@@ -203,7 +203,7 @@ struct GraphRootView: View {
         }
         .background(SidebarBackdrop().ignoresSafeArea())
         // 主窗口是 chromeless + isMovableByWindowBackground=true(全局设计),
-        // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 用户反馈)。
+        // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 反馈)。
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
         .background(WindowDragBlocker())
         .task(id: zone) { await reload() }
@@ -383,7 +383,7 @@ struct GraphRootView: View {
         cameraTracking = false
     }
 
-    /// 点 folder 球聚焦(07-09 用户):相机缓移到该 folder 的隐形圆(气泡)
+    /// 点 folder 球聚焦(07-09):相机缓移到该 folder 的隐形圆(气泡)
     /// 视图 —— center=气泡心(= hub 位),zoom=气泡直径占视口 cameraFolderFill。
     /// tap 与 drag 由手势系统天然区分(DragGesture 有 2pt 阈值,纯点击不触发)。
     /// - Parameter onDone: 取景走完回调。早返(无引擎/无隐形圆/算不出取景)=
@@ -406,7 +406,7 @@ struct GraphRootView: View {
     /// 再拉回(远处小 folder 回总览实测过冲 728~1493pt = 用户报的"强拉回")。
     /// w = 世界可视宽度 = minDim/zoom;rho=1.4(缩放/平移权衡,原论文最优值)。
     /// 目标固定(点击时图已 park),t 基定时动画,帧数不变(时长与原一致)。
-    /// - Parameter onDone: 取景**真正走完**才回调(07-11 用户:点 hub 转完视角
+    /// - Parameter onDone: 取景**真正走完**才回调(07-11:点 hub 转完视角
     ///   再发脉冲)。被取消 / 被新交互顶替 / 引擎换代 → **不回调**(那一发作废)。
     ///   退化早返(无缩放基准)= 相机瞬时到位,立即回调。
     private func animateCamera(toCenter c1: SIMD2<Float>, toZoom z1raw: Double,
@@ -425,7 +425,7 @@ struct GraphRootView: View {
         // 可做,别跑那 36 帧(~0.6s)**空动画**。否则:①每次重复点击都要白等
         // 一段才发脉冲 ②在这段空动画里再点一次,新的 animateCamera 会 cancel
         // 掉上一个 task,上一发挂在 onDone 上的脉冲**被直接吞掉** —— 合起来就
-        // 表现为"冲击波走完才能触发下一发"(07-11 用户报的 bug)。
+        // 表现为"冲击波走完才能触发下一发"(07-11 报的 bug)。
         // 立即完成 → 连点即连发,新脉冲叠加到在飞的那批上(triggerPulse 本就叠加)。
         if simd_length(c1 - c0) < 0.5, abs(log(z1 / z0)) < 0.005 {
             cameraTracking = false
@@ -621,7 +621,7 @@ struct GraphRootView: View {
     private func handleTap(_ id: Int?) {
         guard let id, id < scene.nodes.count else {
             floatNodeId = nil
-            // 点空白 → 平滑移回开场总览(当前隐形环/全节点包围圆);07-09 用户。
+            // 点空白 → 平滑移回开场总览(当前隐形环/全节点包围圆);07-09 定。
             // 与 folder 聚焦同一套平滑动画(直线到中心+几何缩放),消拉回。
             if let tgt = overviewCamera(viewSize) {
                 animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
@@ -630,7 +630,7 @@ struct GraphRootView: View {
         }
         if scene.nodes[id].kind.isHub {
             floatNodeId = nil
-            // 07-11 用户:点 folder/分区球先转视角,**取景转完再发脉冲**(原来
+            // 07-11:点 folder/分区球先转视角,**取景转完再发脉冲**(原来
             // 是立刻发,脉冲在镜头飞行中跑完,看不清)。主球没有取景变换 →
             // 立即发。取景中途被新交互打断 → onDone 不回调,那一发作废。
             if scene.nodes[id].hubBubbleRadius != nil {
@@ -644,7 +644,7 @@ struct GraphRootView: View {
             // 它淡回来,会永久隐身。
             if floatNodeId != id { floatRevealed = false }
             floatNodeId = id
-            // 点小球 → 与信息面板绑定的取景(07-10 用户,event/portrait 两区
+            // 点小球 → 与信息面板绑定的取景(07-10,event/portrait 两区
             // 同款):相机聚焦该球,zoom = 所在家气泡占视口 cameraFolderFill
             // —— 与 folder 聚焦同一缩放级,folder 视角转小球视角时只平移不
             // 变焦,不跳。图已静止 → van Wijk(见 frameCameraToLeaf,治拉回)。
@@ -652,7 +652,7 @@ struct GraphRootView: View {
         }
     }
 
-    /// folder/分区球的脉冲速度 = 该球连线的平均长度 / 1.5s(07-11 用户设计)。
+    /// folder/分区球的脉冲速度 = 该球连线的平均长度 / 1.5s(07-11 设计)。
     /// ⚠️ 只统计**脉冲真正会走的边**(排除 blocked 的主球那条):主球那条边又长
     /// 又不发光,算进均值会把它抬高 —— 叶子少的小 folder 抬得最狠(3 叶时均值
     /// 近 2×)→ 脉冲快一倍,恰好破坏"每个 folder 都 1.5s"的一致性。
@@ -683,7 +683,7 @@ struct GraphRootView: View {
         let depth = isMain ? GraphConstants.pulseMaxDepthMain
                            : GraphConstants.pulseMaxDepthOther
         let blocked: Set<Int> = isMain ? [] : [0]
-        // folder/分区球:速度自适应(07-11 用户设计)= 该球连线的**平均长度**
+        // folder/分区球:速度自适应(07-11 设计)= 该球连线的**平均长度**
         // / pulseHubTravelSeconds → 脉冲恰好用那么久走完一条平均边,不论
         // folder 大小观感一致。主球仍用常量(它 2 跳级联,自适应会让总时长翻倍)。
         // 两者都再乘用户的脉冲档位倍率(pulseScale,>1 更快)。
@@ -741,7 +741,7 @@ struct GraphRootView: View {
         frameCameraToEventBall(idx)
     }
 
-    /// 跳转落地取景(07-10 用户"redirect 后以这个球为中心拉大"):相机 lerp
+    /// 跳转落地取景(07-10 "redirect 后以这个球为中心拉大"):相机 lerp
     /// 跟随**目标球实时位置**(跨画布跳转时引擎刚炸开,球还要飞几秒,一次
     /// 定死会对准过期位置),zoom = 该球所在家的气泡直径占视口
     /// cameraFolderFill(家上下文可见、球居中)。跟到物理定稳且贴合才收官;
@@ -780,7 +780,7 @@ struct GraphRootView: View {
         }
     }
 
-    /// 点小球取景(07-10 用户):图已静止,球不动 → 用 **animateCamera(van Wijk)**
+    /// 点小球取景(07-10):图已静止,球不动 → 用 **animateCamera(van Wijk)**
     /// 到固定目标,而非 frameCameraToEventBall 的 lerp 跟随 —— lerp 跟随在大
     /// 放大比(总览级 → 单球家气泡级)下,目标球屏幕位置会先冲离中心再回来
     /// = "很强的视角拉回"(用户报);van Wijk 单调无过冲。目标同 EventBall:
@@ -823,7 +823,7 @@ struct GraphRootView: View {
             if loading {
                 ProgressView().controlSize(.small)
             }
-            // 前端文案一律英文(用户 2026-07-01 定稿)。
+            // 前端文案一律英文(2026-07-01 定稿)。
             Text("\(scene.nodes.count) nodes · \(scene.edges.count) links")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
@@ -869,7 +869,7 @@ struct GraphRootView: View {
         }.value
         guard gen == loadGen else { return }   // 期间切了 zone → 丢弃
 
-        // 随机种子(07-09 用户"随机种子预加载"):保留每次打开布局有变化;
+        // 随机种子(07-09 "随机种子预加载"):保留每次打开布局有变化;
         // 界面显示前先 headless 跑出该种子的最终隐形环,相机开局即按此
         // 取景 —— 变化 + 不闪。同一 seed 喂给 preload 与真正的引擎,布局
         // 一致(preloadRing == 引擎最终环的影子预测)。
@@ -882,7 +882,7 @@ struct GraphRootView: View {
 
         let fp = GraphSession.fingerprint(of: built)
         if let cached = GraphSession.shared.entries[z], cached.fingerprint == fp {
-            // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02 用户
+            // 数据没变:复用引擎,刷边参数后**重放展开动画**(07-02
             // 定稿:每次打开都要展开效果;确定性物理 → 每次收敛到同一布局)
             cached.engine.updateScene(built)
             cached.engine.explode(seed: seed)
@@ -904,7 +904,7 @@ struct GraphRootView: View {
             engineGen += 1
             camera = GraphCamera()
         }
-        // 陨石滑动速度旋钮(07-11 用户):把 config 档位推给引擎(归位 glide +
+        // 陨石滑动速度旋钮(07-11):把 config 档位推给引擎(归位 glide +
         // 开局点亮速度)。两分支合流,新建/复用引擎都覆盖;下 tick 生效不重建。
         engine?.setAnimationSpeedScale(
             ConfigStore.shared.current.display.graphAnimationSpeed.animationScale)

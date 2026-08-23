@@ -31,7 +31,7 @@ struct MemoryViewModeToggle: View {
             .frame(maxWidth: .infinity)
             .background {
                 if isOn {
-                    // 选中段的圆角长方形框(用户 2026-07-01 定稿:比椭圆好看)
+                    // 选中段的圆角长方形框(2026-07-01 定稿:比椭圆好看)
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Theme.accent.opacity(0.13))
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)

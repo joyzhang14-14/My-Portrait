@@ -32,7 +32,7 @@ enum DisplayBrightness {
     }
 
     /// 亮度是否已调到最低(滑块 0)。0.005 是浮点余量,不是"低亮度"阈值 ——
-    /// 只有真正打到底才算(07-21 用户定稿:亮度=最低时停采)。
+    /// 只有真正打到底才算(07-21 定稿:亮度=最低时停采)。
     static func isAtMinimum() -> Bool {
         guard let v = current() else { return false }
         return v <= 0.005

@@ -173,7 +173,7 @@ final class WritingCaptureWorker {
         }
 
         // 3. Pass 1(整天 OCR → context timeline)**已断**。
-        // 07-30 用户要求:写作采集这条云端路整个下线,给新的本地化 pass1-4
+        // 07-30:写作采集这条云端路整个下线,给新的本地化 pass1-4
         // 腾位置(新逻辑不需要模型)。context timeline 暂时空 —— 下游只拿它
         // 给 record 填 contextSummary,本来就允许 nil。
         let contextTimeline: [WritingCaptureContextSegment] = []
@@ -310,7 +310,7 @@ final class WritingCaptureWorker {
         }
     }
 
-    /// 07-30 用户:typing capture 从零重写了,**这一整套 pass 处理停用** ——
+    /// 07-30:typing capture 从零重写了,**这一整套 pass 处理停用** ——
     /// Step 0 切分 / 路由 / edit_log 过滤 / staged 写入全部不再跑。
     ///
     /// 停的只是「处理」。**采集入库照跑** —— TypingObserver → `typing_events`
@@ -1033,7 +1033,7 @@ final class WritingCaptureWorker {
             return prev.endValue
         }
         // 没有任何打字内容 = 纯剪切板粘贴 / 占位符 / autofill → **一律丢**(返回空)。
-        // (用户决定:纯粘贴不留。根治"Write a message…"这类占位符泄漏 —— 它跟真短
+        // (定的:纯粘贴不留。根治"Write a message…"这类占位符泄漏 —— 它跟真短
         // 粘贴在算法层分不开,唯一区别是匹不匹配剪贴板,而那信号没存进 typing_event。)
         return ""
     }

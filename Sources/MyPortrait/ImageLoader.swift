@@ -63,7 +63,7 @@ struct AsyncDiskThumbnail: View {
     let targetPixelSize: CGFloat
     /// .fill = 填满槽位、溢出裁切(HomeView 方形附件缩略图要的);
     /// .fit = 完整适配不裁像素(Timeline 主画面要的 —— fill 曾把截图左右
-    /// 各裁掉几个 px,07-21 用户发现)。
+    /// 各裁掉几个 px,07-21 发现)。
     var contentMode: ContentMode = .fill
 
     @State private var image: NSImage?

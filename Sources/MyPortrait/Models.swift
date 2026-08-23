@@ -12,7 +12,7 @@ enum MemoryScope: Hashable, Identifiable {
     case portrait(category: String)
     /// Text 侧栏底部的设置入口（排序方式等），不是记忆内容 scope。
     case textSettings
-    /// Neural Graph 侧栏 GRAPH 下的设置入口(07-11 用户):主内容区显示图谱设置
+    /// Neural Graph 侧栏 GRAPH 下的设置入口(07-11):主内容区显示图谱设置
     /// (主球照片等),不是图谱形态。
     case neuralGraphSettings
 

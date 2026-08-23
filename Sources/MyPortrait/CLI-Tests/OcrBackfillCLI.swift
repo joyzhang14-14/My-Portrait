@@ -5,7 +5,7 @@ import GRDB
 import ImageIO
 import Vision
 
-/// 存量帧 OCR 补跑(2026-08-04,用户裁定"不信 AX、不硬编码 app 名单,一起走 OCR")。
+/// 存量帧 OCR 补跑(2026-08-04 update:"不信 AX、不硬编码 app 名单,一起走 OCR")。
 ///
 /// 2026-08-04 之前 `OCRService.recognize` 有 AX 快路:非终端非浏览器 app 只要 AX 文本
 /// ≥20 字就直接当 `full_text`,跳过 Vision。实测该假设在多数 app 上不成立 —— 同 app

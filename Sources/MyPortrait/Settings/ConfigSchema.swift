@@ -434,7 +434,7 @@ struct SchedulerSettings: Codable, Equatable {
 
 // MARK: - Display
 
-/// 通用的 5 档速度等级(07-11 用户:Apple 风,不显示数值)。图谱里有两个独立
+/// 通用的 5 档速度等级(07-11:Apple 风,不显示数值)。图谱里有两个独立
 /// 设置复用它,各取各的倍率映射(medium=1.0=各自的现状手感):
 ///  - `display.graphAnimationSpeed` → `animationScale`(物理动画)
 ///  - `display.graphPulseSpeed`     → `pulseScale`(神经脉冲,纯渲染)
@@ -503,7 +503,7 @@ struct DisplayConfig: Codable, Equatable {
     var graphAnimationSpeed:     SpeedLevel = .medium
     /// 神经脉冲速度(点 hub 的冲击波 + 抵达点亮)。默认中等=当前手感。
     var graphPulseSpeed:         SpeedLevel = .medium
-    /// 极简观感(07-11 用户):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
+    /// 极简观感(07-11):隐藏全部连接线 + 脉冲白杠。**纯前端**——脉冲照常
     /// 级联,球仍按原时序逐个亮起(连锁激活保留),只是传播过程不可见。
     var graphHideLinks:          Bool = false
     /// Memories 上次停在哪个 scope / 视图形态 —— 每次切换写回,下次进来直接
@@ -571,7 +571,7 @@ struct GeneralConfig: Codable, Equatable {
     // 最下面,右上角 Reset 要跟着 display 走)。老 config 里那一行由
     // MyPortraitConfig.migrateCronHistoryToDisplay 搬值,读完不回写,下次
     // 保存自动从文件消失。
-    // auto_scan_imports 已下线(07-28 用户):Import 页固定手动模式 ——
+    // auto_scan_imports 已下线(07-28):Import 页固定手动模式 ——
     // 每个来源显示「未扫描」+ Scan 按钮,点了才扫。旧 config.toml 里
     // 残留的这个键会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
     init() {}

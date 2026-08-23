@@ -64,7 +64,7 @@ final class ConfigStore {
         startWatching()
     }
 
-    /// dev config 第一次用时,整份拷贝真实 config —— 用户要求"新建时两个 app
+    /// dev config 第一次用时,整份拷贝真实 config —— 定的"新建时两个 app
     /// 配置相同、模型供应商相同、不需要重新绑定"。
     ///
     /// 供应商能"不用重新绑定"是因为 TOML 里存的只是**引用名**,真正的密钥在

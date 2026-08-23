@@ -71,7 +71,7 @@ enum EventGraphStyleStore {
 ///   位置全部由力系统涌现(气泡碰撞定角度;圆间零重叠、叶不出圆)。
 enum GraphSceneBuilder {
 
-    /// portrait 画布的 7 个分区(emotions 用户拍板不做)+ 各自颜色。
+    /// portrait 画布的 7 个分区(emotions 拍板不做)+ 各自颜色。
     /// 色系沿用 FolderPalette 预设(需求 §4.3)。
     static let portraitCategories: [(name: String, hex: String)] = [
         ("personality",   "#B87BDC"),
@@ -140,7 +140,7 @@ enum GraphSceneBuilder {
         }
 
         // hub 列表(真 folder + 虚拟 Unclassified),叶数降序定圆弧顺序。
-        // folder 存活门(07-10 用户定稿):气泡内核心球(weight≥beltWeightMax,
+        // folder 存活门(07-10 定稿):气泡内核心球(weight≥beltWeightMax,
         // 有连线)不足 folderMinCoreEvents(3)个的 folder 不上画布 —— weight
         // 衰减成陨石后核心数自然减少,衰减殆尽的 folder 消失;其全部剩余
         // event(核心+陨石)并入 Unclassified(灰)继续显示,数据不动。
@@ -260,12 +260,12 @@ enum GraphSceneBuilder {
                                radius: GraphConstants.mainRadius,
                                colorRGB: mainBlue, fileURL: nil, hubIndex: -1))
 
-        // 07-02 气泡重构(用户定稿):每个 hub 的叶子绕它 360° 成圆。
+        // 07-02 气泡重构定稿:每个 hub 的叶子绕它 360° 成圆。
         // 气泡半径由内容面积涌现(10 叶小圆,1000 叶巨圆);线长 =
         // 日期映射 × 气泡尺度(叶少则全家线等比缩短);hub→主球弹簧
         // rest = 主球半径 + 气泡半径 + 缝(气泡贴主球排布,角度由
         // 气泡碰撞涌现);圆间零重叠、叶不出自家圆由物理保证。
-        // 陨石带只在 Events 画布(07-03 用户定稿)。
+        // 陨石带只在 Events 画布(07-03 定稿)。
         let beltEnabled = zone == .events
         // 单环重构:全场唯一一个陨石环,**所有 belt 家共享全局层基线**
         // (每层径向起点由最大 belt 家 = specs 降序首个有陨石的家产出,
@@ -361,7 +361,7 @@ enum GraphSceneBuilder {
             }
             let cMax = max(cum.last ?? 0, 1e-9)
             // 主球那族把 floor 压低 —— 0.25→1.0 的可用行程只有 3 倍,
-            // 0.10→1.0 是 10 倍,最近的和最旧的一眼分得开(用户:"weight
+            // 0.10→1.0 是 10 倍,最近的和最旧的一眼分得开("weight
             // 影响的长度范围可以大一些")。
             let floorFrac = isRoot ? GraphConstants.rootRestFloor
                                    : GraphConstants.bubbleRestFloor

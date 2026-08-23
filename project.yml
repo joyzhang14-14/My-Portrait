@@ -50,7 +50,7 @@ targets:
   # ── 图谱物理热路径(GraphPhysicsEngine + GraphModel + GraphConstants)──
   # 拆独立静态库的唯一理由:**Debug 也开 -O**。app target 的 Debug 是
   # -Onone,物理单 tick 慢 35 倍(7ms vs 0.2ms)、影子引擎 1.6~2.5s,
-  # 开局/松手肉眼可见延迟(07-08 用户拍板拆模块)。代价:物理模块内
+  # 开局/松手肉眼可见延迟(07-08 拍板拆模块)。代价:物理模块内
   # 断点/逐行调试不可用(优化后变量被折叠),要调试物理临时把
   # SWIFT_OPTIMIZATION_LEVEL 改回 -Onone 重新 xcodegen。
   GraphPhysics:

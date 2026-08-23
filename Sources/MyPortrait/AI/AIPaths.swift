@@ -11,7 +11,7 @@ enum AIPaths {
     /// 直接能用(TOML 里只有引用名),既不用重新绑定供应商,也不会把 API key
     /// 多复制一份到演示目录里。
     static var secretsDB: URL { supportDir.appendingPathComponent("secrets.sqlite") }
-    /// 聊天记录跟 dev mode 走(用户要求:"ai chat 的数据也会换成 dev 的")。
+    /// 聊天记录跟 dev mode 走("ai chat 的数据也会换成 dev 的")。
     static var chatDB: URL    { Storage.uiRootURL.appendingPathComponent("chat.sqlite") }
     static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }

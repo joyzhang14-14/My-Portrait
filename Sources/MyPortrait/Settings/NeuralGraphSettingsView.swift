@@ -7,7 +7,7 @@ extension Notification.Name {
     static let mainBallPhotoChanged = Notification.Name("MyPortrait.MainBallPhotoChanged")
 }
 
-/// 主球照片的落盘位置 + 圆形裁剪工具(07-11 用户:自定义主球照片,
+/// 主球照片的落盘位置 + 圆形裁剪工具(07-11:自定义主球照片,
 /// 上传后程序裁成圆形贴主球)。不进 config schema —— 文件在=已设,
 /// 上传/移除即时生效(发通知让 Neural Graph 重载,不重启 app)。
 enum MainBallPhoto {
@@ -70,7 +70,7 @@ struct NeuralGraphSettingsView: View {
     @State private var config = ConfigStore.shared
 
     var body: some View {
-        // 无页面大标题(07-11 用户:侧栏入口内联,不要标题),只列卡片。
+        // 无页面大标题(07-11:侧栏入口内联,不要标题),只列卡片。
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // 卡片一律不带标题 —— 每张卡里就一个控件,标题和控件自己的
@@ -168,7 +168,7 @@ private struct MainBallPhotoSlot: View {
             if let img = preview {
                 Image(nsImage: img).resizable().scaledToFill()
             } else {
-                // default:纯蓝(仿主球),不加图标(07-11 用户)。
+                // default:纯蓝(仿主球),不加图标(07-11)。
                 Circle().fill(Color(red: 0.3, green: 0.6, blue: 1).opacity(0.85))
             }
         }
@@ -200,7 +200,7 @@ private struct MainBallPhotoSlot: View {
     }
 }
 
-/// 5 档速度选择器(07-11 用户:5 档、无数值、Apple 风,英文标签)。图谱动画
+/// 5 档速度选择器(07-11:5 档、无数值、Apple 风,英文标签)。图谱动画
 /// 与神经脉冲两个设置共用(各自传 title/caption,绑各自的 config 字段)。
 /// 速度是"大小量" → 用带刻度 Slider(仿 macOS 系统设置 Tracking speed),
 /// 5 档标签用 GeometryReader **精确定位到滑块的 5 个停点分数**(等宽列会把
@@ -285,7 +285,7 @@ private struct CropDimHole: Shape {
     }
 }
 
-/// Discord 式圆形头像裁剪弹窗(07-11 用户:上传主球照片时框选区域)。
+/// Discord 式圆形头像裁剪弹窗(07-11:上传主球照片时框选区域)。
 /// 圆形取景框固定居中,用户拖拽平移 + 捏合/滑块缩放定位,Apply 裁出正方形回传。
 /// 坐标系:SwiftUI 视口(左上、y 向下)与 CGImage 像素栅格一致 → 全程不翻 y。
 private struct CircularCropSheet: View {

@@ -26,7 +26,7 @@ struct TypingPrivacyFilter {
         "com.apple.SecurityAgent",                  // "xxx 想要进行更改"授权弹窗
         "com.apple.LocalAuthentication.UIAgent",    // Touch ID / 本地认证弹窗
         "com.apple.Passwords",                      // macOS 15「密码」app
-        // 07-30 用户:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
+        // 07-30:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
         // capture 要采自己 app 里打的字。
     ]
 

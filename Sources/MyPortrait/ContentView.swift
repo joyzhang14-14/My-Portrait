@@ -281,7 +281,7 @@ struct ContentView: View {
     /// chat 三份数据",这几处不在保护范围内、且是有意为之:
     ///   - Connections / Downloads → 凭据在 `secrets.sqlite`,**永远是真实那份**
     ///     (这正是"切过去不用重新绑定供应商"的前提)
-    ///   - Cron Jobs / Notifications → `cron_jobs/` 跟真实配置跑(08-09 用户定),
+    ///   - Cron Jobs / Notifications → `cron_jobs/` 跟真实配置跑(08-09 update),
     ///     dev mode 期间你本人的定时任务照常出结果
     /// 灰不掉也不该灰,所以改成把风险写在脸上。
     private var paneTouchesRealData: Bool {

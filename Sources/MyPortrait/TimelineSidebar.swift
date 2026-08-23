@@ -452,7 +452,7 @@ struct TimelineSidebar: View {
                 Divider().overlay(Theme.stroke).padding(.vertical, Theme.Space.xs)
                 scopeHeader("PORTRAIT")
                 VStack(spacing: 2) {
-                    // emotions 前端下线(08-10 用户):入口不再显示。目录、
+                    // emotions 前端下线(08-10):入口不再显示。目录、
                     // pipeline(distillCategories)与 dev 种子数据都还在 ——
                     // 彻底移除是挂账的后续任务,别在这里顺手删数据。
                     ForEach(PortraitPaths.seedCategories.filter { $0 != "emotions" },
