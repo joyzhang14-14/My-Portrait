@@ -2,8 +2,8 @@
 # 提交 .app 给 Apple notarize + staple ticket。
 #
 # 环境变量(用 keychain profile 存,只一次):
-#   APPLE_ID         你的 Apple ID(joyzhang_14@163.com)
-#   APPLE_TEAM_ID    VYHNX2Y2AL
+#   APPLE_ID         你的 Apple ID(登录 appleid.apple.com 的那个邮箱)
+#   APPLE_TEAM_ID    10 位 Team ID,developer.apple.com → Membership 里查
 #   APPLE_APP_PWD    App-specific password(appleid.apple.com 生成)
 #
 # 第一次跑前:

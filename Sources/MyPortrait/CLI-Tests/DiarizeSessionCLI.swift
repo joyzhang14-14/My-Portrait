@@ -343,7 +343,8 @@ enum DiarizeSessionCLI {
                     print("[reenroll] best-of-N \(String(format: "%.0f%%", 100*accN)) | 质心 \(String(format: "%.0f%%", 100*accC)) | 旧库 \(String(format: "%.0f%%", 100*galleryAcc)) | oracle \(String(format: "%.0f%%", 100*oracleAcc))")
                 }
 
-                let out = "/Users/joyzhang14/Desktop/diarize_session_result.md"
+                let out = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Desktop/diarize_session_result.md").path
                 try? md.write(toFile: out, atomically: true, encoding: .utf8)
                 // 终端摘要
                 print("\n找到 \(nClusters) 个簇。逐段纯声音撞库 vs 声道答案:正确 \(correct) / 标错 \(wrong) / 未匹配 \(unk)"

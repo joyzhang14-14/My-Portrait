@@ -10,7 +10,7 @@
 #
 # 为啥不用 Apple Development cert:
 #   - 绑你 Apple ID。哪天免费 dev 账号 expired / 你换账号,签名身份就丢
-#   - 签名里直接暴露作者邮箱(joyzhang_14@163.com),用户 codesign -dvvv 看得到
+#   - 签名的 Common Name 里带作者邮箱,任何拿到 .app 的人 codesign -dvvv 看得到
 #
 # 为啥不用 ad-hoc(`codesign --sign -`):
 #   - DR 带 cdhash,每次 build 漂。Sparkle 跨版本判 identity 不一致拒

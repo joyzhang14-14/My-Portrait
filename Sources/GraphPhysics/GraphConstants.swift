@@ -9,7 +9,6 @@ public enum GraphEdgeStyle: Sendable {
 }
 
 /// 图谱视图的全部可调常数(旋钮)集中在这一处。
-/// 需求文档:~/Desktop/Obsidian/Memory图谱视图·需求与实现方案.md §8
 public enum GraphConstants {
 
     // MARK: 连接线
