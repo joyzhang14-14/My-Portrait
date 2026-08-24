@@ -443,9 +443,8 @@ private struct ChatBubble: View, @MainActor Equatable {
         HStack(alignment: .top, spacing: 14) {
             BubbleAvatar(role: message.role, glowing: message.role == .assistant && isStreaming)
             VStack(alignment: .leading, spacing: 10) {
-                // 标题行高度恒定 —— 之前 hover 时 BubbleActions 出现在 HStack
-                // 里把行高从 11pt 字撑到按钮高,消息体被往下推一段,体感是
-                // "鼠标一悬停消息往下滑"。改成 actions 走 overlay 不占布局位。
+                // 标题行高度恒定 —— actions 走 overlay 不占布局位,避免
+                // hover 时行高被撑高、消息体跟着下移。
                 HStack(spacing: 6) {
                     Text(message.role == .user ? "You" : "Assistant")
                         .font(.system(size: 11, weight: .semibold))
@@ -514,9 +513,8 @@ private struct ChatBubble: View, @MainActor Equatable {
         .opacity(appear ? 1 : 0)
         .offset(y: appear ? 0 : 12)
         // **hover 触发范围 = 整条消息长方形**(包括留白),contentShape 让
-        // padding 区域也参与 hit-test。之前 hover 只在文字 / glass panel 上
-        // 起作用,鼠标 hover 在右侧 Spacer 区域时不触发,编辑/复制按钮怎么
-        // 都点不到。
+        // padding 区域也参与 hit-test,否则右侧 Spacer 区域 hover 不到,
+        // 编辑/复制按钮点不到。
         .contentShape(Rectangle())
         .onAppear {
             if animatesEntrance {
@@ -528,8 +526,8 @@ private struct ChatBubble: View, @MainActor Equatable {
                 appear = true
             }
         }
-        // hover state 直接切换,不再裹 withAnimation —— actions 走 overlay
-        // 已经不会影响布局,加动画反而引入"消息下滑"错觉。
+        // hover state 直接切换,不裹 withAnimation —— actions 走 overlay
+        // 不影响布局,加动画反而引入"消息下滑"错觉。
         .onHover { hover = $0 }
     }
 }
@@ -1428,7 +1426,6 @@ private struct ThinkingCard: View {
     private var accentStroke: Color {
         // running 用 cyan(语义色,跨主题都看得清);idle 用 Color.primary
         // (= 系统 labelColor,light 下黑、dark 下白,自动跟 colorScheme 切)。
-        // 之前钉死 Color.white.opacity(0.10),light 模式下完全看不见框线。
         block.isRunning ? Color.cyan.opacity(0.40) : Color.primary.opacity(0.18)
     }
 }
@@ -2351,8 +2348,7 @@ private struct IconActionButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 17, weight: .medium))
-                // 没显式 tint 时用系统 label color(自动跟 light/dark 切),
-                // 之前钉 .white 在 light 模式下整个图标几乎看不见。
+                // 没显式 tint 时用系统 label color,自动跟 light/dark 切。
                 .foregroundStyle(tint ?? Theme.textPrimary.opacity(hover ? 0.95 : 0.55))
                 .frame(width: 32, height: 32)
                 .background(
@@ -2745,8 +2741,7 @@ private struct PickerPopover: View {
 // MARK: - Image Lightbox (full-screen, borderless NSWindow)
 
 /// 单例:负责开 / 关全屏图片查看器。仿 Claude desktop —— 一个独立的
-/// borderless NSWindow 盖在整个 screen 上,不受 SwiftUI view tree
-/// 父布局限制(之前用 .overlay 只能盖 HomeView 区,侧栏还露出来)。
+/// borderless NSWindow 盖在整个 screen 上,不受 SwiftUI view tree 父布局限制。
 ///
 /// 关闭路径:点黑底背景 / 点右上角 × / 按 ESC / 调 close()。
 @MainActor

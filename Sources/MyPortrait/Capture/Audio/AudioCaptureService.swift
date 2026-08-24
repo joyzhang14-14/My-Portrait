@@ -41,9 +41,9 @@ actor AudioCaptureService {
 
     /// tap 回调 → samplesTask 的有序通道(单生产者 FIFO,保证样本顺序;同
     /// SystemAudioCaptureService.sampleStream pattern)。tap 回调线程上只做
-    /// 非阻塞 yield 原始 buffer,转换在 samplesTask 里串行做 —— 旧实现每个
-    /// buffer 起独立非结构化 Task,无任何顺序保证,高载(转录把 CPU 打满)时
-    /// buffer 乱序过 converter(内部带重采样状态)→ wav 样本错位、转录乱文。
+    /// 非阻塞 yield 原始 buffer,转换在 samplesTask 里串行做。⚠️ 每 buffer 起
+    /// 独立 Task 会丢失顺序保证,高载(转录把 CPU 打满)时 buffer 乱序过
+    /// converter(内部带重采样状态)→ wav 样本错位、转录乱文。
     private var samplesContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private var samplesTask: Task<Void, Never>?
 
@@ -259,8 +259,8 @@ actor AudioCaptureService {
         tapInstalled = false
         // installTap / engine.start 在格式不匹配 / aggregate device 异常时用
         // **NSException** 报错,Swift 接不住 → 直接 SIGABRT 闪退(线上崩溃就是这个)。
-        // 用 MyPortraitObjC 的 try/catch helper(本就是为这俩造的,之前没接线)兜住,
-        // 转成 Swift error 让 start() 优雅失败。block 只碰 local 变量,避开 actor 隔离;
+        // 用 MyPortraitObjC 的 try/catch helper 兜住,转成 Swift error 让 start()
+        // 优雅失败。block 只碰 local 变量,避开 actor 隔离;
         // tapInstalled 在成功后于 block 外置位。
         var startError: Error?
         let nsErr = MyPortraitObjCTryCatch {
@@ -323,10 +323,10 @@ actor AudioCaptureService {
         }
 
         // 用 AUAudioUnit.setDeviceID(现代 API)—— 这是 AVAudioEngine 真正认的设备切换
-        // 方式:引擎会按新设备重配输入,下面 line 186 的 inputNode.outputFormat 随之更新
-        // 成新设备的真实采样率。旧做法直接 AudioUnitSetProperty(kAudioOutputUnitProperty_
-        // CurrentDevice)在已 initialize 的 AUHAL 上会被静默忽略 → 设备号变了但引擎仍渲染
-        // 旧默认 → 不亮 mic 灯、零 buffer(默认 16k 蓝牙 vs 96k 内置麦尤其明显)。
+        // 方式:引擎会按新设备重配输入,下面 inputNode.outputFormat 随之更新成新
+        // 设备的真实采样率。⚠️ 不能用 AudioUnitSetProperty(kAudioOutputUnitProperty_
+        // CurrentDevice)—— 在已 initialize 的 AUHAL 上会被静默忽略 → 设备号变了但
+        // 引擎仍渲染旧默认 → 不亮 mic 灯、零 buffer(默认 16k 蓝牙 vs 96k 内置麦尤其明显)。
         do {
             try inputNode.auAudioUnit.setDeviceID(deviceID)
             logger.notice("bound mic input to device UID '\(uid, privacy: .public)' via setDeviceID")
@@ -576,7 +576,7 @@ actor AudioCaptureService {
     }
 
     /// tap **实际绑定**的输入设备是不是蓝牙(读 AUHAL CurrentDevice,不是系统默认)。
-    /// 用户锁了非默认设备时,buffer 大小要按真正在用的设备判 —— 原来查系统默认会判错。
+    /// 用户锁了非默认设备时,buffer 大小要按真正在用的设备判。
     /// 蓝牙投递抖动大(±200ms),命中时用更大 tap 缓冲吸收。
     private static func boundInputIsBluetooth(inputNode: AVAudioInputNode) -> Bool {
         guard let au = inputNode.audioUnit else { return false }

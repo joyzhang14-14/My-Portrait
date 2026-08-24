@@ -71,13 +71,12 @@ final class MemoryScheduler {
 
     /// 每次 event-processing 跑最多处理几个未处理日(最老的先跑)。
     ///
-    /// 2026-08-05 update:原来是 config `memory.event_day_cap` + Settings 里一个滑块,
-    /// 现在硬编码 7 天,字段和那张卡都删了。**可能之后会改回可配** ——
-    /// 恢复方式见 ConfigSchema 里 event_day_cap 那条注释。
+    /// (2026-08-05 update) 硬编码 7 天。若需改回可配,见 ConfigSchema 里
+    /// event_day_cap 那条注释。
     private let dayCap: Int = 7
-    // maxRetries 已下线 —— 用户方向是"永不放弃"。失败永远会自动重试,但用
-    // long-backoff 控制频率,避免一直挂的 LLM 烧 token。见 backoffMs(retry:)。
-    // dead_letter case 仍保留(老 DB 行兼容),但不再产生 + needsWork=true。
+    // 失败永远自动重试,用 long-backoff 控制频率,避免一直挂的 LLM 烧 token。
+    // 见 backoffMs(retry:)。dead_letter case 仍保留(老 DB 行兼容),但不再
+    // 产生 + needsWork=true。
     /// 原始数据"收齐"判定：数据日结束（UTC 次日 0 点）后再等这么久。
     private let rawGraceSeconds: TimeInterval = 10 * 60
     /// tick 周期。
@@ -298,8 +297,7 @@ final class MemoryScheduler {
     private let kClassifierPipelineV2 = "scheduler.classifierPipelineV2"
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
-    /// 07-30 起没有写入方(写作采集的定时触发已拿掉),只留着不动 UserDefaults
-    /// 里的旧值 —— 新逻辑要是重新挂定时,沿用这个 key 就能接上原来的进度。
+    /// (07-30) 写作采集定时触发已拿掉,此 key 不再写入,留着以备未来重新挂定时时复用。
     private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
     private let kLastWritingStyle    = "scheduler.lastWritingStyleRun"
 
@@ -309,8 +307,8 @@ final class MemoryScheduler {
 
     /// App 启动调用：先回收死锁，立刻 tick 一次，再起周期 timer。
     func start() {
-        // 自愈 helper 注册:开关开着就刷新一次(rebuild 后 cdhash 变也能对上 LWCR,
-        // 不再"开关开着却 EX_CONFIG 起不来")。开关没开则 no-op,无副作用。
+        // 自愈 helper 注册:开关开着就刷新一次(rebuild 后 cdhash 变化也需要重新
+        // 对齐 LWCR)。开关没开则 no-op,无副作用。
         SleepHelperClient.shared.syncRegistration()
         loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
                              // 会读老值(避免覆盖更早的 user-required kind)
@@ -437,16 +435,14 @@ final class MemoryScheduler {
 
     // MARK: - Catch-up triggers(合盖 / 开盖空闲都能推进)
 
-    /// 起周期触发源,替代原来的 15min Foundation Timer。普通 Timer 在合盖
-    /// DarkWake / 开盖 idle-sleep 里不 fire(P0 探针 scripts/darkwake-probe.swift
-    /// 实测),会让管线一睡就停到开盖。这里两路冗余,都汇到同一个幂等、节流的
-    /// periodicCatchUp:
-    ///   主:NSBackgroundActivityScheduler —— 探针实测在 DarkWake 里 fire 得最勤。
+    /// 起周期触发源,两路冗余,都汇到同一个幂等、节流的 periodicCatchUp:
+    ///   主:NSBackgroundActivityScheduler —— 在 DarkWake 里 fire 得最勤。
     ///   兜底:DispatchSourceTimer —— 比 Foundation Timer 在后台略可靠。
-    /// 真正的 tick 仍按 tickInterval 节流,频繁 fire 只是多几次 no-op 检查。
-    /// ⚠️ 注意:合盖 DarkWake 窗口 ~45s,本地 MLX(进程内可续算)能跨窗口磨完,
-    /// 但单次 >45s 的云 RPC 被 suspend 会断、按 backoff 重试到开盖才成 —— 按工作
-    /// 类型分路处理留给 P2(本 P1 只修触发层,对现状严格不劣)。
+    /// 普通 Timer 在合盖 DarkWake / 开盖 idle-sleep 里不 fire,会让管线一睡
+    /// 就停到开盖。真正的 tick 仍按 tickInterval 节流,频繁 fire 只是多几次
+    /// no-op 检查。
+    /// ⚠️ 合盖 DarkWake 窗口 ~45s,本地 MLX(进程内可续算)能跨窗口磨完,
+    /// 但单次 >45s 的云 RPC 被 suspend 会断、按 backoff 重试到开盖才成。
     private func startCatchUpTriggers() {
         bgScheduler?.invalidate()
         let bas = NSBackgroundActivityScheduler(identifier: "com.myportrait.scheduler.catchup")
@@ -472,9 +468,9 @@ final class MemoryScheduler {
         catchUpTimer = t
     }
 
-    /// 周期源每分钟来一次,但只在距上次 tick ≥ tickInterval 才真跑(节流)。
-    /// 真跑前先 recoverStaleLocks() —— 跟 didWake 同款:把 willSleep 暂停的 /
-    /// 真崩溃残留的行恢复,这样合盖 DarkWake 窗口里也能续上,不再只等开盖 didWake。
+    /// 周期源每分钟来一次,只在距上次 tick ≥ tickInterval 才真跑(节流)。
+    /// 真跑前先 recoverStaleLocks()(跟 didWake 同款),把 willSleep 暂停的 /
+    /// 真崩溃残留的行恢复,让合盖 DarkWake 窗口里也能续上。
     private func periodicCatchUp(reason: String) async {
         // 巡检兜底:idle(无任务)时核对一次 keep-awake —— 若系统残留 disablesleep=1
         // (helper 异常死亡留下),refreshKeepAwake → setKeepAwake(false) 会主动清。
@@ -573,17 +569,14 @@ final class MemoryScheduler {
         // ===== Tier 1 =====
         var tier1Ran = false
 
-        // **eventToday 只挡 daily-scheduled trigger,不挡 retry** —— 跟下面
-        // portrait/personality 的 retry 分支同款修法(Tier-1 此前漏修):当天
-        // 跑过一次后某天 failed/budget_deferred,backoff 到点也要能当天重试,
-        // 否则 UI 显示 "~10 min" 实际要等到次日,Reset 按钮也形同虚设。
+        // eventToday 只挡 daily-scheduled trigger,不挡 retry:backoff 到点
+        // 要能当天重试,否则 UI 显示 "~10 min" 实际要等到次日,Reset 按钮形同虚设。
         let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
         let eventCatchUp = s.event.frequency == .daily
             && (eventJobHasWork() || classifierJobHasWork())
         // eventNeedsRetry() 只认 failed/budget_deferred,而 "Retry now"(resetDay)
-        // 把阶段翻成 **pending** —— 落在判据之外。于是当天已跑过时,按钮点下去
-        // 到次日才动,正是上面注释想避免的"形同虚设"。把 pending 的活也算进
-        // retry 分支:有没跑完的天(且过了 backoff)就跑,不受"今天跑过"限制。
+        // 把阶段翻成 pending,不落在判据里 —— 当天已跑过时点了也要等到次日。
+        // 把 pending 的活也算进 retry 分支:有没跑完的天(且过了 backoff)就跑。
         let eventRetry   = s.event.frequency != .off
             && (eventNeedsRetry() || eventJobHasWork() || classifierJobHasWork())
         let eventScheduled = eventToday
@@ -594,10 +587,9 @@ final class MemoryScheduler {
             tier1Ran = true
         }
 
-        // 07-30 update:写作采集的定时触发**整个拿掉**。typing capture 从零重写,新逻辑
-        // 不跑模型,也就不需要「挑个夜里定时批处理」这套 —— 定时器存在的理由
-        // (攒一天、半夜烧 token)没有了。runWritingCaptureJob() 保留但已无
-        // 调用方,新逻辑要定时的话在这里重新挂。
+        // (07-30 update) 写作采集定时触发已整个拿掉:新逻辑不跑模型,不需要
+        // 定时批处理。runWritingCaptureJob() 保留但已无调用方,要重新定时
+        // 的话在这里重新挂。
 
         // 有 Tier-1 跑过 → **本 tick 接着跑 Tier-2**(不等下一个 tick),只在
         // 中间留 10s 缓冲:让 event rebalance 的盘上写入 / DB 落定,Tier-2 读到
@@ -610,10 +602,9 @@ final class MemoryScheduler {
         // folder classify 已并入上面的 event job，固定在 event / impact 后执行。
 
         // ===== Tier 2 =====
-        // **portraitToday 只挡 daily-scheduled trigger,不挡 retry** ——
-        // retry 已被 backoffMs(10min→1h→6h→24h)节流,daily 双重 guard 会让
-        // 中午跑失败的 row 等到第二天才再试。bug:6-03 personality 13:08 失败
-        // → portraitToday=false → 不再触发 → attention 行 9 小时都在显示。
+        // portraitToday 只挡 daily-scheduled trigger,不挡 retry:retry 已被
+        // backoffMs(10min→1h→6h→24h)节流,daily 双重 guard 会让失败的 row
+        // 白等到第二天才再试。
         let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
         let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
         // 同 eventRetry:resetDay 翻出的 pending 也要能当天重跑。
@@ -1147,9 +1138,8 @@ final class MemoryScheduler {
                     }
                 }
                 print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
-                // **可疑空值 → .failed 触发重试**,别静默标 complete 永久锁死。
-                // 只针对"有高权重事件 + LLM 提了 tag,却被 OCR 验证全丢光"这一种 ——
-                // 这是真 bug 现场(配合 minOCRFrames 降到 15,重试有机会通过)。
+                // 可疑空值 → .failed 触发重试,别静默标 complete 永久锁死。只针对
+                // "有高权重事件 + LLM 提了 tag,却被 OCR 验证全丢光"这一种真 bug 场景。
                 // 真低活跃日(eventsAboveWeight==0)或 LLM 判断无特质(snapshotTags==0)
                 // 是合法的空,照常 .success,不重试、不噪音。
                 if r.eventsAboveWeight > 0, r.snapshotTags > 0, r.ocrKept == 0 {
@@ -1222,10 +1212,9 @@ final class MemoryScheduler {
             outcome = try await PiAgentRegistry.$owner.withValue(owner) { try await work() }
         } catch let e as BudgetExhaustedError {
             schedLog.notice("\(date)/\(processor): budget exhausted — \(e.message, privacy: .public)")
-            // BudgetExhaustedError 仍走 .budgetExhausted(老路径不动),但同时
-            // 让 classifier 分一下 — 区分 transient throttle vs permanent quota
-            // exhaustion,供 UI banner 区分 "auto-recovering" vs "Top up & click
-            // Problem solved"。
+            // BudgetExhaustedError 走 .budgetExhausted,同时让 classifier 分一下 ——
+            // 区分 transient throttle vs permanent quota exhaustion,供 UI banner
+            // 区分 "auto-recovering" vs "Top up & click Problem solved"。
             recordFailure(date: date, stage: stage, kind: ErrorClassifier.classify(e))
             outcome = .budgetExhausted
         } catch {
@@ -1292,8 +1281,8 @@ final class MemoryScheduler {
             if let day = rollbackDay {
                 deleteEvents(on: day)
             }
-            // 永远走 .failed —— 不再升级 .deadLetter。retry_count++ 仍记录,但只
-            // 用来算 backoff 间隔,不作为"放弃"门槛。频率由 backoffMs(retry:) 控制。
+            // 永远走 .failed,不升级 .deadLetter。retry_count++ 只用来算 backoff
+            // 间隔,不作为"放弃"门槛,频率由 backoffMs(retry:) 控制。
             let n = store.bumpRetry(date: date)
             store.setStatus(date: date, stage: stage, status: .failed)
             // work() **返回** .failed(而非 throw,如部分天 llmFailedDays>0)时,
@@ -1653,9 +1642,8 @@ final class MemoryScheduler {
     }
 
     // dismissDay 已删除 —— 它把失败阶段直接标 complete,那天从此永不重跑。
-    // 2026-07-25 update:OAuth refresh 连炸 4 天,attention 行只有 Dismiss 一个按钮,
-    // 点完 5 天数据被静默丢弃。现在 attention 行只有 "Retry now"(resetDay),
-    // 没有"放弃这一天"这个选项 —— 每天都必须跑到。别加回来。
+    // (2026-07-25) attention 行只有 "Retry now"(resetDay),没有"放弃这一天"
+    // 这个选项 —— 每天都必须跑到。别加回来。
 
     /// 需要用户关注的日：任一阶段处于 failed / dead_letter / budget_deferred。
     /// nonisolated:纯 DB 读 + 数据变换,不碰 MainActor 状态,可在后台调用

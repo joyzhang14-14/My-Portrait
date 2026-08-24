@@ -475,9 +475,8 @@ final class EventClassifier {
         }
 
         lines.append("")
-        // **只喂 title** —— summary 偶尔混入 LLM 把 Earth Science 抓进
+        // **只喂 title** —— summary 偶尔混入会让 LLM 把 Earth Science 抓进
         // UCI Application 这种跨主题幻觉,tags 又重复 title 的信息且占 token。
-        // 用户原话:"只按照 title 排,幻觉和 token 消耗都会更好"。
         lines.append("UNCLASSIFIED EVENTS (\(unclassified.count)):")
         for ev in unclassified {
             lines.append("- path=\(ev.path)")

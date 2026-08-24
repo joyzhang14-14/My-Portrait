@@ -259,8 +259,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(typingToggle)
         menu.addItem(.separator())
 
-        // 08-01 update:版本号行和 "Open ~/.portrait/" 都删了(没人用)。
-        // 数据目录的入口仍在 Settings → Storage 的 Data directory 卡片上。
+        // 数据目录的入口在 Settings → Storage 的 Data directory 卡片上。
 
         menu.addItem(devModeBanner)
         menu.addItem(.separator())
@@ -280,9 +279,6 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         statusItem.isVisible = visible
     }
 
-    // 08-01 update:setCustomIconPath / customIconPath 删掉 —— 菜单栏图标现在是三盏
-    // 实时采集灯,不再允许换成静态图(换了灯就没了,这个入口在 Display 页也已删)。
-
     private func refreshIcon() {
         let unhealthy = HealthMonitor.shared.unhealthy
         // 菜单栏图标永远保持角色图 / 用户自定义图,**不再**因健康异常(stall 等)
@@ -299,8 +295,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             // 深浅两套不走代码分支 —— 每个 imageset 里 Any(黑描边,浅色菜单栏)
             // 和 Dark(白描边)各一份,AppKit 按按钮的 effectiveAppearance 自己挑。
             // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
-            // 变化通知,回头调 refreshIcon,重算就成自激死循环(08-01 炸过,
-            // 主线程 100% CPU、UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
+            // 变化通知,回头调 refreshIcon,重算会成自激死循环(主线程 100% CPU、
+            // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
             let lamps = CaptureLampState.shared
             if let img = NSImage(named: lamps.assetName) {
                 img.size = NSSize(width: 18 * img.size.width / max(img.size.height, 1),
@@ -404,9 +400,6 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     @objc private func openMainWindow() {
         (NSApp.delegate as? AppDelegate)?.showMainWindow()
     }
-
-    // 08-01 update:openPortraitDir 随菜单项一起删 —— 已无调用方。
-    // ConfigStore.openPortraitDir() 本体还在,Storage 页那个 Open 按钮在用。
 
     @objc private func quit() {
         NSApp.terminate(nil)

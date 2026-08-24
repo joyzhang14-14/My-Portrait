@@ -19,9 +19,8 @@ struct WritingCaptureStep0 {
     /// keystroke → "用户真敲了什么" 串(跳过 modifier-only / shortcut,backspace
     /// 拼 `<BS>`,Return 拼 `<CR>` 给切分判断用)。**纯确定性,不碰 LLM**。
     ///
-    /// 原本挂在 `WritingCapturePass2Agent` 上。07-30 断云端后那个文件成了没人
-    /// 调用的死代码(留着当参考),但这个 helper 还在确定性 AX 路上活着
-    /// (Worker 的组级击键 gate),所以复制到这里,不再跨文件依赖它。
+    /// 独立实现,不依赖 `WritingCapturePass2Agent`(07-30 断云端后已是死代码,
+    /// 留着当参考)—— 这个 helper 仍在确定性 AX 路上用(Worker 的组级击键 gate)。
     static func assembleKeystrokeText(_ keys: [KeystrokeEntry]) -> String {
         var out = ""
         for k in keys.sorted(by: { $0.tsMs < $1.tsMs }) {
@@ -43,12 +42,8 @@ struct WritingCaptureStep0 {
     static let mergeWindowMs: Int64 = 30 * 60 * 1000
     /// throwaway 最小字数
     static let throwawayMinChars = 20
-    /// OCR Jaccard 相似度阈值。0.50 比 0.85 更激进 —— 牺牲"看清用户打字
-    /// 过程中的中间帧"换取大幅 token 节省,只保留"最终输出"那一刻的帧。
-    /// 95 → 85 → 50 演进:
-    ///   0.95:看得到每一步小改动,但 prompt 撑爆过 claude code
-    ///   0.85:大部分 chrome 不变帧合并,5/23 实测 23K tokens
-    ///   0.50:连用户打字过程中的中间状态也合并,只留终态 + 显著变化的帧
+    /// OCR Jaccard 相似度阈值 —— 牺牲"看清用户打字过程中的中间帧"换取
+    /// 大幅 token 节省,只保留"最终输出"那一刻的帧。
     static let ocrJaccardThreshold = 0.50
     /// canvas 判定:session typing_events 总字数 ≤ 此值 = AX 稀疏 canvas。
     static let canvasTypingThreshold = 50
@@ -588,9 +583,9 @@ struct WritingCaptureStep0 {
     /// 同候选组(同 app + 同 URL + < 30min)的所有 sessions 拼成一条 ——
     /// typing_events / keystrokes / ocr_frames 都按 ts 排序拼起来。
     ///
-    /// 原本 Pass 3 prompt 会把所有 raw_sessions 都喂给 LLM,让 LLM 在候选组
-    /// 内决合不合 —— 重活动日 774 sessions 直接撑爆 context。算法层先合,
-    /// LLM 看到的是 ~20 个 mega-session,空间 / token 都省一大截。
+    /// 算法层先合并候选组,LLM 只看到 ~20 个 mega-session(而非全部
+    /// raw_sessions 逐条判断)—— 重活动日 774 sessions 直接喂 LLM 会撑爆
+    /// context。
     ///
     /// trade-off:LLM 失去「同 doc 里换主题就拆开」的能力。重活动日的反复
     /// 切换 + 主题断裂场景,Pass 3 输出会少一些细分 record(可能合在一条

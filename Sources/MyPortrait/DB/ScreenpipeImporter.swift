@@ -82,7 +82,7 @@ struct ScreenpipeImporter: Sendable {
         let earliestMs: Int64?    // 源端最早 ts(显示用)
         let latestMs: Int64?      // 源端最晚 ts
 
-        /// 0 = 全都已导(按钮该灰)。也包含 videoChunk —— B 方案 backfill 场景下
+        /// 0 = 全都已导(按钮该灰)。也包含 videoChunk —— backfill 场景下
         /// frameCount 可能 0 但 chunks 还要补。
         var hasAnythingToImport: Bool {
             frameCount > 0 || audioTranscriptCount > 0 || videoChunkCount > 0
@@ -142,12 +142,9 @@ struct ScreenpipeImporter: Sendable {
         var c = Configuration()
         c.readonly = true
         let q = try DatabaseQueue(path: db.path, configuration: c)
-        // **不用 ISO 字符串比较** —— screenpipe 历史 timestamp 有两种格式
-        // ('2024-05-04 14:23:12' 和 '2024-05-04T14:23:12.000Z'),字符串比
-        // 较里空格 < T,老格式行永远算 "< cutoff" false positive,导致 scan
-        // 显示固定卡 1 帧(真 import 里 Swift 层 ms 二次过滤把它 skip)。
-        // 改用 strftime('%s', ...) 转 unix sec,SQLite 能解析两种格式,
-        // 结果跟 isoToMs 一致。
+        // ⚠️ 不用 ISO 字符串比较:screenpipe 历史 timestamp 有两种格式
+        // ('2024-05-04 14:23:12' 和 '2024-05-04T14:23:12.000Z'),字符串比较
+        // 会误判。改用 strftime('%s', ...) 转 unix sec,兼容两种格式。
         let cutoffSec: Int64? = cutoffMs.map { $0 / 1000 }
         let (fc, ac, tc, minMs, maxMs): (Int, Int, Int, Int64?, Int64?) = try q.read { d in
             // frames count(JOIN ocr_text + 按 cutoff 过滤)
@@ -300,14 +297,13 @@ struct ScreenpipeImporter: Sendable {
             throw ImportError.sourceMissing(sourceDB.path)
         }
 
-        // 2. 算 cutoff:My-Portrait 最早**原生采集**带媒体的 frame ts。
+        // 2. cutoff = My-Portrait 最早**原生采集**带媒体的 frame ts。
         //    imported 行一律不参与定界:
-        //    - 无媒体的老 imported frames 不算 —— 允许这次回头补 video_chunk
-        //      (B 方案 backfill 场景)。
-        //    - **带媒体的 imported frames 也不能算** —— 分批提交后若导入中途
-        //      失败,已提交的最老批会把 cutoff 拉到自己身上,剩余源帧全部被
-        //      `< cutoff` 滤掉,重导静默导 0 行,数据永久缺失。cutoff 的语义
-        //      是「本机原生采集从何时开始」;已导入行的去重交给探重索引。
+        //    - 无媒体的老 imported frames 不算 —— 允许这次回头补 video_chunk。
+        //    - ⚠️ 带媒体的 imported frames 也不能算 —— 否则分批提交中途失败时,
+        //      cutoff 会被拉到已提交的最老批上,剩余源帧被 `< cutoff` 滤掉,
+        //      重导静默导 0 行,数据永久缺失。cutoff 语义是「本机原生采集从
+        //      何时开始」;已导入行的去重交给探重索引。
         let cutoffMs = try await Task.detached(priority: .userInitiated) {
             try target.read { db in
                 try Int64.fetchOne(
@@ -375,7 +371,7 @@ struct ScreenpipeImporter: Sendable {
         )
     }
 
-    // MARK: - Video chunks (B 方案:真拷 MP4)
+    // MARK: - Video chunks(拷贝 MP4)
 
     /// 拷 screenpipe MP4 chunks 到 ~/.portrait/raw_data/video/<day>/imported/,
     /// 同时 INSERT My-Portrait video_chunks 行,返回 old_chunk_id → new_chunk_id 映射
@@ -548,8 +544,8 @@ struct ScreenpipeImporter: Sendable {
 
     /// JOIN screenpipe `frames` × `ocr_text`,转换 ISO TIMESTAMP → UTC ms,
     /// INSERT/UPSERT 到 My-Portrait `frames`。
-    /// - UPSERT 模式:同 (ts, app) 已存在的 frame → UPDATE video_chunk_id (B 方案
-    ///   backfill);不存在 → INSERT 新行。
+    /// - UPSERT 模式:同 (ts, app) 已存在的 frame → UPDATE video_chunk_id
+    ///   (backfill);不存在 → INSERT 新行。
     /// - 无 OCR 的 frame 跳过(My-Portrait full_text notNull,且没 OCR 就没价值)。
     private static func importFrames(
         source: DatabaseQueue,
@@ -622,9 +618,8 @@ struct ScreenpipeImporter: Sendable {
             bytesDone: 0, bytesTotal: 0
         ))
 
-        // 探重索引预拉:原来每行一次 SELECT 点查,几万行 = 几万次;进事务前
-        // 一次性把已导入帧的 (timestamp_ms, app_name) → id 拉成内存索引,
-        // 事务内 O(1) 判重。几万条 key 占内存 MB 级,可接受。
+        // 探重索引预拉:提前把已导入帧的 (timestamp_ms, app_name) → id 拉成
+        // 内存索引,事务内 O(1) 判重,避免几万行逐行 SELECT。占内存 MB 级。
         struct ImportedKey: Hashable { let ts: Int64; let app: String }
         var existingByKey: [ImportedKey: Int64] = try target.read { db in
             var m: [ImportedKey: Int64] = [:]
@@ -645,10 +640,9 @@ struct ScreenpipeImporter: Sendable {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         // 每 ~200 行回调一次 UI,避免 callback overhead 拖慢 INSERT。
         let tickEvery = max(1, total / 50)
-        // 分批提交:原来全部源帧塞一个写事务(可持续数分钟),期间独占
-        // writer,实时采集 insertFrame / 转录写入全排队,TimelineDB 第二
-        // 连接全部 BUSY。每 1000 行一个事务,批间让出 writer;中途失败只
-        // 回滚当前批,已提交批次靠探重索引幂等(重导跳过)。
+        // ⚠️ 分批提交(每 1000 行一个事务),批间让出 writer —— 全部塞一个
+        // 长事务会独占 writer,导致实时采集 / 转录写入排队甚至 BUSY。中途
+        // 失败只回滚当前批,已提交批次靠探重索引幂等(重导跳过)。
         let batchSize = 1000
         var batchStart = 0
         while batchStart < rows.count {
@@ -680,7 +674,7 @@ struct ScreenpipeImporter: Sendable {
                 }
 
                 // UPSERT:同 (ts, app) 已存在 → UPDATE video_chunk_id / offset_ms
-                // (B 方案 backfill 场景)。否则 INSERT 新行。
+                // (backfill 场景)。否则 INSERT 新行。
                 let existingId: Int64? = existingByKey[ImportedKey(ts: ts, app: r.appName)]
                 if let eid = existingId {
                     // 已有行:只补 video_chunk_id + offset_ms,别的字段保留
@@ -716,8 +710,8 @@ struct ScreenpipeImporter: Sendable {
                             "text": text, "now": nowMs
                         ])
                     inserted += 1
-                    // 登记进探重索引:源数据里同 (ts, app) 的后续重复行
-                    // 走 UPDATE/skip 路径,与旧的逐行 SELECT 行为一致。
+                    // 登记进探重索引,让源数据里同 (ts, app) 的后续重复行
+                    // 走 UPDATE/skip 路径。
                     existingByKey[ImportedKey(ts: ts, app: r.appName)] = db.lastInsertedRowID
                 }
             }

@@ -21,9 +21,8 @@ final class ScreenCaptureService {
 
     private let ignore: IgnoreGate
 
-    // (07-21 删 OCR accuracy booster 开关:按物理像素(Retina 2x)抓帧永远开,
-    //  OCR 吃满分辨率。代价:单帧瞬时内存 ~4x,帧短命,OCR/存盘后即释放;
-    //  存盘 JPG 仍被 jpegMaxWidth cap,体积基本不变。)
+    // (07-21) 按物理像素(Retina 2x)抓帧,OCR 吃满分辨率。代价:单帧瞬时内存
+    //  ~4x,帧短命,OCR/存盘后即释放;存盘 JPG 仍被 jpegMaxWidth cap,体积基本不变。
 
     /// 被排除窗口区域的填充色。`SCStreamConfiguration.backgroundColor` 是
     /// `unowned(unsafe)`，必须用长生命周期常量，否则临时 CGColor 立即释放成野指针。

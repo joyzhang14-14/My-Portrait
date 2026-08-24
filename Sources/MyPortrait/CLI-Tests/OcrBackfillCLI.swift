@@ -5,13 +5,11 @@ import GRDB
 import ImageIO
 import Vision
 
-/// 存量帧 OCR 补跑(2026-08-04 update:"不信 AX、不硬编码 app 名单,一起走 OCR")。
+/// 存量帧 OCR 补跑(2026-08-04 update):不信 AX、不硬编码 app 名单,一起走 OCR。
 ///
-/// 2026-08-04 之前 `OCRService.recognize` 有 AX 快路:非终端非浏览器 app 只要 AX 文本
-/// ≥20 字就直接当 `full_text`,跳过 Vision。实测该假设在多数 app 上不成立 —— 同 app
-/// 下 AX 长度 ÷ OCR 长度:Obsidian 0.06x / 微信 0.06x / Spotify 0.04x / Xcode 0.10x /
-/// Preview 0.20x,AX 只给控件名(navigator/debug bar),正文一个字读不到。
-/// 快路已移除;本 CLI 补存量的 **54,899 个 ax 帧 + 25,086 个无文字帧**。
+/// AX 文本在多数 app 上不可靠 —— 同 app 下 AX 长度只有 OCR 的 0.03x–0.22x,
+/// AX 只给控件名(navigator/debug bar),正文一个字读不到。
+/// 本 CLI 补存量的 **54,899 个 ax 帧 + 25,086 个无文字帧**。
 ///
 /// ⚠️ **只写 `ocr_backfill_text` / `ocr_backfill_words`(Schema v43),不碰
 /// `full_text`/`text_source`/`ocr_words_json`** —— WritingCaptureStore 依赖
@@ -25,10 +23,8 @@ import Vision
 enum OcrBackfillCLI {
 
     /// `minId` = 从这个 frame id 起跑(含)。**长跑批必备的断点续跑**:本机的
-    /// session 会不定期 SIGKILL 长跑进程(2026-08-05 全量重跑在 85.8% 处被杀,
-    /// 已完成的 68,000 帧因为按 50 帧一提交并未丢失,但 `--force` 的 WHERE 1=1
-    /// 会让重启从头再来 13.5 小时)。每批提交后打印 `next-min-id`,被杀了就用
-    /// 它接着跑。
+    /// session 会不定期 SIGKILL 长跑进程,`--force` 的 WHERE 1=1 会让重启从头
+    /// 再来。每批提交后打印 `next-min-id`,被杀了就用它接着跑。
     static func run(limit: Int?, day: String?, force: Bool = false, minId: Int64? = nil) {
         Task {
             do {
@@ -164,17 +160,11 @@ enum OcrBackfillCLI {
         gen.appliesPreferredTrackTransform = true
         gen.requestedTimeToleranceBefore = .zero
         gen.requestedTimeToleranceAfter = .zero
-        // ⚠️ 2026-08-05 修:原版直接请求 `CMTime(value: offsetMs, timescale: 1000)`,
-        // **取到的是上一帧**。frames.offset_ms 是整毫秒,而 MP4 封装的时间基是 600 ——
-        // HEVCEncoder 写的 43138ms 落盘后成了 25883/600 = 43138.333ms。零容差是
-        // "返回该时刻**正在显示**的那一帧",43.138 < 43.138333 落在前一帧的显示
-        // 区间里,于是拿到前一帧的画面。实测封装舍入偏差 ±0.667ms,34.7% 的帧
-        // PTS > offset_ms(全都会踩中);app 切换处对照:补跑帧 29.2% 的文字属于
-        // 上一帧,而原生 OCR 帧只有 10.1%。
-        // 修法是**请求时刻 +1ms**,不是加容差 —— 容差只允许生成器换个时刻偷懒,
-        // 不会让它去找"最近的帧",实测 ±2ms 容差照样返回上一帧。+1ms 覆盖了
-        // ±0.833ms 的舍入,又远小于最小帧间隔(约 700ms),不会越到下一帧。
-        // 三向实测:PTS 舍入变大 38.748→43.138 ✓ / 舍入变小仍取原帧 ✓ / 首帧 ✓。
+        // ⚠️ 直接请求 `CMTime(value: offsetMs, timescale: 1000)` 会取到上一帧。
+        // frames.offset_ms 是整毫秒,而 MP4 封装的时间基是 600,舍入后请求时刻可能
+        // 落在前一帧的显示区间里。修法是**请求时刻 +1ms**,不是加容差 —— 容差只
+        // 允许生成器换个时刻,不会让它去找"最近的帧",+1ms 覆盖了舍入误差,又远
+        // 小于最小帧间隔,不会越到下一帧。
         // (ImageLoader 用 preferredTimescale: 600 与封装同基,恰好躲开了这个坑;
         //  ReOcrCLI 给了 ±500ms 容差,靠"就近"侥幸躲过。)
         let time = CMTime(value: CMTimeValue(max(0, t.offsetMs) + 1), timescale: 1000)

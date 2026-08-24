@@ -975,8 +975,8 @@ enum DBSchema {
         // v41 — keystroke_log.input_source(击键时所用的输入法)
         // ═══════════════════════════════════════════════════════════
         //
-        // keystroke 存的是物理击键字符:中文输入法下打"妈的"存的是拉丁 `made`,跟英文
-        // made 分不开(同 v19 注释:拿不到合成的汉字)。记录当时的输入源 ID
+        // keystroke 存的是物理击键字符:中文输入法下打"我们"存的是拉丁 `women`,跟英文
+        // women 分不开(同 v19 注释:拿不到合成的汉字)。记录当时的输入源 ID
         // (如 com.apple.keylayout.US=英文键盘 / im.rime.inputmethod.Squirrel=拼音),
         // 让实验线判别"这串拉丁是英文字面还是拼音"从"猜"变"读"。
         // 采集层只记这一个原始信号,所有判别逻辑都在实验线,不进 Swift。旧行 NULL。
@@ -1072,8 +1072,8 @@ enum DBSchema {
         //
         // 背景:2026-08-04 之前 OCRService 有 AX 快路 —— 非终端非浏览器 app 若 AX
         // 文本 ≥20 字就直接当 full_text,跳过 Vision。实测该假设在多数 app 上不成立
-        // (同 app AX 长度 ÷ OCR 长度:Obsidian 0.06x/微信 0.06x/Xcode 0.10x/
-        // Preview 0.20x),AX 只给控件名,正文读不到。快路已移除,但**存量 54,899 帧
+        // (同 app AX 长度只有 OCR 的 0.03x–0.22x),AX 只给控件名,正文读不到。
+        // 快路已移除,但**存量 54,899 帧
         // 的 full_text 还是 AX 文本**,而 TimelineDB.ocrText() 不看 text_source、
         // 一律当 OCR 喂给 event 生成。
         //

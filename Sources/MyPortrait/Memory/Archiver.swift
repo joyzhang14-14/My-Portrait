@@ -13,7 +13,7 @@ import Foundation
 ///   - not pinned
 ///   - not already archived
 ///
-/// portrait 不再持有 impact —— 它不是归档条件。
+/// portrait 不含 impact 字段,不是归档条件。
 ///
 /// Archiving = moving the file from
 ///     <portrait>/<category>/<...>/file.md
@@ -103,8 +103,8 @@ enum Archiver {
                 skipped += 1; continue
             }
 
-            // Rule check —— portrait 不再持有 impact（event-only），归档判定
-            // 只看 weight（EMA 衰减后）+ days_idle + pin + protected-category。
+            // Rule check —— 归档判定只看 weight（EMA 衰减后）+ days_idle
+            // + pin + protected-category，不看 impact。
             let days = file.daysSinceLastOccurrence(now: now)
             let curWeight = WeightEMA(halfLifeDays: rule.weightHalfLifeDays)
                 .currentWeight(stored: file.weight,
@@ -126,8 +126,8 @@ enum Archiver {
             plans.append(Plan(source: url, destination: destURL, reason: reason))
         }
 
-        // Execute: 每条 plan 独立处理 —— 撞重名 / 读写 / 移动失败只跳过该条并回滚
-        // archived_at 戳(避免「标记已归档但文件还在」的 ghost),不再中止整轮。
+        // Execute: 每条 plan 独立处理,撞重名 / 读写 / 移动失败只跳过该条并回滚
+        // archived_at 戳,避免「标记已归档但文件还在」的 ghost。
         var done: [Plan] = []
         for plan in plans {
             // 目标已存在(上轮已归档同 slug)→ 跳过,不重复戳、不抛错。

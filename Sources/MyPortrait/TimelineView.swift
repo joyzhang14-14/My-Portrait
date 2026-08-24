@@ -67,15 +67,9 @@ struct TimelineView: View {
     }
 
     var body: some View {
-        // 07-21 v2:回到单列流式布局(上一版试过日期栏浮在画面上,被否 ——
-        // 截图必须**完美展示、零遮挡**,scaledToFit 等比放大)。"两个 bar"的
-        // 观感靠这些消除,而不是靠叠层:
-        //   - 分隔线已删、日期栏无独立底色,直接浮在连续的 SidebarBackdrop 上
-        //     → 顶部不再是一条"bar",只是背景上几颗控件
-        //   - 画面槽位横向 padding 60→16(见 FramePreview),截图在宽高两个
-        //     方向一起等比变大,吃掉原顶部栏让出的空间
-        //   - 时间轴柱子直接从窗口底边长出来(TimelineSlider 已去掉清 Dock
-        //     的 Spacer,高度 220→140)
+        // 单列流式布局:日期栏无独立底色,直接浮在连续的 SidebarBackdrop 上;
+        // 截图贴边显示(见 FramePreview 横向 padding);时间轴柱子直接从
+        // 窗口底边长出来。
         VStack(spacing: 0) {
             TimelineControlsBar(
                 currentDate: Binding(
@@ -84,14 +78,10 @@ struct TimelineView: View {
                 ),
                 onRefresh: { reload() }
             )
-            // 内容本身被标题栏安全区(~28pt)垫着起步,这里只是控件到安全区
-            // 的留白(07-21 update:12 再往下 5px = 17)。
-            //
-            // 08-09 再往下 11 = 28:截图在槽里**贴底**,槽位的富余全堆在它上面,
-            // 于是「URL 条 → 截图顶边」比「截图底边 → app 信息行」宽出一大截,
-            // 上下不对称。日期栏往下压多少,槽位就矮多少,富余同额减少 ——
-            // 压 11 之后两处间距都在 ~8pt。
-            //(成立前提:截图是被**宽度**卡住的 —— 常规窗口比例下都是。)
+            // 内容本身被标题栏安全区(~28pt)垫着起步,这里是控件到安全区的留白。
+            // (08-09 update)padding-top=28:截图在槽里贴底显示,日期栏往下压
+            // 多少槽位就矮多少,让「URL 条→截图顶边」与「截图底边→信息行」
+            // 两处间距基本对称(前提:截图是被宽度卡住的,常规窗口比例下都是)。
             .padding(.top, 28)
             .padding(.bottom, 6)
 
@@ -123,22 +113,13 @@ struct TimelineView: View {
                 .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 07-21 update:原本是写死的 `Color.black` + 强制 `.environment(\.colorScheme,
-        // .dark)`(理由"展示屏幕录像,黑底凸显画面")。但用户切 light 后整个
-        // Timeline 仍是黑的,跟侧栏割裂。现在改成跟侧栏同一个 SidebarBackdrop
-        // (light 奶白→浅薰衣草 / dark 近黑+紫 glow),两侧观感统一。
-        //
-        // ⚠️ 强制 dark 一去掉,里面所有「假设背景是黑的」的写死白色都会失效,
-        // 已一并改成动态色:NoMediaPlaceholder / 截图描边 / 时间轴渐变 /
-        // 当前刻度辉光 / URL 药丸。TimelineControlsBar 与 CalendarPopover 本就
-        // 全用 Theme.* 动态色,拆掉强制 dark 后自动跟随反转(白底黑字)。
-        // ⚠️ backdrop 必须带 `.ignoresSafeArea()`(跟 TimelineSidebar 一致),
-        // 且外层**不能再挂 `.clipped()`** —— 顶部 bar 的真正根因就是原来那个
-        // "belt + suspenders" 的 .clipped():背景往标题栏安全区伸出去的那截
-        // 会被它剪回来,露出 window.backgroundColor(dark 纯黑 → 黑 bar;
-        // light 奶白 → 早前那条"顶部漏光"),同一 bug 两副面孔。侧栏没有
-        // .clipped() 所以从来正常。内部 preview / slider 各自已有 .clipped(),
-        // 面板不会真溢出,外层这道保险其实没在保任何东西。
+        // 背景跟随侧栏同一个 SidebarBackdrop(light/dark 动态色,不强制 dark)。
+        // NoMediaPlaceholder / 截图描边 / 时间轴渐变 / 当前刻度辉光 / URL 药丸
+        // 均用 Theme.* 动态色。
+        // ⚠️ backdrop 必须带 `.ignoresSafeArea()`;外层不能再挂 `.clipped()`——
+        // 会把背景在标题栏安全区外伸出的那截剪掉,露出 window.backgroundColor
+        // (顶部出现一条实色 bar)。内部 preview / slider 各自已有 .clipped(),
+        // 不需要外层再保一道。
         .background(SidebarBackdrop().ignoresSafeArea())
         .ignoresSafeArea(.container, edges: .top)
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
@@ -227,7 +208,6 @@ struct TimelineView: View {
             guard token == state.reloadToken else { return }
             state.frames = fetched
             // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
-            // 原来无条件覆盖 focusIndex,pendingSeek 永远被忽略 → 跨天定位失效。
             if let target = state.pendingSeek {
                 state.snapFocus(to: target)   // 最近帧;空帧内部 guard
                 state.pendingSeek = nil        // 清掉,免得后续同天 reload 又吸到旧目标
@@ -250,7 +230,7 @@ struct TimelineView: View {
 //   - date trigger: .bordered button (the standard "pill" look used in
 //     Calendar, Reminders, the menu-bar clock, Finder's column-view header,
 //     etc.)
-//   - system font (SF Pro) on the date — monospaced was too "code-editor"
+//   - system font (SF Pro) on the date
 
 // `internal`(去 private):Input 图谱(InputActivityChartView)复用这套
 // 「和 timeline 一致的日期切换栏 + 日历弹窗」,不重复实现。
@@ -505,12 +485,9 @@ private struct FramePreview: View {
                 } else if let path = frame.snapshotPath {
                     // Color.clear 严格取槽位尺寸,图 overlay 上去再裁 ——
                     // 直接放 scaledToFill 的图会**上报超过槽位的布局高度**
-                    // (clipped 只裁画面不裁布局),把整列顶出面板:日期栏被
-                    // 顶进标题栏 ~30pt,空数据天没图不溢出,栏就"沉下去"。
-                    // 07-21 update:去掉 RoundedRectangle 圆角裁切 —— 8pt 圆角会把
-                    // 截图四个角的真实像素物理切掉("边角有截断"),
-                    // 截图必须逐像素完整。描边 overlay 是槽位尺寸不是图的
-                    // 尺寸,图不满槽时悬空,一并去掉。
+                    // (clipped 只裁画面不裁布局),把整列顶出面板。
+                    // ⚠️ 不裁圆角、不加描边:截图必须逐像素完整,圆角裁切会
+                    // 把四角真实像素物理切掉,描边 overlay 在图不满槽时会悬空。
                     Color.clear
                         // contentMode .fit:组件默认 .fill 会把比例差的那几个
                         // px 溢出交给外层 clipped 裁掉(左右各截几像素)。
@@ -534,8 +511,8 @@ private struct FramePreview: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // 07-21 update:60→16→8。scaledToFit 的图基本都是被宽度卡住的,横向留白
-            // 收窄后图在宽、高两个方向一起等比变大("截图等比例增大/再放大一点")。
+            // (07-21 update)横向留白收窄,scaledToFit 的图被宽度卡住,留白变窄后
+            // 图在宽高两个方向一起等比放大。
             .padding(.horizontal, 8)
             .padding(.top, 6)
 
@@ -611,36 +588,6 @@ struct RealAppIcon: View {
 // =============================================================================
 //
 // Source: My-Orphies/apps/orphies-tauri/components/rewind/timeline/timeline.tsx
-//
-// Original React structure (the canonical version we're replicating exactly):
-//
-//   <div className="overflow-x-auto overflow-y-visible"
-//        style={{ paddingTop: 60, paddingBottom: 24 }}>
-//     <div className="flex flex-nowrap w-max justify-center px-[50vw] h-24">
-//       {frames.map(f => (
-//         <div style={{
-//           width: '6px', marginLeft: '2px', marginRight: '2px',
-//           backgroundColor: appNameToBarColor(f.appName),
-//           height: isCurrent ? "80%" : "45%",
-//           borderRadius: '4px 4px 0 0',
-//           transform: isCurrent ? 'scale(1.15)' : '',
-//         }} />
-//       ))}
-//     </div>
-//   </div>
-//
-// SwiftUI translation:
-//   - overflow-x-auto → ScrollView(.horizontal)
-//   - overflow-y-visible → .scrollClipDisabled() (macOS 14+) — needed so the
-//     scale(1.15) on current bar isn't clipped at the top
-//   - flex flex-nowrap → HStack(alignment: .bottom, spacing: 0) [NOT LazyHStack
-//     — the React version renders every frame eagerly, and Lazy was the cause
-//     of "only one bar visible" reports]
-//   - h-24 → .frame(height: 96, alignment: .bottom)
-//   - px-[50vw] → .padding(.horizontal, 600)  // hardcoded buffer; GeometryReader
-//     created a layout cycle that hid content
-//   - width: 6px + 2px margin × 2 → bar width 6, HStack spacing 4
-//   - height: 45% / 80% → 96 * 0.45 = 43 / 96 * 0.80 = 77 (absolute pixels)
 
 private struct TimelineSlider: View {
     @Bindable var state: TimelineState
@@ -650,19 +597,14 @@ private struct TimelineSlider: View {
             // Bigger bars + bigger icons — matches the original Orphies scale.
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
-                    // **LazyHStack(原来是 eager HStack)** —— 一天的帧现在是
-                    // 全量加载(framesForDay 去了 limit),实测一天 3000~9000 帧。
-                    // eager HStack 会把这几千个 FrameColumn 一次性全建出来常驻,
-                    // 且每按一次方向键(focusIndex 变)就 diff 全部列 → 按住
-                    // 方向键回放时主线程卡顿。改 lazy 后只渲染可见的几十列,
-                    // diff 量从数千降到数十,内存也跟着降。
-                    // 列宽固定(FrameColumn 锁 12pt),lazy 能正确算 content 宽度;
-                    // ScrollViewReader.scrollTo 对未渲染 id 仍可定位。
+                    // LazyHStack:一天的帧全量加载(实测 3000~9000 帧/天),只渲染
+                    // 可见的几十列。列宽固定(FrameColumn 锁 12pt)使 lazy 能正确
+                    // 算出 content 宽度;ScrollViewReader.scrollTo 对未渲染 id
+                    // 仍可定位。
                     //
-                    // 07-22 点击判定铺满空隙:原来 spacing 6 的缝是死区(点了
-                    // 没反应)。改 spacing 0 + 每列左右 padding 3 —— 视觉上柱宽
-                    // 12、缝 6 一个像素都没变,但 contentShape 把 18pt 整列
-                    // (含透明的图标槽/Spacer 区)都变成可点区,列与列无缝衔接。
+                    // spacing 0 + 每列左右 padding 3(视觉柱宽 12、缝 6 不变):
+                    // contentShape 把 18pt 整列(含透明的图标槽/Spacer 区)都变成
+                    // 可点区,列与列间无点击死区。
                     LazyHStack(alignment: .bottom, spacing: 0) {
                         ForEach(state.frames.indices, id: \.self) { idx in
                             FrameColumn(
@@ -707,8 +649,6 @@ private struct TimelineSlider: View {
                     }
                 }
             }
-            // (07-21 去掉了原来垫在下面清 Dock 的 Spacer —— 全出血布局要求
-            // 柱子从窗口底边长出来。)
         }
     }
 }

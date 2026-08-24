@@ -28,10 +28,8 @@ struct MemoriesView: View {
     @State private var config = ConfigStore.shared
 
     @State private var entries: [Entry] = []
-    /// events 视图的 folder 分组缓存 —— 原来 foldersGroupedList 在 body 里
-    /// 每次重算都同步 EventFolderStore.loadAll()(枚举目录+逐 JSON 解码)
-    /// 在主线程。现在只在 reload()(folder 写操作成功后都会走 reload)和
-    /// deleteEntry 后后台重算,body 只读缓存。
+    /// events 视图的 folder 分组缓存 —— 只在 reload()(folder 写操作成功后
+    /// 都会走 reload)和 deleteEntry 后后台重算,body 只读缓存。
     @State private var folderGroups: [FolderGroup] = []
     @State private var ungroupedEntries: [Entry] = []
     @State private var loading: Bool = false
@@ -237,9 +235,7 @@ struct MemoriesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 中间列原来钉死 black.opacity(0.28),light 模式下盖在 warm-white
-        // 上变成大灰块,跟左右两列格格不入。light 下用极淡 black 透出底色,
-        // dark 下保留原本的 0.28 暗化效果。
+        // 中间列背景:light 用极淡 black 透出底色,dark 保留 0.28 暗化效果。
         .background(Color.black.opacity(colorScheme == .light ? 0.03 : 0.28))
         // event 右键 "New folder…" → 输入新 folder 名。
         .alert("New folder", isPresented: Binding(

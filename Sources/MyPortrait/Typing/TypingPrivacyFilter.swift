@@ -26,8 +26,6 @@ struct TypingPrivacyFilter {
         "com.apple.SecurityAgent",                  // "xxx 想要进行更改"授权弹窗
         "com.apple.LocalAuthentication.UIAgent",    // Touch ID / 本地认证弹窗
         "com.apple.Passwords",                      // macOS 15「密码」app
-        // 07-30 update:移除 com.joyzhang.myportrait(自采集)—— 新的 typing
-        // capture 要采自己 app 里打的字。
     ]
 
     /// 终端类 app 的 bundle id。**算法限制**，非用户隐私选择 —— 终端的
@@ -134,9 +132,8 @@ struct TypingPrivacyFilter {
     /// 这个 app 为什么不采打字 —— nil = 会采。
     ///
     /// **`TypingObserver.attach` 的完整判据就是这个函数**,菜单栏采集灯也读它。
-    /// 两边各写一份必然走偏:08-01 灯只查了黑名单、漏了终端那道闸,结果在终端
-    /// 里打字蓝灯还亮着 —— 对一盏"用来自证没在记"的灯,这是最严重的错。
-    /// 以后再加屏蔽条件,**只改这里**。
+    /// 两边各写一份必然走偏(08-01 灯只查了黑名单、漏了终端那道闸,导致在终端
+    /// 里打字蓝灯还亮着)。以后再加屏蔽条件,**只改这里**。
     @MainActor
     static func exclusionReason(bundleId: String) -> ExclusionReason? {
         if isTerminalApp(bundleId: bundleId) { return .terminal }

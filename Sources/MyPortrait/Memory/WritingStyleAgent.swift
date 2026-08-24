@@ -143,8 +143,8 @@ final class WritingStyleAgent {
             if let cs = r.contextSummary, !cs.isEmpty {
                 lines.append("context: \(cs)")
             }
-            // OCR snippet 已删 —— context_summary 是 writing capture Pass 3
-            // LLM 生成的语境,已经描述当时在干什么,distiller 直接信它就够。
+            // context_summary 是 writing capture Pass 3 LLM 生成的语境,
+            // 已经描述当时在干什么,distiller 直接信它就够。
             lines.append("text:")
             lines.append(truncate(r.text, max: recordTextMaxChars))
             lines.append("edit_log:")

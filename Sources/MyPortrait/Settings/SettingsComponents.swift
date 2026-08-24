@@ -177,8 +177,7 @@ struct SettingsInfoBadge: View {
 struct SettingsDivider: View {
     var body: some View {
         Rectangle()
-            // Color.primary 跟 colorScheme 切:dark≈白、light≈黑,light 模式下
-            // 才看得见(原来钉死 white.opacity 在浅底上隐身)。
+            // Color.primary 跟 colorScheme 切:dark≈白、light≈黑,light 模式下才看得见。
             .fill(Color.primary.opacity(0.10))
             .frame(height: 1)
             .padding(.leading, 48)
@@ -278,13 +277,6 @@ struct SettingsPage<Content: View>: View {
         .background(SidebarBackdrop())
     }
 }
-
-// ConfigToolbar(每页右上角的 "Open ~/.portrait" 按钮)已下线 —— 07-28
-// 用户反馈"每个 setting 界面都挂一个,不好看"。入口没丢:Storage 页
-// Data directory 卡片的 Open 按钮 + 状态栏菜单的 "Open ~/.portrait/"
-// 都走同一个 ConfigStore.openPortraitDir()。
-// (更早一轮里这个 toolbar 上的 Reset 按钮就已经砍掉了,理由是
-//  "会清空所有数据"歧义;想恢复默认直接改/删 config.toml。)
 
 /// Inline orange banner for TOML parse errors. Click "Reload" to re-read
 /// after fixing the file in vim.
@@ -559,9 +551,7 @@ struct TypingAppPicker: View {
     /// (同 IgnoredAppPicker / 音频「暂停名单」)。nil = 这处不支持类别。
     var categories: Binding<[String]>? = nil
 
-    /// bundle id 最后一段是无意义通用词的 app —— 直接给名字。
-    /// (07-30 update:`com.bitwarden.desktop` 显示成 "desktop",在黑名单列表里
-    ///  看着像个没用的条目,差点被当垃圾从密码管理器黑名单里删掉。)
+    /// bundle id 最后一段是无意义通用词的 app —— 直接给名字(07-30 update)。
     static let displayNames: [String: String] = [
         "com.bitwarden.desktop": "Bitwarden",
     ]
@@ -871,10 +861,7 @@ struct CategoryDropdown: View {
     }
 }
 
-/// 名单里的一枚可移除 chip —— app / 类别 / URL 全走这一个。
-///
-/// 原来屏幕、打字、音频三处各写一份:音频那份带图标,另两份没有,同一件事
-/// 在三张卡上长得不一样。以后要改 chip 样式**只改这里**。
+/// 名单里的一枚可移除 chip —— app / 类别 / URL 全走这一个。以后要改 chip 样式只改这里。
 struct SelectionChip: View {
     let icon: String
     let text: String

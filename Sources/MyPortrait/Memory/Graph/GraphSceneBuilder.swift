@@ -502,9 +502,9 @@ enum GraphSceneBuilder {
     }
 
     /// 没设过颜色的 folder(兜底,创建/迁移都会固化 colorHex):与列表视图
-    /// 共用 FolderPalette.defaultHex(djb2 稳定 hash,跨启动不变、两侧一致;
-    /// 07-10 修:原来两侧各自用 Swift hashValue,每次启动随机化 → 没设色的
-    /// folder 每次启动换色)。
+    /// 共用 FolderPalette.defaultHex(djb2 稳定 hash,跨启动不变、两侧一致)。
+    /// ⚠️ 不能用 Swift 内置 hashValue —— 每次启动随机化,没设色的 folder 会
+    /// 每次启动换色。
     private static func defaultFolderHex(name: String) -> String {
         FolderPalette.defaultHex(for: name)
     }

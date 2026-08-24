@@ -470,12 +470,10 @@ final class ConfigStore {
         guard fd != -1 else { return }
         watchFD = fd
 
-        // **Queue 用 .main**：之前用 `.global(qos: .utility)`，在 macOS 26 上
-        // 跟 Swift Concurrency cooperative pool 撞 dispatch_assert_queue_fail
-        // —— 用户 toggle capture 设置 → ConfigStore.mutate → 250ms debounce →
-        // 写盘 → DispatchSource 在 utility-qos 上 fire → 创建 Task @MainActor
-        // 跨 QoS 调度，撞 macOS 26 hardening 死。
-        // handleFileChange() 是 @MainActor，本来就要 hop，干脆就在 .main 上 fire。
+        // ⚠️ Queue 必须用 .main:用 `.global(qos: .utility)` 在 macOS 26 上会跟
+        // Swift Concurrency cooperative pool 撞 dispatch_assert_queue_fail(跨 QoS
+        // 调度创建 @MainActor Task 触发 hardening 崩溃)。handleFileChange() 是
+        // @MainActor,本来就要 hop,直接在 .main 上 fire。
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .extend, .rename, .delete],

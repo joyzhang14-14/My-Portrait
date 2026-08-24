@@ -374,8 +374,7 @@ struct MyPortraitApp: App {
             let day = args.firstIndex(of: "--day").flatMap { i -> String? in
                 i + 1 < args.count ? args[i + 1] : nil
             }
-            // --force:连已写过 ocr_backfill_text 的行也重跑(2026-08-05 抽帧
-            // 差一帧的 bug 修好后,存量 79,433 行需要覆盖重写)。
+            // --force:连已写过 ocr_backfill_text 的行也重跑(覆盖此前抽帧有误的存量)。
             // --min-id:断点续跑(长跑批会被 session SIGKILL,见 CLI 注释)。
             let minId = args.firstIndex(of: "--min-id").flatMap { i -> Int64? in
                 i + 1 < args.count ? Int64(args[i + 1]) : nil
@@ -737,8 +736,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // **两半分开**避免死锁:主线程那半(取消 task / 停 MainActor 监听)本就在主
         // 线程,直接同步跑;actor 那半放 detached task 等 —— 它们不碰主线程,主线程
         // 在 sem.wait 也不会跟它们死锁。
-        //   (原来把整个 @MainActor 的 stopManagedLifecycle 丢进 detached task,要
-        //    hop 回被 sem.wait 卡死的主线程 → 永远跑不完,清理白等 1s 一行没执行。)
         let services = self.services
         services?.stopMainActorParts()
         let sem = DispatchSemaphore(value: 0)

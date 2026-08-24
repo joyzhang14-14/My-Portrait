@@ -543,9 +543,8 @@ struct AudioCaptureSettingsView: View {
         SettingsCard(title: "Input") {
             SettingsRow("Microphone",
                         icon: "mic.circle") {
-                // 用原生 Picker —— macOS Menu 不认 Image.opacity,所以
-                // 之前自己画 checkmark 会导致每个选项都显示打勾(Issue #11)。
-                // Picker 让系统自己给选中项画 ✓,避免这个坑。
+                // 用原生 Picker,不自己画 checkmark —— macOS Menu 不认
+                // Image.opacity,自画会导致每个选项都显示打勾(Issue #11)。
                 Picker("", selection: config.binding(\.capture.audio.preferredInputDeviceUID)) {
                     Text("Follow system default").tag("")
                     Divider()
@@ -617,8 +616,7 @@ struct AudioCaptureSettingsView: View {
 // MARK: - Screen Recording
 
 /// Screen Recording 设置子分区:Power mode + 屏幕采集(截图 + OCR)+
-/// privacy 子项(原 Privacy 子分区,合并到这里页面尾部 —— 跟 capture 配置
-/// 是同一条思路,放一起省一次跳转)。
+/// privacy 子项 —— 跟 capture 配置是同一条思路,放一起省一次跳转。
 struct ScreenCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
     /// Auto 模式当前实际解析出的档位(显示 "Auto — Balanced")。
@@ -861,12 +859,11 @@ struct TypingCaptureSettingsView: View {
             Group {
                 typingSection
                 blacklistSection
-                // Writing capture —— 数据源是 typing capture。07-30 起这条 pipeline
-                // 停用重写,这里只剩 Pending review(处理旧 staged 记录)。
+                // Writing capture —— 数据源是 typing capture(07-30 起停用重写,
+                // 只剩 Pending review 处理旧 staged 记录)。
                 // (writing style 是 portrait 侧 pipeline,留在 Memory 页。)
                 WritingPipelineSection()
-                // 07-30 update:"Writing capture AI" 卡片删掉 —— 新的 typing capture 不跑
-                // 模型,没有 provider / model 可选。config 里那三个键也一并摘了。
+                // (07-30 update:typing capture 不跑模型,没有 provider / model 可选。)
             }
         }
         .task {

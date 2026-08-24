@@ -49,9 +49,8 @@ public struct GraphNode: Identifiable, Sendable {
     /// 出生散布角(相对「背主球方向」,rad;路径哈希,确定性)。
     /// 只用于绽放播种 —— 稳态角向分布由碰撞挤开涌现(模糊感)。
     public var beltAngle: Double = 0
-    /// 环带吸引的目标半径偏移(单环重构:相对**全场唯一陨石环**的基准
-    /// 半径 ringR):层基准 + 径向模糊抖动 —— 层界互相渗透,"模模糊糊"
-    /// 是要求不是缺陷。
+    /// 环带吸引的目标半径偏移:相对**全场唯一陨石环**的基准半径 ringR ——
+    /// 层基准 + 径向模糊抖动,层界互相渗透,"模模糊糊"是要求不是缺陷。
     public var beltRadialOffset: Double = 0
 
 
@@ -95,13 +94,11 @@ public struct GraphEdge: Sendable {
 }
 
 
-/// 陨石散布(07-03 五稿,builder 与独立自检共用的**纯函数**,保证零漂移):
+/// 陨石散布(07-03 update):builder 与独立自检共用的**纯函数**,保证零漂移。
 /// 输入一家全部陨石(按层内→外串接:高 weight 在前),输出每球"模糊家位"。
-/// ⚠️ 五稿坐标系换成**主球极坐标**(用户画黄线:"弧度更平,和隐形圆没
-/// 太大关系了"——绕自家气泡排的弧曲率太大,改绕全图中心排,半径大弧
-/// 自然平):家位 = (径向偏移相对气泡远端, 角度相对 hub 的主球极角)。
-/// 弧宽先随数量展开(上限 ∝ 自家气泡的角footprint),装满一排往外延长;
-/// 大幅哈希模糊,层间无空隙,小(低 weight)球偏外。
+/// 坐标系为**主球极坐标**:家位 = (径向偏移相对气泡远端, 角度相对 hub 的
+/// 主球极角)。弧宽先随数量展开(上限 ∝ 自家气泡的角 footprint),装满一排
+/// 往外延长;大幅哈希模糊,层间无空隙,小(低 weight)球偏外。
 public enum BeltLayout {
     /// - Parameters:
     ///   - radii: 全家陨石球半径(层内→外串接,高 weight 在前)
@@ -109,10 +106,9 @@ public enum BeltLayout {
     ///   - hashA/hashB: 每球两个独立的 [0,1) 确定性哈希(路径加盐)
     ///   - bubbleR: 自家气泡半径
     ///   - mainDist: hub→主球弹簧自然长度(≈ hub 到全图中心的距离)
-    ///   - tierBases: 全局层基线(单环重构:**所有 belt 家共享**,由最大
-    ///     belt 家先算出 tierStarts 传给所有家)—— 全环统一"内=高
-    ///     weight、外=低 weight",不再每家自成小内外。nil = 自家串接排
-    ///     (只在产出基线的首家用,数学上与传自家基线等价)。
+    ///   - tierBases: 全局层基线(**所有 belt 家共享**,由最大 belt 家先算出
+    ///     tierStarts 传给所有家),全环统一"内=高 weight、外=低 weight"。
+    ///     nil = 自家串接排(只在产出基线的首家用,数学上与传自家基线等价)。
     /// - Returns: (径向偏移「相对环基准 ringR,引擎侧一次算死」,
     ///            家位角「相对 hub 绕环心的极角」, 各层实际起点) 同序
     public static func homes(radii: [Double], tiers: [Int],
@@ -125,11 +121,11 @@ public enum BeltLayout {
         let slotW = 2 * ((radii.max() ?? 1) + 1)
         // 气泡远端到全图中心的半径:弧容量按这个大半径算 → 平弧
         let baseR = mainDist + bubbleR
-        // 弧宽上限 ∝ 自家气泡的角 footprint(九稿 ×3.4 大胆版)
+        // 弧宽上限 ∝ 自家气泡的角 footprint
         let ownHalf = asin(min(0.95, bubbleR / max(mainDist, bubbleR + 1)))
         let arcCap = min(GraphConstants.beltMaxHalfArc, ownHalf * 3.4 + 0.2)
         // 家弧 = 最大层的单排需求(排不满的层照此弧稀疏铺满 —— 全层平
-        // 齐,零头不挤一小块)。装填 0.65(单环重构"更分散":排更稀)
+        // 齐,零头不挤一小块)。装填 0.65(排更稀,视觉更分散)
         var tierCount = [0, 0, 0]
         for t in tiers { tierCount[min(max(t, 0), 2)] += 1 }
         let maxTC = Double(tierCount.max() ?? 1)
@@ -154,16 +150,15 @@ public enum BeltLayout {
                 let depth = Double(placed) / Double(n)
                 let rowArc = famArc
                     * (1 - GraphConstants.beltEndTaper * depth * depth)
-                // 每排装 50%(单环"更分散"指厚度:排更稀 → 排数更多 →
-                // 带更厚;0.75→0.65→0.5)
+                // 每排装 50%(排更稀 → 排数更多 → 带更厚)
                 let cap = max(1, Int(2 * rowArc * ringR / slotW * 0.5))
                 let rowCount = min(cap, idxs.count - k)
                 let slot = 2 * rowArc / Double(rowCount)
                 let rowStart = k
                 for j in 0..<rowCount {
                     let g = idxs[k]
-                    // 模糊(单环重构加码:径向 ±1.1 排距、角向 ±1.2 槽,
-                    // 确定性哈希驱动,不是真随机)—— 边缘不刻意
+                    // 模糊:径向 ±1.1 排距、角向 ±1.2 槽,确定性哈希驱动
+                    // (不是真随机)—— 边缘不刻意
                     offsets[g] = cursor + (hashA[g] - 0.5) * slotW * 2.2
                     angles[g] = -rowArc + (Double(j) + 0.5) * slot
                         + (hashB[g] - 0.5) * slot * 2.4
@@ -191,7 +186,7 @@ public enum BeltLayout {
                     let scale = rowArc / maxAbs
                     for g in rowIDs { angles[g] *= scale }
                 }
-                // 排距(单环"更分散"指厚度:beltRowGap 加大 = 带更厚)
+                // 排距:beltRowGap 加大 = 带更厚
                 cursor += slotW * GraphConstants.beltRowGap
             }
         }

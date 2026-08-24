@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// 盖在图后的透明 AppKit 层:让「在图上按下拖动」不被当成拖动窗口
+/// 盖在图后的透明 AppKit 层:防止在图上拖动被当成拖动窗口
 /// (窗口 isMovableByWindowBackground 时,SwiftUI 内容默认可拖窗 → 整窗漂移)。
 private struct WindowDragBlocker: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { BlockerView() }
@@ -43,8 +43,8 @@ struct InputActivityChartView: View {
     @State private var pendingJumpId: Int64? = nil
     /// 当前高亮的 record(定位后 ~2s 淡出)。
     @State private var highlightedId: Int64? = nil
-    /// wr chip 跳转的独占展示:非 nil 时 records 列表**只显示这一条**
-    /// (07-10 update "只展示那一张")。用户任何选中操作/切天即清除恢复。
+    /// wr chip 跳转的独占展示:非 nil 时 records 列表只显示这一条(07-10 update)。
+    /// 用户任何选中操作/切天即清除恢复。
     @State private var focusId: Int64? = nil
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
@@ -108,10 +108,9 @@ struct InputActivityChartView: View {
         }
     }
 
-    /// records 就绪后:**把目标 record 的时间段设为图表选中窗口**(等同手动
-    /// 框选那段;07-10 update "目标段设为画布中心")—— records 列表随选中
-    /// 过滤到该窗口,目标卡片直接在台前,不再依赖全天长列表的 LazyVStack
-    /// 滚动(懒加载下 scrollTo 不可靠,实测滚不到)。再展开 + 高亮。
+    /// records 就绪后:把目标 record 的时间段设为图表选中窗口(07-10 update),
+    /// records 列表随之过滤到该窗口,目标卡片直接可见,不依赖 LazyVStack 的
+    /// scrollTo(懒加载下不可靠)。再展开 + 高亮。
     /// 目标不在当前 records(天没对上/reload 未完)则不动,留待下一次 reload
     /// 末尾重试(pendingJumpId 不清)。
     @MainActor
@@ -259,11 +258,8 @@ struct InputActivityChartView: View {
                     }
 
                     // records 独立滚动区(图不动、只这里滚)。
-                    // ⚠️ wr chip 定位**不再程序滚动**:程序 scrollTo 与用户手动滑动
-                    // 抢同一个 ScrollView,用户在自动滚时插一手 → ScrollView 卡死滚
-                    // 不动。改为——每次 redirect 都是全新进入本界面(ScrollView 天然
-                    // 从顶部起)+ focusId 独占让列表**只显示目标那一张卡**;
-                    // 不需要也不做任何程序滚动,零冲突。
+                    // ⚠️ 不用程序 scrollTo 定位:与用户手动滑动抢同一 ScrollView 会卡死滚动。
+                    // 靠 ScrollView 天然从顶部起 + focusId 独占让列表只显示目标那一张卡定位。
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
                             recordsSection
@@ -436,12 +432,11 @@ struct MinuteBuckets: Sendable {
 
     // MARK: 峰值丛选择旋钮(代码里可调)
 
-    /// 每分钟击键 ≥ 此值才算"活跃"。取 1:连微弱边缘(每分钟 1 键)也算进 session,
-    /// 不再被当噪声剔掉,选中不漏边边角。只有完全 0 击键的分钟才是"安静"。
+    /// 每分钟击键 ≥ 此值才算"活跃"。取 1,只有完全 0 击键的分钟才是"安静",
+    /// 选中不漏边边角。
     static let activeFloor = 1
-    /// 连续安静 ≥ 此分钟数 → session 收边。取 90min:实测(2026-07-10 扫库)相邻
-    /// bump 间距 45~90min 的很多,视觉上是同一坨,gap=45 会把它们划开 → 点一边
-    /// 漏另一边的"边角"。只有真正的长时间安静(>1.5h)才断开。调大 = 选更大片。
+    /// 连续安静 ≥ 此分钟数 → session 收边。取 90min(2026-07-10 扫库实测),
+    /// 只有真正长时间安静(>1.5h)才断开。调大 = 选更大片。
     static let gapMinutes = 90
     /// 点击自动选中的击键上限(安全值)—— 从点击点按密度扩到此量就停,
     /// 防极端大 session 一口气全选。绝大多数 session 都在此值内会整段选中。
@@ -531,11 +526,10 @@ struct MinuteBuckets: Sendable {
 
     /// 死区兜底窗口:点击点 ± 动态半宽的盒子,再把被盒边**切到一半**的 session
     /// 补全(盒内有活跃分钟时,左右各自延伸到其 session 完整边界)——绝不拦腰切
-    /// session(实测:兜底盒切在上午 session 中间是"漏边角"的主要来源之一)。
+    /// session。
     ///
-    /// 半宽 = 当天跨度/8(盒宽 = 图面 1/4,任何一天视觉占比恒定)。固定 ±3h 在
-    /// 短跨度日会一盒包住大半图面;跨度/8 在全 24h 日恰为 180min(与旧值等价),
-    /// 短日自动收窄。下限 fallbackRadiusMin。
+    /// 半宽 = 当天跨度/8(盒宽 = 图面 1/4,任何一天视觉占比恒定),短日自动收窄,
+    /// 下限 fallbackRadiusMin。
     func fallbackWindow(around click: Int) -> (lo: Int, hi: Int) {
         let c = min(max(click, firstMinute), lastMinute)
         let radius = max(Self.fallbackRadiusMin, (lastMinute - firstMinute) / 8)
@@ -565,8 +559,7 @@ struct MinuteBuckets: Sendable {
     private static let smoothRadius = 2
 
     /// 选中窗口视觉外扩(分钟)。曲线画的是**平滑值**(±smoothRadius)+ 样条圆角,
-    /// 比 raw 活动边缘多探出 ~3min;带子贴 raw 边收,曲线尾巴就总露在带外
-    /// ("总是差一捏捏",2026-06-04 update 实测:raw 末键 02:11,平滑曲线到 02:13 才归零)。
+    /// 比 raw 活动边缘多探出 ~3min;带子若贴 raw 边收,曲线尾巴会露在带外(2026-06-04)。
     /// 提交窗口两端各外扩此值盖住裙边;外扩分钟 raw=0,keys 计数不变。
     static let visualPad = smoothRadius + 1
 
@@ -886,9 +879,8 @@ private struct InputRecordCard: View {
 
     private var appLabel: String { InputCaptureView.appLabel(record.app) }
     private var accent: Color { AppColor.color(for: appLabel) }
-    /// 不再用 GeometryReader + PreferenceKey 反向写 @State 判断截断：它会让
-    /// LazyVStack 在部分 Release 构建里反复重新布局。这里用稳定的内容特征判断，
-    /// 偶尔多显示一个徽标也比主线程进入 AttributeGraph 布局循环安全。
+    /// ⚠️ 不用 GeometryReader + PreferenceKey 反向写 @State 判断截断:会让
+    /// LazyVStack 在部分 Release 构建里反复重新布局。改用稳定的内容特征判断。
     private var logicalLineCount: Int {
         record.text.split(separator: "\n", omittingEmptySubsequences: false).count
     }

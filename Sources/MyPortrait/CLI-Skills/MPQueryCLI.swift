@@ -372,9 +372,8 @@ enum MPQueryCLI {
         let start = parseTime(opts["start"], anchor: .start) ?? Date().addingTimeInterval(-3600)
         let end = parseTime(opts["end"], anchor: .end) ?? Date()
         let speaker = opts["speaker"]
-        // 默认 500(原 60 太小):会议转译每分钟几十条,60 条只够 ~4 分钟,
-        // 后半段(audioTranscripts 是 ASC 取最早 N 条)会被截掉 —— 模型据此误判
-        // "没讨论"。500 覆盖一整场典型会议,一次拉全,弱模型也不用自己重拉。
+        // 默认 500:会议转译每分钟几十条,过小会截断后半段(audioTranscripts
+        // 是 ASC 取最早 N 条)导致模型误判"没讨论"。500 覆盖一整场典型会议。
         let limit = Int(opts["limit"] ?? "500") ?? 500
 
         let db = TimelineDB()
@@ -408,8 +407,8 @@ enum MPQueryCLI {
     private static func parseOpts(_ args: [String]) -> [String: String] {
         // ⚠ **用 updateValue 不要用 subscript 赋值** —— Swift 6 / macOS 26
         // 工具链上,`out[key] = val` 这种 Dictionary 下标赋值在 enum 的
-        // private static func 里偶发会被优化掉(opts 永远空 dict),花了一
-        // 小时定位。换成 updateValue(_:forKey:) 一切正常。
+        // private static func 里偶发会被优化掉(opts 永远空 dict)。换成
+        // updateValue(_:forKey:) 一切正常。
         //
         // 同时支持两种形式(AI agent 实际两种都会试):
         //   --start today        (空格分隔)
@@ -615,9 +614,7 @@ enum MPQueryCLI {
         start: Date, end: Date, limit: Int
     ) -> [FrameSearchResult] {
         // **per-frame SQL LIKE 直查** —— frames.full_text 每帧独立存 OCR,
-        // 直接 WHERE full_text LIKE '%q%' 命中精确帧。之前把所有帧 OCR 合
-        // 200k 大 blob 然后 substring 匹配,200k 一截大量帧丢了,而且匹配
-        // 粒度也丢了(blob 命中就 return 头 N 帧,不是真匹配的帧)。
+        // 直接 WHERE full_text LIKE '%q%' 命中精确帧(避免合并大 blob 丢帧、丢匹配粒度)。
         var db_: OpaquePointer?
         guard sqlite3_open_v2(db.dbPath, &db_, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             return []
@@ -724,10 +721,9 @@ enum MPQueryCLI {
         db: TimelineDB, q: String?, start: Date, end: Date,
         limit: Int, speakerName: String? = nil
     ) -> [TranscriptResult] {
-        // **q / speaker 过滤下推进 SQL WHERE** —— 之前是先
-        // `audioTranscripts(... LIMIT n)` 取窗口内最早 n 条再在 Swift 侧过滤,
-        // 关键词不在最早 n 条里就永远查不到(LIMIT 截断在过滤之前)。
-        // 直查写法同本文件 searchFrames:read-only 打开 + sqlite3_bind。
+        // **q / speaker 过滤下推进 SQL WHERE** —— 避免 LIMIT 在过滤之前截断,
+        // 导致关键词命中的记录被漏掉。直查写法同本文件 searchFrames:
+        // read-only 打开 + sqlite3_bind。
         var db_: OpaquePointer?
         guard sqlite3_open_v2(db.dbPath, &db_, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             return []

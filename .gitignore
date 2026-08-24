@@ -40,22 +40,16 @@ scripts/release/dmg/.venv/
 # Claude Code 会话本地文件
 .claude/
 
-# 本地发版 runbook(私人备忘,不进仓库)
+# 本地发版 runbook
 RELEASE.md
 INTEL.md
 
-# 项目 CLAUDE.md 留本地,不上传 GitHub
+# AI 助手文档
 /CLAUDE.md
 /AGENTS.md
 
-# 全量 code review 台账(记录未修的缺陷,不适合公开)
+# 全量 code review 台账
 /code-review/
 
-# ⚠️ Tests/ 整个不上传。
-# 里面的 lab 目录是拿真实采集数据(屏幕 OCR 原文、击键、session、canvas 文本)
-# 做的 gold / fixture,属于隐私数据。2026-07-25 发现它们已经被推到**公开**仓库,
-# 且其中一份 OCR 里含一个真实的 Discord bot token(采集时正好在屏幕上)。
-# 已改写历史清除并 force push。整个目录一刀切,不再逐个 lab 维护白名单。
-# ⚠️ 相应地 Package.swift 的 testTarget 和 project.yml 的 MyPortraitTests
-# 也已摘除 —— 留着会让 clone 下来的仓库找不到目录、直接 build 失败。
+# Lab 内容,正在开发中
 Tests/

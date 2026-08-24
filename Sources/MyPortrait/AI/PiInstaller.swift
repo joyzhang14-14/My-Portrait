@@ -141,13 +141,10 @@ enum PiInstaller {
     private static func bunAdd(in dir: URL, spec: String) async throws {
         let bun = AIPaths.bunBinary
         let bunDir = AIPaths.bunDir
-        // 整段同步阻塞放 detached 线程(别堵协程池)。两个老坑一并规避:
-        //   ① 原来 terminationHandler 装在 run() 之后 —— 进程若在 run 与装 handler
-        //      之间退出,handler 永不触发 → continuation 永挂。改用 waitUntilExit
-        //      收尸,与时序无关,无竞争。
-        //   ② 原来 stdout/stderr 全程不抽干 —— bun add 输出 >64KB 会撑满管道缓冲,
-        //      子进程卡在 write 永不退出。这里把 stderr 并进 stdout 一条管道,持续
-        //      readDataToEndOfFile 读到 EOF(= 子进程退出),边读边排空,不会卡。
+        // 整段同步阻塞放 detached 线程(别堵协程池)。用 waitUntilExit 收尸(与
+        // 时序无关,无竞争);stderr 并入 stdout 一条管道,持续
+        // readDataToEndOfFile 读到 EOF 边读边排空 —— 否则输出 >64KB 会撑满
+        // 管道缓冲,子进程卡在 write 永不退出。
         // Process 在闭包内创建,避免跨线程捕获非 Sendable 对象。
         try await Task.detached(priority: .userInitiated) {
             let p = Process()

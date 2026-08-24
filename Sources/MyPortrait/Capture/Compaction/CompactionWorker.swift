@@ -16,7 +16,7 @@ import os.log
 ///       - db.replaceFramesWithVideoChunk（事务）
 ///       - 删除原 JPG 文件
 ///
-/// 抄 My-Orphies snapshot_compaction.rs 的参数：
+/// 参数：
 ///   - MIN_AGE_SECS = 600     (10 分钟前的 JPG 才压)
 ///   - POLL_INTERVAL = 300    (5 分钟一轮)
 ///   - MAX_FRAMES_PER_CHUNK = 100

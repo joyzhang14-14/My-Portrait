@@ -68,7 +68,6 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
         }
 
         // 说话人识别完全靠声纹匹配 + Voice Training（读 30s 建干净声纹）。
-        // 不再用「麦克风+单人 → 按名字自动命名」那条粗启发式（已删 audio.userName）。
 
         return out
     }

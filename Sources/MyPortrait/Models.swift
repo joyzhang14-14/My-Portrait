@@ -334,11 +334,8 @@ enum IntegrationRegistry {
         // 走 Codex client_id 拿额度)。这一档纯 BYOK,贴 sk-... API key。
         .init(id: "openai-byok",        name: "OpenAI API",      bundleId: "com.openai.chat",                       letter: "O",  assetName: "OpenAI", assetFullBleed: true, accent: Color(white: 0.10),                         signInMethod: .apiKey,       category: .ai),
         .init(id: "claude-code",        name: "Claude Code CLI", bundleId: nil,                                     letter: ">",  assetName: "ClaudeCode", assetFullBleed: true, accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .localApp,     category: .ai),
-        // Anthropic API 用 bundled asset "Anthropic"(自带橙底圆角 A| logo)。
-        // 早期实现复用了 Claude Desktop 的 bundleId 让 NSWorkspace 抓真 app icon,
-        // 但那图标随 Claude.app 升级会变、没装 Claude.app 的用户看到的又是另一张 ——
-        // 系统级图标不在我们手里,语义上 Anthropic API(BYOK)也不该跟 Claude
-        // Desktop 绑定。已删 bundleId,永远走我们 bundle 自带的 asset。
+        // Anthropic API 用 bundled asset "Anthropic"(自带橙底圆角 A| logo),不用
+        // bundleId 抓系统图标 —— 系统图标随 app 版本变,且语义上不该跟 Claude Desktop 绑定。
         .init(id: "anthropic-api",      name: "Anthropic API",   bundleId: nil,                                     letter: "A",  assetName: "Anthropic", assetFullBleed: true, accent: Color(red: 0.85, green: 0.46, blue: 0.21),  signInMethod: .apiKey,       category: .ai),
         .init(id: "gemini",             name: "Gemini",          bundleId: nil,                                     letter: "G",  assetName: "Gemini", accent: Color(red: 0.26, green: 0.52, blue: 0.96),  signInMethod: .apiKey,       category: .ai),
         // Perplexity:用 bundle 的 perplexity.svg 资源(从 screenpipe 引来的

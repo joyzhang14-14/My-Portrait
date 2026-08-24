@@ -148,9 +148,8 @@ actor PortraitDBImpl: PortraitDB {
                 //    死行的成因,也恰是这条写入最容易失败的时刻,抛错会把
                 //    最需要压缩释放空间的那一轮整个掐掉。
                 //  - 独立小事务给采集层写入留插队间隙,不长时间占住 WAL 唯一
-                //    writer。(v39 起 frames_fts 触发器已列限定,这条只改
-                //    snapshot_path 不再触发 OCR 全文重分词 —— 重分词不再是
-                //    分批的理由,锁粒度才是。)
+                //    writer(这条只改 snapshot_path,不触发 OCR 全文重分词;
+                //    分批是为了锁粒度)。
                 var neutralized = 0
                 do {
                     var start = 0

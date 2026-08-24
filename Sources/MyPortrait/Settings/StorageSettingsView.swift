@@ -21,16 +21,14 @@ struct StorageSettingsView: View {
                      onResetCurrentPage: { config.mutate { $0.storage = .init() } }) {
 
             SettingsCard(title: "Local disk storage") {
-                // 描述只报当前路径 —— 目录已经不让在 UI 里改了(Change 按钮
-                // 07-28 换成 Open),原来那句"改目录会重新开始录"没有对应操作。
+                // 描述只报当前路径 —— 目录已不能在 UI 里改(07-28 update)。
                 SettingsRow(
                     "Data directory",
                     description: resolvedDataDir,
                     icon: "folder"
                 ) {
                     HStack(spacing: 6) {
-                        // 07-28 update:原 "Change" 换成 "Open" —— 接管被删掉的
-                        // 每页右上角 "Open ~/.portrait" 按钮的入口。
+                        // Open 接管了原本每页右上角 "Open ~/.portrait" 按钮的入口。
                         Button("Open") { config.openPortraitDir() }
                             .font(.system(size: 12, weight: .medium))
                             .help("Open the data folder in Finder")

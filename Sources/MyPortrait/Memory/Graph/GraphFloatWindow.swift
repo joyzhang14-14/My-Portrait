@@ -7,11 +7,9 @@ extension Notification.Name {
     static let memoryJumpToInputRecord = Notification.Name("MyPortrait.MemoryJumpToInputRecord")
 }
 
-/// 末端球(event / portrait 小球)点击后的浮动详情卡(需求 §5.1):
+/// 末端球(event / portrait 小球)点击后的浮动详情卡:
 /// 完整内容,markdown 正文可滚动;来源 chips 可点跳转。
-/// 关闭:右上 × / 点画布空白处(07-10 update,取代"移出 1s 自动关"——
-/// 悬停机制曾因窗口跟球飞时从光标下滑走被误杀;点空白本就回主视角,
-/// 关卡片与回视角一步完成)。
+/// 关闭:右上 × / 点画布空白处(07-10 update)。
 struct GraphFloatWindow: View {
     let node: GraphNode
     /// 相机收官前不构建长正文,避免 Portrait 大段 markdown 排版与换球动画

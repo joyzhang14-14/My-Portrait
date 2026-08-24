@@ -53,10 +53,6 @@ enum DevMode {
 
     /// 写下新状态。**调用方负责立刻重启** —— 见 `GeneralSettingsView.devModeCard`,
     /// 那里是一个按钮直接"切换并重启",不留"已改但未生效"的中间态。
-    ///
-    /// 中间态原本是有的(开关 + "Restart to apply" 提示行),但那个提示行读的是
-    /// UserDefaults 这种 SwiftUI 看不见的值,拨完开关不会重画,得切到别的页面
-    /// 再回来才出现。与其给它套一层可观察包装,不如取消中间态本身。
     static func setEnabled(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: defaultsKey)
         UserDefaults.standard.synchronize()   // 马上要 terminate,不能等系统自己刷

@@ -9,14 +9,10 @@ import os.log
 /// 捕获其他 app 的输出(视频会议另一方的声音、视频播放声等),与麦克风音频
 /// 并列存在。
 ///
-/// **为什么用 SCK 而不是 CoreAudio Process Tap:**
-/// 老版本用 `AudioHardwareCreateProcessTap` + 聚合设备,聚合设备**必须锚定一个
-/// 真实输出设备**才有交付。这导致两个死路:
-///   - 蓝牙耳机打电话切 HFP 时,通话音频走蓝牙 SCO 语音通道,锚谁都是哑的;
-///   - per-app 路由(Zoom→AirPods)绕过锚定的默认输出 → tap 在跑但全 0。
-/// screenpipe 把 process tap 列为**实验性**路径,默认走 **ScreenCaptureKit**——
-/// SCK 在「系统混音」层抓音频(路由到输出设备之前),**完全设备无关**:锚的是
-/// 显示器不是输出设备,蓝牙怎么切都不影响。这才是正路。
+/// ⚠️ **为什么用 SCK 而不是 CoreAudio Process Tap:** Process Tap(聚合设备)
+/// **必须锚定一个真实输出设备**才有交付 —— 蓝牙耳机切 HFP、per-app 路由
+/// (Zoom→AirPods)时锚点失效,音频全 0。SCK 在「系统混音」层抓音频(路由到
+/// 输出设备之前),**完全设备无关**:锚的是显示器不是输出设备,蓝牙怎么切都不影响。
 ///
 /// 链路:
 ///   1. SCShareableContent 取一个显示器(音频系统级,锚哪个显示器都一样)
@@ -312,7 +308,7 @@ final class SystemAudioStreamOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         let state = ConvInputState()
         let status = converter.convert(to: outBuf, error: &err) { _, statusPtr in
             // ⚠ 复用 converter:必须 .noDataNow,不能 .endOfStream(否则之后永远
-            // 返回 0 帧)。跟旧 process-tap 实现 + AudioCaptureService 同款修法。
+            // 返回 0 帧)。同 AudioCaptureService 同款修法。
             if state.consumed {
                 statusPtr.pointee = .noDataNow
                 return nil

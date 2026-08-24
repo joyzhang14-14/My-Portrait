@@ -70,11 +70,9 @@ struct ConnectionsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if showsHeader {
-                    // 标题块走 SettingsPageTitle 跟其他 Settings 页(General/
-                    // Display/AI models…)一模一样。之前是自己 Text("Connections")
-                    // + 自己一行 subtitle,size/opacity 跟 SettingsPageTitle
-                    // 看着差不多但 layout 错位 —— 同一份组件保证字号/spacing
-                    // 完全一致。onboarding 嵌入时 showsHeader=false,不影响。
+                    // 标题块走 SettingsPageTitle,跟其他 Settings 页(General/
+                    // Display/AI models…)保持字号/spacing 完全一致。
+                    // onboarding 嵌入时 showsHeader=false,不影响。
                     SettingsPageTitle(
                         title: "Connections",
                         subtitle: "Give AI access to your memory, and connect to the apps you use every day"
@@ -95,7 +93,6 @@ struct ConnectionsView: View {
                 Spacer(minLength: 0)
             }
             // 跟 SettingsPage 同款 padding —— horizontal 28 + top 30 + bottom 40。
-            // 之前 top 22 让标题贴顶,跟其他 Settings 页对比"挤上去"了。
             //
             // 内嵌进 onboarding 时(showsHeader=false)大幅收紧:那 70pt 上下
             // 留白是给"整页只有这一块"准备的,嵌进去之后上面已经有步骤标题、
@@ -235,10 +232,8 @@ struct ConnectionsView: View {
                         .foregroundStyle(Theme.textPrimary.opacity(0.5))
                 }
                 if appState.isConnected(integration.id) {
-                    // 统一一个 CONNECTED 绿标。原来还分 ACTIVE(= 当前选中的
-                    // AI)和 CONNECTED 两种,但同一个位置两种词两种颜色,看着
-                    // 像连接状态有强弱之分 —— 其实"哪个 AI 在用"是另一件事,
-                    // 有 provider picker 管,不该混进连接状态里。
+                    // 统一一个 CONNECTED 绿标 —— "哪个 AI 在用"是另一件事,
+                    // 由 provider picker 管,不混进连接状态里。
                     StatusPill(text: "CONNECTED", color: .green)
                     // 连上之后说明文字就过期了 —— 那段讲的是"要不要连、怎么连",
                     // 已经连上的人再读一遍没有意义,还把 Disconnect 挤到下面去。
@@ -327,8 +322,7 @@ struct ConnectionsView: View {
 
             HStack(spacing: 8) {
                 if appState.isConnected(integration.id) {
-                    // "Make active for chat" 移除了 —— 实际激活是从 chat picker
-                    // 里选,在这放只是多余按钮。
+                    // 实际激活是从 chat picker 里选,这里不放激活按钮。
                     Button("Disconnect", role: .destructive) {
                         disconnect(integration)
                     }
@@ -695,9 +689,7 @@ struct ConnectionsView: View {
     /// Intelligence): TCC permission lives in System Settings → Privacy.
     /// Apple Calendar 走 EventKit:第一次调用 requestFullAccessToEvents 系统
     /// 会弹原生权限弹窗;之后如果用户拒了再点 Connect,我们就跳系统设置让
-    /// 他改。当前 .systemAccess 只剩 apple-calendar 一个 tile —— 其它假
-    /// systemAccess tile(Voice Memos / Apple Intelligence)已经从
-    /// IntegrationRegistry 删掉。
+    /// 他改。当前 .systemAccess 只有 apple-calendar 一个 tile。
     private func connectSystemAccess(_ integration: Integration) {
         guard integration.id == "apple-calendar" else {
             // 未来如果再加 systemAccess tile 走这里;现在不应触发。
@@ -765,8 +757,7 @@ struct ConnectionsView: View {
         case .smtp: return "Save SMTP settings"
         }
     }
-    /// 描述文案按 markdown 渲染 —— 只用加粗标关键词(试过反引号代码样式,
-    /// 在这种一两行的说明里显得很跳)。实现在 `Markdown.inline`,全 app 一份。
+    /// 描述文案按 markdown 渲染 —— 只用加粗标关键词。实现在 `Markdown.inline`,全 app 一份。
     private func markdown(_ s: String) -> AttributedString { Markdown.inline(s) }
 
     private func descriptionFor(_ i: Integration) -> String {
@@ -862,12 +853,10 @@ struct IntegrationIcon: View {
 
     @State private var realIcon: NSImage? = nil
 
-    /// `Image(named:)` + SwiftUI 在某些 macOS / 构建配置下加载 asset 不稳:
-    /// v1.0.0 收到反馈:Codex / OpenAI / Gemini / Perplexity / DeepSeek
-    /// 全是空白方块,即使 Assets.car 验证过有完整数据。换 `NSImage(named:)`
-    /// **直接走 AppKit**,绕过 SwiftUI 的 template-rendering-intent 解析,
-    /// 还能在加载失败时拿到 nil 让 view 显式 fallback 到 letter,不会再渲
-    /// 染空白瓦片。
+    /// `Image(named:)` + SwiftUI 在某些 macOS / 构建配置下加载 asset 不稳,
+    /// 会渲染空白方块。改用 `NSImage(named:)` **直接走 AppKit**,绕过 SwiftUI
+    /// 的 template-rendering-intent 解析,加载失败时拿到 nil,可显式
+    /// fallback 到 letter。
     private var bundledIcon: NSImage? {
         guard let asset = integration.assetName else { return nil }
         return NSImage(named: asset)
@@ -911,8 +900,7 @@ struct IntegrationIcon: View {
                 }
             } else {
                 // 品牌色底块 + 优先 SF Symbol(若提供),否则用 letter 字形。
-                // **bundled asset 加载失败也走这条**(以前会停在前面那个 else if
-                // 里渲染空白白瓦片)—— 即使图标丢了,至少看到品牌色 + 字母。
+                // **bundled asset 加载失败也走这条** —— 即使图标丢了,至少看到品牌色 + 字母。
                 RoundedRectangle(cornerRadius: size * 0.22)
                     .fill(integration.accent)
                 if let symbol = integration.iconSymbol {
@@ -933,8 +921,7 @@ struct IntegrationIcon: View {
     private func tryLoadRealIcon() async {
         // 先清旧 —— 切 tile 时 SwiftUI 复用同一份 IntegrationIcon View 实例,
         // @State realIcon 会保留上一个 integration 的图。新 integration 没
-        // bundleId / NSWorkspace 探不到时,不清就会一直显示上一个图(展开面
-        // 板里选 Email 还看到 Spotify 的图标就是这个)。
+        // bundleId / NSWorkspace 探不到时,不清就会一直显示上一个图。
         self.realIcon = nil
         // 死规定:有 bundled asset 就强制用它,不再从 NSWorkspace 抓真 app icon。
         // 取真 app icon 会随系统升级 / 应用换 icon 漂移,没装应用的用户体验割裂,

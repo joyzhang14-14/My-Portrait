@@ -562,9 +562,9 @@ final class TypingRecordWriter {
     /// - IME commit Enter(commit raw pinyin)→ `newValue` 仍是落定后的整条文字
     /// - 用户连按 Enter 但 value 几乎没变
     ///
-    /// ⚠️ (c) 早先写的是「`newValue < 30`」绝对断崖,IME 落字会跨界误判
-    /// (拼音 31 字 → 落定 29 字,29 < 30 被当成发送把消息劈两半)。改判「残渣绝对
-    /// 极少」:发送后留下的是**小常量**(Discord 的 `﻿\n`=2 字;占位符已被 (b) 接走),
+    /// ⚠️ (c) 判「残渣绝对极少」而非绝对阈值(如 `newValue < 30`)—— 绝对阈值在
+    /// IME 落字时会跨界误判(拼音 31 字 → 落定 29 字,被当成发送把消息劈两半)。
+    /// 发送后留下的是**小常量**(Discord 的 `﻿\n`=2 字;占位符已被 (b) 接走),
     /// 跟消息多长无关。IME 落定留的是整条真文字(≥30 消息远不止 4 字)→ 不会命中。
     nonisolated static func looksLikeSubmitClear(
         message: String, newValue: String, sessionStart: String

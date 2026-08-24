@@ -91,11 +91,9 @@ enum EventFolderStore {
         try save(f)
     }
 
-    /// 一次性迁移(07-10 update "随机色生成之后就不会变"):没设过颜色的
-    /// 存量 folder 随机固化一个预设色写盘。此前默认色用 Swift hashValue,
-    /// 每次启动随机化种子 → 没设色的 folder 每次启动换色且易撞色(颜色
-    /// 冲突的历史遗留根因)。幂等:colorHex 非 nil 一律跳过(不覆盖手选色),
-    /// 全部已固化时零写盘。App 启动调一次。
+    /// 一次性迁移(07-10 update):没设过颜色的存量 folder 随机固化一个
+    /// 预设色写盘。幂等:colorHex 非 nil 一律跳过(不覆盖手选色),全部已
+    /// 固化时零写盘。App 启动调一次。
     static func migrateAssignColors() {
         let all = loadAll()
         var used = Set(all.compactMap(\.colorHex))

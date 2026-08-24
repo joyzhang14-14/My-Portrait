@@ -45,8 +45,7 @@ final class FoundationTokenizer: FTS5CustomTokenizer {
 
         // 增量游标:byteOffset 始终 = text[0..<lastUTF16] 的 UTF-8 字节数。
         // enumerateSubstrings(.byWords) 按递增 range 访问,只对「上个词尾→本词头」
-        // 的间隙补算 UTF-8 长度 → 全文 O(n)。原来每个词重算 [0..<location] 前缀
-        // 是 O(n²),满屏 OCR 文本(几十 KB)每次入库/查询都白烧 CPU。
+        // 的间隙补算 UTF-8 长度 → 全文 O(n)。
         var lastUTF16 = 0
         var byteOffset = 0
 
@@ -58,7 +57,7 @@ final class FoundationTokenizer: FTS5CustomTokenizer {
 
             // 把 UTF-16 range（NSString 索引）转 UTF-8 字节偏移（FTS5 要求）。
             // 间隙(标点/空格)的 UTF-8 长度补进 byteOffset —— disjoint 子串的 UTF-8
-            // 拼接 = 整段 UTF-8,故 iStart 与原来逐前缀算法字节级一致。
+            // 拼接 = 整段 UTF-8,字节偏移与原始文本一致。
             if range.location > lastUTF16 {
                 let gap = ns.substring(with: NSRange(location: lastUTF16, length: range.location - lastUTF16))
                 byteOffset += gap.utf8.count

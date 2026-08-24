@@ -17,8 +17,8 @@ import os.log
 ///        - 每个 chunk：WhisperKit.transcribe → DB.insertTranscription → 更新 status=done
 ///        - 异常 → status=failed
 ///
-/// 设计抄设计文档第二节"延迟转录策略"：移动场景只录音（VAD 入库），AC 接通才烧
-/// CPU/Neural-Engine 转录。中断恢复以"段"为单位（最坏丢一段未完成转录）。
+/// 移动场景只录音（VAD 入库），AC 接通才烧 CPU/Neural-Engine 转录。
+/// 中断恢复以"段"为单位（最坏丢一段未完成转录）。
 actor TranscriptionScheduler {
 
     private let db: PortraitDB
@@ -35,16 +35,14 @@ actor TranscriptionScheduler {
 
     /// 后台兜底 poll 间隔。已有 PowerWatcher 事件驱动唤醒 +
     /// 新段事件直接驱动（ingest 成功入库后评估一轮），poll 仅作为"防漏"
-    /// 兜底，故拉长到 60s（vs 之前 5s）。
+    /// 兜底，故拉长到 60s。
     private let fallbackPollSeconds: TimeInterval = 60
 
-    /// 攒批闸门:模型装载开销(GB 级读盘 + CoreML 编译)远超单段推理,
-    /// 稳态录音下「每 60s 装载 → 转 1-2 段 → 卸载」是纯浪费。改成:
-    /// 攒够 batchMinChunks 段,**或**最老的 pending 已等了 batchMaxWaitMs,
-    /// 才真正开一轮 drain;poll / 新段事件 / 电源事件都按这个闸门评估。
-    /// 代价:转录延迟最坏 ~5min + poll 间隔,换装载次数 ÷N(模型用完即卸,
-    /// 不常驻内存)。阈值远低于 StallDetector 的 backlog 告警线(20 段/20min),
-    /// 不会误报。
+    /// 攒批闸门:模型装载开销(GB 级读盘 + CoreML 编译)远超单段推理,故攒够
+    /// batchMinChunks 段,**或**最老的 pending 已等了 batchMaxWaitMs,才真正开一轮
+    /// drain;poll / 新段事件 / 电源事件都按这个闸门评估(模型用完即卸,不常驻内存)。
+    /// 代价:转录延迟最坏 ~5min + poll 间隔。阈值远低于 StallDetector 的 backlog
+    /// 告警线(20 段/20min),不会误报。
     private let batchMinChunks = 5
     private let batchMaxWaitMs: Int64 = 5 * 60_000
     /// 每轮 poll 从 DB 拉多少 chunk。设计文档要求"限并发数 1-2"。
@@ -128,9 +126,9 @@ actor TranscriptionScheduler {
             }
         }
 
-        // ⚠️ 这里**不再** markStarted。转录调度器是随 app 起的,拿它当起点
-        // 等于"audio uptime = app 开机时长",音频采集关着也在涨。起点改由
-        // Services 订阅 audioCaptureEnabled 推(见 AudioMetrics.markStarted)。
+        // ⚠️ 不能在这里 markStarted:转录调度器随 app 起,拿它当起点会让
+        // "audio uptime = app 开机时长"(音频采集关着也在涨)。起点由 Services
+        // 订阅 audioCaptureEnabled 推(见 AudioMetrics.markStarted)。
         logger.info("TranscriptionScheduler started (event-driven via PowerWatcher + 60s fallback)")
 
         // 一次性清理跨通道去重上线前积累的历史双份(外放回录)。120s 冷启动

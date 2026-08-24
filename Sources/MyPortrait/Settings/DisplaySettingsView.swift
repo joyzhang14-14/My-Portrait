@@ -145,9 +145,9 @@ private struct AppCustomizeCard: View {
                     fileName: "dock.png"
                 )
 
-                // 08-01 update:菜单栏图标自定义槽位删掉 —— 图标现在是三盏实时采集灯
-                // (紫屏幕/黄音频/蓝打字),换成一张静态图会把灯整个盖掉,
-                // 那盏"用来自证没在记"的灯就失效了。
+                // 08-01 update:菜单栏图标没有自定义槽位 —— 图标是三盏实时采集灯
+                // (紫屏幕/黄音频/蓝打字),换成静态图会把灯盖掉,那盏"用来
+                // 自证没在记"的灯就失效了。
 
                 Divider().background(Color.primary.opacity(0.08))
 
@@ -216,14 +216,11 @@ private struct AppCustomizeCard: View {
 /// 改成直接 spawn 可执行文件 `{bundle}/Contents/MacOS/<binary>`,绕开
 /// LaunchServices。
 ///
-/// **等旧进程真的没了再拉新的**(08-09 update):原来是固定 `sleep 1`,而
-/// `NSApp.terminate` 的收尾(flush config、关 sqlite、停采集)不保证一秒内做完
-/// —— 超时就会新旧两个窗口同屏,观感很糟。改成轮询 `kill -0`(只探测进程存在
-/// 性,不发任何信号),旧窗口消失后新窗口才出现。10 秒封顶,免得 terminate 被
-/// 卡住时永远不重启。
+/// **等旧进程真的没了再拉新的**(08-09 update):轮询 `kill -0`(只探测进程
+/// 存在性,不发任何信号),旧窗口消失后新窗口才出现,避免新旧两窗口同屏。
+/// 10 秒封顶,免得 terminate 卡住时永远不重启。
 ///
-/// 原本是 AppCustomizeCard 的私有方法。dev mode 切换也要重启,提到文件级共用 ——
-/// 上面这些坑不值得为第二个调用方再踩一遍。
+/// dev mode 切换也要重启,与 AppCustomizeCard 共用这份逻辑。
 enum AppRelaunch {
     static func run() {
         guard let exec = Bundle.main.executablePath else {
@@ -547,13 +544,13 @@ private struct LampGlyph: View {
     static let hubColor    = Color(red: 232/255, green: 159/255, blue: 67/255)
 
     /// 归一化几何 —— **x 和 y 都除以内容框宽 916**(等比!)。
-    /// ⚠️ 一开始 y 除的是高度 1052、x 除的是宽度,非等比 → 整个图被竖向压扁、
-    /// 顶部那颗球被推到 y<0 裁掉了(看起来就是"图标偏上、上面被盖住一块")。
-    /// y 的取值范围因此是 0…aspect,不是 0…1。
+    /// ⚠️ x/y 必须用同一个除数,否则非等比缩放,顶部球会被推到 y<0 裁掉
+    /// (看起来就是"图标偏上、上面被盖住一块")。y 的取值范围因此是 0…aspect,
+    /// 不是 0…1。
     private static let aspect: CGFloat = 1052.0 / 916.0     // 1.148472
-    /// ⚠️ 球 ×1.2(含中心)、描边 ×0.8、连线长度不变 —— 原版彩芯只有 2.8px@1x,
-    /// 白圈吃掉了大半,菜单栏上看不清。现在彩芯 4.0px@1x。连线长度**不能再缩**:
-    /// 球放大后三条连线本就所剩无几,再短球就压进中心球里了。
+    /// ⚠️ 球 ×1.2(含中心)、描边 ×0.8、连线长度不变 —— 白圈占比大,彩芯太小
+    /// 在菜单栏上看不清,加大到 4.0px@1x。连线长度**不能再缩**:球放大后
+    /// 三条连线本就所剩无几,再短球就压进中心球里了。
     private static let hub = CGPoint(x: 0.233624, y: 0.749236)
     private static let rHub: CGFloat = 0.274192      // 0.228493 × 1.2
     private static let rDot: CGFloat = 0.190481      // 0.158734 × 1.2
@@ -614,9 +611,8 @@ private struct LampGlyph: View {
                     let c = P(p)
                     let ri = R(Self.rDot - Self.stroke)
                     if self[keyPath: kp] {
-                        // 辉光:同色大圆低透明度垫在下面,呼吸时轻微涨缩
-                        // 球放大后 ri 变大,辉光半径跟着涨 —— 系数从 2.0 收到
-                        // 1.6,配合 margin 0.11 才不会被 Canvas 边缘切出直边。
+                        // 辉光:同色大圆低透明度垫在下面,呼吸时轻微涨缩。
+                        // 系数 1.6,配合 margin 0.11 才不会被 Canvas 边缘切出直边。
                         let glow = ri * (1.6 + 0.30 * breathe)
                         ctx.fill(disc(c, glow), with: .color(color.opacity(0.16 + 0.08 * breathe)))
                         ctx.fill(disc(c, ri), with: .color(color))

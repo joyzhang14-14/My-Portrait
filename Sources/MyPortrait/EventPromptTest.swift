@@ -2,13 +2,11 @@ import Foundation
 
 /// `--event-prompt-test <yyyy-MM-dd>` — DEV-ONLY diagnostic entry point.
 ///
-/// Validates the proposed "方案 D" per-event clustering prompt WITHOUT
-/// touching EventBuilder / Backfill. Reads one day's frames, runs Tier 1
-/// merge, enriches with OCR, sends batched per-event prompts to the LLM,
-/// validates the schema, and dumps everything to stdout. Writes nothing.
+/// Reads one day's frames, runs Tier 1 merge, enriches with OCR, sends
+/// batched per-event clustering prompts to the LLM, validates the schema,
+/// and dumps everything to stdout. Writes nothing.
 ///
-/// Disposable: delete this file + the App.swift flag once the prompt is
-/// validated and the real EventBuilder rewrite lands.
+/// Disposable: delete this file + the App.swift flag once EventBuilder is rewritten.
 enum EventPromptTestCLI {
 
     final class State: @unchecked Sendable {
@@ -418,9 +416,8 @@ enum EventPromptTestCLI {
     }
 }
 
-/// `--backfill-day <yyyy-MM-dd>` — DEV-ONLY entry point that runs the real
-/// `Backfill.run` restricted to a single day. Used to test the per-event
-/// EventBuilder rewrite on one day's data. Disposable.
+/// `--backfill-day <yyyy-MM-dd>` — DEV-ONLY entry point that runs
+/// `Backfill.run` restricted to a single day. Disposable.
 enum BackfillDayCLI {
     final class State: @unchecked Sendable {
         var done = false
@@ -529,17 +526,15 @@ enum BackfillDaysCLI {
     }
 }
 
-/// `--wipe-personality-concepts` — DEV-ONLY 一次性迁移:备份 portrait/
-/// personality/ + personality_daily/,然后清空(只留 INDEX.md)。用于
-/// personality pipeline 改架构后从零重建。events/ 不动。
+/// `--wipe-personality-concepts` — DEV-ONLY 一次性迁移:清空 portrait/
+/// personality/ + personality_daily/(只留 INDEX.md)。不备份。events/ 不动。
 enum WipePersonalityCLI {
     static func run() {
         print("=== wipe-personality-concepts ===")
         let fm = FileManager.default
         let personalityDir = Storage.portraitDir.appendingPathComponent("personality")
         let dailyDir = Storage.personalityDailyDir
-        // 不再备份 —— 测试期间反复 wipe 会堆一坨 personality.bak.* 占地方,
-        // 用户已确认风险自担。
+        // 不备份,用户已确认风险自担。
         var removed = 0
         for dir in [personalityDir, dailyDir] {
             guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil,
@@ -1002,8 +997,8 @@ enum DistillStagedCLI {
 
 /// `--dump-day <yyyy-MM-dd>` — DEV-ONLY. Exports one day's enriched Tier-1
 /// sessions (id / time / app / window / url / OCR / frame ids) as JSON to
-/// `/tmp/dump_<day>.json`. No LLM call — used to hand data to a subagent
-/// when the codex quota is exhausted. Disposable.
+/// `/tmp/dump_<day>.json`. No LLM call — used to hand data off for external
+/// clustering. Disposable.
 enum DumpDayCLI {
     static func run(day dayStr: String) {
         let fmt = DateFormatter()
@@ -1076,7 +1071,6 @@ enum DumpDayCLI {
 /// `--materialize-day <yyyy-MM-dd> <clustering.json>` — DEV-ONLY. Takes a
 /// subagent-produced clustering JSON and the matching `/tmp/dump_<day>.json`,
 /// and writes correct PortraitFile `.md` events to `~/.portrait/events/<day>/`.
-/// Used when the codex quota is exhausted and a subagent did the clustering.
 ///
 /// clustering JSON shape:
 ///   {"events":[{"title","summary","type","tags":[],"portrait_facets":["f:v"],

@@ -5,7 +5,7 @@ import os.log
 
 /// Vision OCR 包装。
 ///
-/// 算法（抄 My-Orphies apple.rs）：
+/// 算法：
 ///   1. 查 OCRCache（key = appTitle + imageHash@1/6 下采样）
 ///   2. 转灰度 luma8（提速 + 不掉精度）
 ///   3. VNImageRequestHandler + VNRecognizeTextRequest
@@ -41,16 +41,10 @@ struct OCRService: Sendable {
     ///   1. 查缓存
     ///   2. 一律走 Vision OCR
     ///
-    /// ⚠️ **AX 快路已于 2026-08-04 移除**（不信 AX、不硬编码 app 名单）。
-    /// 原设计是「AX text ≥20 字 && 非终端 && 非浏览器 → 直接用 AX，省 ~50ms Vision」，
-    /// 假设「编辑器/原生聊天 app 的 AX 是 canvas 内容，比 OCR 准」。**实测该假设在多数
-    /// app 上不成立** —— 同 app 下 AX 文本长度 ÷ OCR 文本长度：
-    ///     Obsidian 0.06x · 微信 0.06x · Spotify 0.04x · Discord 0.03x ·
-    ///     Xcode 0.10x · Finder 0.22x · Preview 0.20x · Sourcetree 0.04x
-    /// AX 只给控件名（`navigator`/`debug bar`/`editor area`），正文一个字读不到；
-    /// 开图核实：Preview 的 PDF 正文全丢、Xcode 的代码全丢、Obsidian 只有标题重复两遍，
-    /// 更有帧的 AX 读到了**屏幕外窗口**的内容（图文不同源）。
-    /// AX 赢的只有 My Portrait 1.76x / Activity Monitor 2.73x —— 恰是内容价值最低的两类。
+    /// ⚠️ **AX 快路已于 2026-08-04 移除**（不信 AX、不硬编码 app 名单）。实测同 app
+    /// 下 AX 文本长度只有 OCR 的 0.03x–0.22x：AX 只给控件名（`navigator`/`debug bar`/
+    /// `editor area`），正文一个字读不到，甚至有帧的 AX 读到了**屏幕外窗口**的内容
+    /// （图文不同源）。
     ///
     /// 存量影响（2026-08-04 全量统计）：ax 帧 54,899（占 19%）；生产 event 1,001 个
     /// 有源帧的里，重度污染（源帧全是劣质 AX）8 个、中度 139 个。

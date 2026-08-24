@@ -76,9 +76,6 @@ struct MemorySettingsView: View {
     @State private var hasPersonalityWork: Bool = true
     /// body 渲染期间不再直接查 DB / 文件系统 —— 下面这些探测缓存在
     /// reload()/refreshStaging() 既有刷新点后台重算,body 只读缓存。
-    /// (原来 triggerRow×3 + reviewSection×3 每次 body 求值各开一条 sqlite
-    /// 连接全表扫 processing_log,job 跑着时每帧 6 次;hasPending 是同步
-    /// fileExists;attentionRow 每行还各一次查询。)
     @State private var dbInProgressEvent = false
     @State private var dbInProgressDistill = false
     @State private var dbInProgressPersonality = false
@@ -136,8 +133,7 @@ struct MemorySettingsView: View {
     private var pageBody: some View {
         ScrollView {
             // VStack spacing / 外层 padding 跟 SettingsPage 完全对齐
-            // (spacing 20 / top 30 / bottom 40)—— 原来钉死 24 / 44 / 28 跟
-             // General / Display 等页对比明显错位。
+            // (spacing 20 / top 30 / bottom 40)。
             VStack(alignment: .leading, spacing: 20) {
                 header
 
@@ -521,14 +517,8 @@ struct MemorySettingsView: View {
     }
 
     /// 标题块直接用 SettingsPageTitle 跟其他 Settings 页对齐(尺寸 / 颜色
-     /// / spacing 全部一份组件控制)。原来用自己的 Text + size 26 default
-     /// primary 渲染,subtitle 12 .secondary —— 跟 General/Display 用的
-     /// SettingsPageTitle(title 26 / 0.96, subtitle 13 / 0.55)视觉对不上。
-     ///
-     /// title 也从 "Memory · Parameter" / "Memory · Scheduler" 改成单词
-     /// (Parameter / Scheduler / Changelog),跟左边 sidebar 一致 ——
-     /// Capture 页那边右边 pane 就是 "Screen Capture" 单词没有 "Capture · "
-     /// 前缀。
+     /// / spacing 全部一份组件控制)。title 用单词(Parameter / Scheduler /
+     /// Changelog),跟左边 sidebar 一致。
     private var header: some View {
         SettingsPageTitle(title: tab.rawValue, subtitle: headerBlurb)
     }
@@ -555,10 +545,9 @@ struct MemorySettingsView: View {
         "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
     ]
 
-    /// 单 pipeline 的「自动运行」开关卡。原来 5 个 pipeline 挤在一张
-    /// schedulerSection 里,现在拆成每页一个。老字段(timeOfDay/dayOfWeek/
-    /// dayOfMonth)留着不动 —— toml 向后兼容,UI 只暴露 on/off。tick 周期 15min
-    /// 固定,catchUp + backoff 自动接管 retry。
+    /// 单 pipeline 的「自动运行」开关卡,每个 pipeline 一页。老字段
+    /// (timeOfDay/dayOfWeek/dayOfMonth)留着不动 —— toml 向后兼容,UI 只暴露
+    /// on/off。tick 周期 15min 固定,catchUp + backoff 自动接管 retry。
     /// `desc` 传 nil = 不显示卡片灰字说明,同时也不显示 Auto/Manual 那行状态灰字
     /// (整张卡只剩标题 + 开关)。
     /// `manual` 传了的话:自动开关**关掉时**,同一张卡下面伸出一行手动运行。
@@ -843,9 +832,8 @@ struct MemorySettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// spinner + "N jobs running…" + Stop all 行。同时考虑本 View 触发的 +
-    /// scheduler 后台触发的 run —— 之前只看 runningTriggers,scheduler tick
-    /// 跑起来时按钮显示 Running… 但没 spinner / 没 Stop,看着像卡死。
+    /// spinner + "N jobs running…" + Stop all 行,同时考虑本 View 触发的 +
+    /// scheduler 后台触发的 run。
     /// 统一的运行指示:spinner + 当前阶段文案 + Stop。三类 pipeline 共用 ——
     /// 字体 / 布局 / 按钮一致。
     @ViewBuilder
@@ -1983,10 +1971,6 @@ struct MemorySettingsView: View {
             // 用 menu 风格的 dropdown 复刻一个 hour-minute 选择器 ——
             // 视觉上跟同一行 Frequency Picker(160 宽 menu)完全一致,
             // 右沿 + 内 padding 都对齐。
-            // 原来用 DatePicker(.hourAndMinute) 出来的是 stepperField
-            // 风格(内嵌小输入框 + 外挂上下箭头),宽度跟同一行 Frequency
-            // Picker 视觉对不齐,收到的反馈"time 右侧选项框左右 padding
-            // 不一致"就是这条。改成 menu 后两行控件一模一样。
             HStack(spacing: 4) {
                 Picker("", selection: hourBinding(dateBinding)) {
                     ForEach(0..<24, id: \.self) { Text(Self.hourLabel($0)).tag($0) }

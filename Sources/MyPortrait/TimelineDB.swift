@@ -88,8 +88,9 @@ struct AudioTranscriptEntry: Identifiable, Hashable {
     let startS: Double
     /// 稳定 id —— 由内容(录制时刻 + 段内偏移 + 设备 + 方向 + 文本)决定。
     /// 同一条转录在连续 reload 里 id 不变,SwiftUI 的 ForEach 复用行、不整列
-    /// 重建。原来 `let id = UUID()` 每次新建 → 切帧时全列表 teardown+rebuild
-    /// → 闪屏。**不含 speaker** —— 说话人重命名 / 再识别只更新行内容,不让行重建。
+    /// 重建。⚠️ 不能用随机 id(如 `UUID()`)—— 会导致切帧时全列表 teardown+
+    /// rebuild、闪屏。**不含 speaker** —— 说话人重命名 / 再识别只更新行内容,
+    /// 不让行重建。
     var id: String {
         "\(Int(timestamp.timeIntervalSince1970 * 1000))|\(Int(startS * 1000))|\(device)|\(isInput ? 1 : 0)|\(text)"
     }
@@ -819,15 +820,10 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
-        // 列表"最后活动时间"= **严格的最后转录时间** —— 不混 updated_at_ms。
-        //
-        // 之前为了让"重训完立刻显示 just now"取 max(transcribed, updated_at),
-        // 副作用是任何 admin 操作(merge / dedupe / 重训 / 命名)都把时间顶
-        // 到 now,造成"两条录音相隔很久但 UI 都显示 2 min ago"。
-        //
-        // 现在严格走 transcribed_at:行展示的"X ago"就是你最后听到这个人的
-        // 时间,跟 UI 操作无关。ORDER BY 用 transcribed_at,没转录的(刚训
-        // 完没说话)用 created_at 当 secondary 排序兜底。
+        // 列表"最后活动时间"= **严格的最后转录时间**(transcribed_at),不混
+        // updated_at_ms —— 混入的话任何 admin 操作(merge / dedupe / 重训 / 命名)
+        // 都会把时间顶到 now,显示失真。ORDER BY 用 transcribed_at,没转录的
+        // (刚训完没说话)用 created_at 当 secondary 排序兜底。
         // model 是受控的固定枚举值(en_campplus/zh_campplus/...),内联安全。
         let modelFilter = model.map { " AND s.embedding_model = '\($0)'" } ?? ""
         let sql = """

@@ -24,8 +24,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case screen, audio, typing
     }
     enum Memory: String, Hashable, CaseIterable {
-        // 4 个 pipeline 各一页(原 Parameter / Scheduler 已拆掉,provider 配置
-        // 移进每个 pipeline)+ Changelog(含原 Scheduler 的 Needs attention)。
+        // 4 个 pipeline 各一页(provider 配置在各自页面里)+ Changelog(含 Needs attention)。
         case eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {

@@ -8,9 +8,8 @@ import SQLite3
 ///
 /// Reads `speakers JOIN audio_transcriptions` live from timeline DB.
 ///
-/// **2026-05-26**: 之前是独立的 Settings 分页(`SettingsPage("Speakers", ...)`)。
-/// 现在被嵌进 Audio Capture 页 —— 训练 + 簇管理跟麦克风/转录配置放一起,
-/// 不再单独走 sidebar。view 自己不再包 SettingsPage,由 caller 控制版式。
+/// **2026-05-26**:嵌在 Audio Capture 页(训练 + 簇管理跟麦克风/转录配置放
+/// 一起,不单独走 sidebar)—— view 自己不包 SettingsPage,由 caller 控制版式。
 struct SpeakersSettingsView: View {
     @State private var rows: [SpeakerRow] = []
     @State private var search = ""
@@ -97,8 +96,7 @@ struct SpeakersSettingsView: View {
             toolbar
 
             // ② diarization 自动识别 + 你命名、但没训练过的簇 —— 可随意管理。
-            // 空的时候整块隐藏 —— 原来靠副标题当空状态提示,副标题去掉后
-            // 只剩一个光秃秃的标题。
+            // 空的时候整块隐藏(否则只剩一个光秃秃的标题)。
             if !namedClusters.isEmpty {
                 SectionLabel("DETECTED SPEAKERS")
                 VStack(spacing: 6) {
@@ -364,7 +362,7 @@ private struct AttentionBanner: View {
 
 private struct SectionLabel: View {
     let title: String
-    /// 有值就在标题右边挂一个 ⓘ,点开看说明。原来的 subtitle 灰字已去掉。
+    /// 有值就在标题右边挂一个 ⓘ,点开看说明。
     var info: String? = nil
     init(_ title: String, info: String? = nil) {
         self.title = title; self.info = info
@@ -595,10 +593,10 @@ private struct IdentifiedRow: View {
 
             Spacer()
 
-            // **hover 或 popover 打开都显示 actions**。之前只看 hover,
-            // 用户鼠标从 person.2 滑到 popover 的瞬间 hover 变 false →
-            // actions 直接消失 → popover 跟着 dismiss,merge 永远点不到。
-            // 把 popover 状态也算进可见条件,popover 关之前 actions 不收。
+            // **hover 或 popover 打开都显示 actions** —— 只看 hover 的话,
+            // 鼠标从 person.2 滑向 popover 瞬间 hover 变 false,actions 消失
+            // 会导致 popover 跟着 dismiss,merge 永远点不到。popover 开着时
+            // actions 不收。
             if (hover || showMerge), !editing {
                 Button {
                     draft = row.name ?? ""; editing = true

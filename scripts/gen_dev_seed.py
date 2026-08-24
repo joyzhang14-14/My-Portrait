@@ -237,7 +237,7 @@ LOOSE = [
      "The chart notation finally clicked.", 1.9, 2.1, ["hobbies", "learning"]),
 ]
 
-# 程序化补充的散事件(08-09"再多,不够多"):主题 × 具体事,~80 条,
+# 程序化补充的散事件(08-09):主题 × 具体事,~80 条,
 # 日期铺满 1..60 天,weight 0.6~3.4 —— 陨石带和气泡都喂饱。
 _MORE = [
     ("Repotted the monstera", "It had been rootbound for a year. The new pot looks huge; give it a month.", ["plants"]),
@@ -326,7 +326,7 @@ for _i, (_t, _s2, _tags) in enumerate(_MORE):
     _imp = round(min(4.0, 1.2 + _w * 0.7), 1)
     LOOSE.append((_day, _t, _s2, round(_w, 1), _imp, _tags))
 
-# ── 压测填充(08-09"再多,均匀给所有 folder,编号即可") ──────────────
+# ── 压测填充(08-09) ──────────────────────────────────────────
 # 纯占位数据,不讲叙事;要撤掉删这一段重跑即可。
 _FILL_PER_FOLDER = 40
 _FILL_LOOSE = 120

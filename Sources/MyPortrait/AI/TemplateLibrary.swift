@@ -13,9 +13,8 @@ final class TemplateLibrary {
     private(set) var templates: [SummaryTemplate] = []
 
     // v2 = adapted for My-Portrait data model (uses mp-query memories /
-    // mp-folders skills + portrait/ + events/). v1 was the screenpipe-style
-    // generic "screen activity" set. Old v1 UserDefaults data is kept
-    // (not deleted), but the app reads v2 only — users see the new seeds.
+    // mp-folders skills + portrait/ + events/). Old v1 UserDefaults data is
+    // kept (not deleted), but the app reads v2 only.
     private let key = "MyPortrait.summaryTemplates.v2"
 
     /// 「已退休的种子清过一次没有」标志。见 removeRetiredFolderSeed。
@@ -221,9 +220,8 @@ final class TemplateLibrary {
               window: .today),
 
 
-        // (08-10 update 删掉 "Folder Suggestions" 这条种子:归档到文件夹已经是
-        //  pipeline 自己在做的事,不再需要用户手动点一个快捷方式去问。
-        //  老用户的 UserDefaults 里还留着,由 removeRetiredFolderSeed 清一次。)
+        // (08-10 update)"Folder Suggestions" 种子已删,原因见 retiredSeeds 注释;
+        // 老用户的 UserDefaults 里还留着,由 removeRetiredFolderSeed 清一次。
     ]
 }
 

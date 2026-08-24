@@ -45,8 +45,8 @@ actor FocusProbe {
     ]
 
     /// AX 文本抓取的最大递归深度。3 层覆盖大多数 app 的「窗口 → 主区 →
-    /// 子组件」三段,Electron / SwiftUI 嵌套深的不强求(它们 OCR 也够)。
-    /// 从 5 降到 3 主要是为了减少 walkAXText 时主线程持有时间。
+    /// 子组件」三段,Electron / SwiftUI 嵌套深的不强求(它们 OCR 也够);
+    /// 层数浅是为了减少 walkAXText 时主线程持有时间。
     private let axMaxDepth = 3
 
     /// AX 文本总长度上限（字符）。防止巨型页面（如 Twitter timeline）撑爆 RSS。
@@ -422,9 +422,9 @@ actor FocusProbe {
                 ? roleRef as? String : nil
 
         // 菜单树整棵跳过:菜单展开时 kAXFocusedWindow 会返回 AXMenu 元素,
-        // 不跳就把整份系统菜单(About This Mac/Force Quit/…)当"屏幕文本"抄进
-        // axText,下游 digest 被灌进上百条菜单项(6-05 s3212 实锤 134 条)。
-        // 菜单项文字对记忆管线零价值 —— 它不是用户产出的内容。
+        // 不跳就会把整份系统菜单(About This Mac/Force Quit/…)当"屏幕文本"抄进
+        // axText,下游 digest 被灌进上百条菜单项。菜单项文字对记忆管线零价值
+        // —— 它不是用户产出的内容。
         if let role, role == "AXMenuBar" || role == "AXMenu"
             || role == "AXMenuItem" || role == "AXMenuBarItem" || role == "AXMenuButton" {
             return

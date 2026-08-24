@@ -26,8 +26,7 @@ final class UpdaterService: NSObject {
     /// Sparkle delegate(必须 strong 持有 —— Sparkle weak-ref delegate)。
     private let bannerDelegate = UpdateBannerDelegate()
 
-    /// 检查间隔(分钟)—— 写死,不再可配(原 General → Update check interval
-    /// 字段已下线)。
+    /// 检查间隔(分钟)—— 写死,不可配置。
     static let checkIntervalMinutes = 10
 
     /// 自己跑的 check timer。Sparkle 内部 scheduler 在 Release build 强制
@@ -65,11 +64,10 @@ final class UpdaterService: NSObject {
     /// applyConfig(否则随便改个别的设置都会重建 timer + 立即触发一次检查)。
     private var observedAutoDownload: Bool = false
 
-    /// 常驻监听 autoDownloadUpdates。之前重应用职责挂在
-    /// GeneralSettingsView 的 onChange 上 —— 页面不在屏幕上就没人监听,
-    /// vim 改 TOML(ConfigStore 热加载)后 SPUUpdater 和 checkTimer 仍按旧值
-    /// 跑到下次重启。其它模块(ConfigApplier / Services)都用常驻
-    /// withObservationTracking,updater 对齐。
+    /// 常驻监听 autoDownloadUpdates —— 页面不在屏幕上也要生效,vim 改 TOML
+    /// (ConfigStore 热加载)后 SPUUpdater 和 checkTimer 要跟着更新,不能等
+    /// 到下次重启。跟 ConfigApplier / Services 一样用常驻
+    /// withObservationTracking。
     private func observeConfig() {
         observedAutoDownload = ConfigStore.shared.current.general.autoDownloadUpdates
         withObservationTracking {
@@ -90,9 +88,7 @@ final class UpdaterService: NSObject {
     /// "Check now" 时想要的就是"有没有新版给我看一下",modal 给"是/否
     /// + 立刻装"的明确反馈。
     ///
-    /// 之前版本 toggle on 时走 checkForUpdatesInBackground() 是错的 ——
-    /// 那条 silent path 没 UI 反馈,用户点了感觉按钮"没反应"。
-    /// 自动 timer 路径仍走 silent(用 applyConfig 里那条 Timer 调
+    /// 自动 timer 路径走 silent(applyConfig 里那条 Timer 调
     /// checkForUpdatesInBackground)。手动 ≠ 自动。
     func checkForUpdates() {
         // Sparkle 在已有更新会话进行时(canCheckForUpdates=false)会**直接吞掉**
@@ -123,7 +119,7 @@ final class UpdaterService: NSObject {
         u.automaticallyChecksForUpdates = false
         u.automaticallyDownloadsUpdates = g.autoDownloadUpdates
 
-        // 检查间隔写死 10 分钟(原来可配,UI 已下线)。
+        // 检查间隔写死 10 分钟。
         checkTimer?.invalidate()
         let interval = TimeInterval(Self.checkIntervalMinutes * 60)
         // **fires=true** 立刻先 check 一次,然后每 interval 再 check
@@ -156,11 +152,9 @@ final class UpdaterService: NSObject {
 ///      immediateInstallHandler(),Sparkle 立刻装新版 + relaunch app,
 ///      **不等用户 ⌘Q**。
 ///
-/// 之前用过 SPUStandardUserDriverDelegate 的两个 gentle reminder 方法
-/// (shouldHandleShowingScheduledUpdate / willHandleShowingUpdate)实际
-/// 完全不被 \`automaticallyDownloadsUpdates=true\` 的 silent install-on-quit
-/// 路径调用 —— Sparkle 在那条路径上根本不"展示"update,而是默默等 quit。
-/// 必须用 SPUUpdaterDelegate 的 willInstallUpdateOnQuit。
+/// Sparkle 在 \`automaticallyDownloadsUpdates=true\` 的 silent install-on-quit
+/// 路径上根本不"展示"update,而是默默等 quit,gentle reminder 类方法不会
+/// 被调用。必须用 SPUUpdaterDelegate 的 willInstallUpdateOnQuit。
 private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate {
 
     // MARK: SPUUpdaterDelegate

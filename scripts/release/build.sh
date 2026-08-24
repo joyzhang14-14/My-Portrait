@@ -5,22 +5,16 @@
 #   build/MyPortrait.xcarchive
 #   build/export/MyPortrait.app   (MyPortraitDev 签名 + hardened runtime + entitlements)
 #
-# 签名策略:本地自签 keychain cert(MyPortraitDev),跟 My-Smart-Bar /
-# My-Orphies 同款方案。
+# 签名策略:本地自签 keychain cert(MyPortraitDev)。
 #
-# 为啥不用 Apple Development cert:
-#   - 绑你 Apple ID。哪天免费 dev 账号 expired / 你换账号,签名身份就丢
-#   - 签名的 Common Name 里带作者邮箱,任何拿到 .app 的人 codesign -dvvv 看得到
+# 不用 Apple Development cert:账号过期 / 换号会丢签名身份;Common Name
+# 里带作者邮箱,任何人 codesign -dvvv 都能看到。
+# 不用 ad-hoc(`codesign --sign -`):cdhash 每次 build 漂,Sparkle 跨版本
+# 判 identity 不一致会拒绝更新。
 #
-# 为啥不用 ad-hoc(`codesign --sign -`):
-#   - DR 带 cdhash,每次 build 漂。Sparkle 跨版本判 identity 不一致拒
-#
-# 为啥自签 cert 没问题(原始 project.yml 注释"自签 cert macOS TCC 卡
-# Screen Recording auth_value=0"是误判 / 过时):
-#   - My-Orphies 用 MyOrphiesDev 自签 cert,Screen Recording 实际能给+生效
-#   - macOS 15+ 对 self-signed code signing identity 不再有 Screen Recording
-#     特殊歧视;只要 Hardened Runtime + entitlements + NSScreenCaptureUsage-
-#     Description 都对,跟 Apple Dev cert 待遇一样
+# 自签 cert 在 macOS 15+ 上 Screen Recording 授权正常生效,不受特殊限制;
+# 只要 Hardened Runtime + entitlements + NSScreenCaptureUsageDescription
+# 都对,跟 Apple Dev cert 待遇一样。
 #
 # 一次性建 cert(本机做一次):
 #   Keychain Access → Certificate Assistant → Create a Certificate
@@ -71,8 +65,8 @@ xcodebuild \
 rm -rf "$EXPORT_DIR"; mkdir -p "$EXPORT_DIR"
 # ⚠️ Xcode 16 的 xcodebuild -exportArchive 对自签(无 Developer ID)app 失效:
 #    "method" 无任何可用值,报 `expected one {} but found development/debugging`。
-#    但 export 本就只为把 .app 从 archive 取出来(下一步会用 MyPortraitDev 重签),
-#    所以直接 copy archive 里的 .app,绕过坏掉的 exportArchive。ExportOptions.plist 不再用。
+#    export 本就只为把 .app 从 archive 取出来(下一步会用 MyPortraitDev 重签),
+#    所以直接 copy archive 里的 .app,绕过坏掉的 exportArchive。
 echo "→ copy .app from archive (绕过 Xcode16 坏掉的 exportArchive)"
 cp -R "$ARCHIVE/Products/Applications/MyPortrait.app" "$EXPORT_DIR/"
 

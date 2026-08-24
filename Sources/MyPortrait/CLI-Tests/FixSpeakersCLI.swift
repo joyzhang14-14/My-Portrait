@@ -66,9 +66,8 @@ enum FixSpeakersCLI {
         }
 
         do {
-            // 默认不再做 2GB+ 全库备份(用户原话:"bak 文件占内存空间")。
-            // 真有需要回滚就开 MYPORTRAIT_KEEP_BAK=1 — 否则就靠 git / Time
-            // Machine 这种 app 外的备份。
+            // 默认不做 2GB+ 全库备份(占空间)。真要回滚开 MYPORTRAIT_KEEP_BAK=1 —
+            // 否则就靠 git / Time Machine 这种 app 外的备份。
             try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
             if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
                 let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
@@ -102,11 +101,11 @@ enum FixSpeakersCLI {
         exit(0)
     }
 
-    /// 后续纠正(`--consolidate-self`):试听确认那些被聚成"别人"的簇其实都是本人
-    /// (只是嘈杂/远场)。把所有非训练、非噪声测试的簇**合并进训练的 本人#13**(转录 +
-    /// 样本向量都搬过去,样本进本人的 fallback 池让它更耐噪、减少将来再碎),删掉这些簇。
+    /// 后续纠正(`--consolidate-self`):那些被聚成"别人"的簇其实都是本人
+    /// (嘈杂/远场)。把所有非训练、非噪声测试的簇**合并进训练的 本人#13**(转录 +
+    /// 样本向量都搬过去,样本进本人的 fallback 池让它更耐噪),删掉这些簇。
     /// matchSpeaker 是质心优先,本人的干净质心不被这些样本带偏(质心 merge 时不重算)。
-    /// 动态扫描当前所有 hall=0 且非训练的簇(不再 hardcode id),稳健。
+    /// 动态扫描当前所有 hall=0 且非训练的簇,稳健。
     static func consolidateNoisyJoy() {
         let base = Storage.rootURL
         let src = base.appendingPathComponent("portrait.sqlite")

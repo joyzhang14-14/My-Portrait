@@ -648,9 +648,8 @@ final class WritingCaptureWorker {
         //   AX 有料(session 有 typing_events)→ ax 路 → 走确定性构造
         //   AX 空(真 canvas,如 Google Docs:AX 失灵,内容只在屏幕)→ 保留 Step 0
         //     的 route(默认 ocr)→ 走 CanvasAgent OCR 重建。
-        // 之前用 LLM 判,把有干净 AX prompt 的 Claude Desktop 误判成 ocr →
-        // ensureOcrPrepped 清掉 typingEvents → 用户 prompt 直接消失。chat/Electron
-        // app 的输入在 AX,绝不该为了 OCR 丢掉它。
+        // ⚠️ chat/Electron app 的输入在 AX,不该为了 OCR 丢掉它 —— 误判走 ocr 会让
+        // ensureOcrPrepped 清掉 typingEvents,用户 prompt 直接消失。
         let needJudge = sessions.enumerated().filter { !$0.element.typingEvents.isEmpty }
         @Sendable func judge(_ idx: Int) async -> (Int, [WritingCaptureRawSession]) {
             let s = sessions[idx]
@@ -715,9 +714,8 @@ final class WritingCaptureWorker {
                       }) >= 120 {
                 // 真 canvas 写作 → ocr。门槛对齐 isAxBroken(≥120 有效击键、同一套
                 // meaningfulKeys 定义):AX 对这 app 失灵(从不产 typing_event)**且用户
-                // 确实大量手打** = 在写文档。旧门槛 10 太低,把"Spotify 等前台时顺手打
-                // 几个字"的纯屏 OCR 误当文档(36 个环境击键 ≥ 10 就进 canvas,LLM 把屏上
-                // 歌词/别处窗口文字拼成假记录)。
+                // 确实大量手打** = 在写文档,避免纯屏 OCR 把前台顺手打几个字的场景
+                // 误当文档。
                 out.append(s)
             }
             // else: AX 有效 app 的无输入 session(AI 回复/阅读)或 击键不足 → 丢
@@ -1050,7 +1048,7 @@ final class WritingCaptureWorker {
     /// 从一个 typing_event 的 edit_log 里拆出**每一条发出去的消息**。
     /// 聊天里连发多条会挤进同一个 typing_event:发送后输入框留下零宽残留
     /// (如 Discord 的 "﻿\n"),不被当成 flush 边界,于是 N 条消息共用一个 event,
-    /// bestGroupText 只取得到一条、其余全丢 —— 这正是用户早指出的"同框第二条 invalid"。
+    /// bestGroupText 只取得到一条、其余全丢。
     /// 救法:每次发送 = 一条把**整框内容整条删掉**的 delete,且其**相邻项只剩零宽/空白**
     /// (发送后那一瞬的字段态)。纠正型删除(改字、退格)旁边没有这种空标记 → 排除。
     nonisolated static func extractSentMessages(
@@ -1097,11 +1095,11 @@ final class WritingCaptureWorker {
 
     // MARK: - 统一提取(字段状态时间线模型)
     //
-    // 替掉散落互相打架的 6 个启发式。核心一句话:维护「当前跨事件草稿 cur」,字段每次
-    // reset(空/零宽/占位符)就把 cur 吐成一条消息;末尾没 reset 的是草稿。reset 用
-    // 「下一个事件起点是不是 reset 态」判 —— **绝不用前缀比对**(CJK 拼音↔汉字、中途改字
-    // 会把前缀判炸成逐字爆炸,那次 194 条就是这么来的)。event 内连发由 withinEventSends
-    // 拆。占位符按 run 级「整段跳变复现」识别,不认 app/语言/长度。
+    // 核心一句话:维护「当前跨事件草稿 cur」,字段每次 reset(空/零宽/占位符)就把
+    // cur 吐成一条消息;末尾没 reset 的是草稿。⚠️ reset 判断用「下一个事件起点是不是
+    // reset 态」,绝不用前缀比对(CJK 拼音↔汉字、中途改字会把前缀判炸成逐字爆炸)。
+    // event 内连发由 withinEventSends 拆。占位符按 run 级「整段跳变复现」识别,
+    // 不认 app/语言/长度。
 
     /// 字段是不是「reset 态」:空/纯空白/零宽,或 run 级识别出的占位符。
     nonisolated static func isResetState(_ s: String, placeholders: Set<String>) -> Bool {
@@ -1186,8 +1184,7 @@ final class WritingCaptureWorker {
         let evById = Dictionary(rawTyping.compactMap { e in e.id.map { ($0, e) } },
                                 uniquingKeysWith: { a, _ in a })
         // "已发送"只认 isSendClear(输入框**真清空**)。submit 标记**不算已发送**:
-        // 回车未必真发出、app 会假清空(claudefordesktop:989"那个图…"带 submit 但
-        // 990 仍带该前缀=没真发),这种假 submit 不该挡住前缀合并把早期草稿并进后续。
+        // 回车未必真发出、app 会假清空,假 submit 不该挡住前缀合并把早期草稿并进后续。
         func hasSend(_ r: WritingCaptureRecord) -> Bool {
             r.referenceTypingEventIds.contains { id in
                 guard let e = evById[id] else { return false }
@@ -1523,8 +1520,8 @@ final class WritingCaptureWorker {
         )
     }
 
-    /// 按 (app, url) 整天合并 raw_sessions(已弃用,留向后兼容)。
-    /// Pre-Pass-2 算法层优化的早期方案,现在改成 group + 并发 subagent。
+    /// 按 (app, url) 整天合并 raw_sessions(已弃用,留向后兼容;现用 group +
+    /// 并发 subagent 代替)。
     static func mergeRawSessionsByApp(
         _ sessions: [WritingCaptureRawSession]
     ) -> [WritingCaptureRawSession] {

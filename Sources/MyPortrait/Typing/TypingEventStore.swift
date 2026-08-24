@@ -24,15 +24,14 @@ struct EditEntry: Codable, Equatable, Sendable {
     ///                      不存在当场重读分支,见 TypingRecordWriter.fireDebounce)
     ///   - "ax-selection" = ⌘X 时抢读的 AXSelectedText(被剪原文)
     /// 缺省 = 常规 sandwich diff 路径。下游闸凭它判断「这个值是 AX 当场
-    /// 观测的还是缓存」,不用再靠时间推理去猜(#53 陈旧快照教训)。
+    /// 观测的还是缓存」。
     var src: String? = nil
     /// text 的**观测时刻**(UTC ms,可选,2026-08-01 加,老数据无此键):
     /// 这段文本真正被 AX 读到的时间。`ts` 是**落库时刻**,两者脱钩正是
     /// 陈旧快照的病根——submit 的 message 可能来自几百 ms 前的缓存。
     /// 语义:delete 条目记被删文本的观测时刻(=上一拍快照的到达时刻);
     /// commit/paste 记新值的到达时刻;race/ax-selection 记当场读的时刻。
-    /// 下游拿它与击键时间戳**直接比先后**(如「观测是否晚于最后一个退格」),
-    /// 时间判据替代推理。
+    /// 下游拿它与击键时间戳**直接比先后**(如「观测是否晚于最后一个退格」)。
     var seenTs: Int64? = nil
 
     enum CodingKeys: String, CodingKey {

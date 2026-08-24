@@ -214,7 +214,7 @@ enum TimelineContextBuilder {
         return "## \(chip.label) — \(frames) frames\(appsBit)"
     }
 
-    /// Used to be `chip.resolve()`. Only used for the screen-time chip types.
+    /// Only used for the screen-time chip types.
     private static func resolveTimeWindow(_ spec: ContextChip.Spec) -> (start: Date, end: Date, appName: String?) {
         let now = Date()
         switch spec {

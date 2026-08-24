@@ -22,8 +22,8 @@ struct ImportSettingsView: View {
     @State private var config = ConfigStore.shared
 
     @State private var scan: ScreenpipeImporter.ScanResult? = nil
-    /// 固定手动模式(07-28 update 删掉 auto-scan 开关):初始「未扫描」,
-    /// 不闪一下 Scanning…,等用户点 Scan。
+    /// 固定手动模式(07-28 update):初始「未扫描」,不闪一下 Scanning…,
+    /// 等用户点 Scan。
     @State private var scanning: Bool = false
     @State private var running: Bool = false
     @State private var statusLines: [String] = []
@@ -124,7 +124,7 @@ struct ImportSettingsView: View {
             }
         }
         // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
-        // 「未扫描」+ Scan 按钮,用户点了才扫(原 auto-scan 开关已删)。
+        // 「未扫描」+ Scan 按钮,用户点了才扫。
     }
 
     // MARK: CLI 导入 UI(Claude Code / Codex 各一张卡片,共用此 block)
@@ -347,7 +347,7 @@ struct ImportSettingsView: View {
         .padding(.vertical, 10)
     }
 
-    /// 手动模式(Auto-scan off)下还没扫过 —— 提示 + Scan 按钮。
+    /// 还没扫过 —— 提示 + Scan 按钮。
     private var notScannedBlock: some View {
         // 跟 Claude Code / Codex 的未扫描卡片一致:绿色 source 图标 + 名 + 灰 Scan 按钮 + 简短提示。
         VStack(alignment: .leading, spacing: 8) {
@@ -613,9 +613,9 @@ struct ImportSettingsView: View {
         defer { scanning = false }
         // 先从 My-Portrait DB 拿 cutoff,再扫盘按 cutoff 过滤源端 count。
         // cutoff = 最早**原生采集**带媒体的 frame ts(与 ScreenpipeImporter.run
-        // 的定界完全一致):imported 行不参与定界 —— 无媒体的允许 backfill
-        // (B 方案),带媒体的若参与会在分批导入中途失败后把 cutoff 拉前,
-        // 剩余源帧被滤掉、重导静默 0 行。
+        // 的定界完全一致):imported 行不参与定界 —— 无媒体的允许 backfill,
+        // 带媒体的若参与会在分批导入中途失败后把 cutoff 拉前,剩余源帧被
+        // 滤掉、重导静默 0 行。
         let dbImpl = services?.db as? PortraitDBImpl
         let dbPool = dbImpl?.dbPool
         let override = overrideDir

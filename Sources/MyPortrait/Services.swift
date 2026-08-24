@@ -685,8 +685,8 @@ final class Services {
 
     // MARK: - 私有：权限
 
-    /// 权限被 denied 时弹 NSAlert 问用户，确认后才打开系统设置。
-    /// 不再像之前那样无脑 openSettings —— 那样每次启动都弹设置窗口。
+    /// 权限被 denied 时弹 NSAlert 问用户，确认后才打开系统设置 ——
+    /// 避免每次启动都弹设置窗口。
     private func confirmThenOpenSettings(title: String, body: String, perm: PermissionMonitor.Kind) {
         let alert = NSAlert()
         alert.messageText = title
@@ -702,11 +702,10 @@ final class Services {
     // MARK: - 私有：响应 settings 变化
 
     // 每个子系统一条串行 apply 链:新的 start/stop 接在上一次 apply 之后执行。
-    // 之前每次翻转各起一个独立 Task.detached,彼此没有顺序保证 —— 快速
-    // off→on(或权限 3s 轮询造成 denied→granted 抖动)时 start 可能先被调度,
-    // 撞上还没停的旧实例被 `guard == nil` 挡成 no-op,随后 stop 落地:终态
-    // 采集停止而 UI toggle 显示开启,且 removeDuplicates 吞掉后续事件,没有
-    // 任何信号再纠正。链式执行让落地顺序恒等于 toggle 顺序,最后一次必生效。
+    // ⚠️ 必须串行 —— 并发的独立 Task 没有顺序保证,快速 off→on(或权限 3s
+    // 轮询造成 denied→granted 抖动)时可能新 start 先调度,撞上还没停的旧
+    // 实例被 `guard == nil` 挡成 no-op,随后旧 stop 落地:终态采集停止而
+    // UI toggle 显示开启,且 removeDuplicates 吞掉后续事件,没有信号再纠正。
     private var screenApplyChain: Task<Void, Never>?
     private var audioApplyChain: Task<Void, Never>?
     private var sysAudioApplyChain: Task<Void, Never>?

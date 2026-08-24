@@ -38,9 +38,7 @@ struct GeneralSettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
             }
-            // autoDownloadUpdates 的同步由 UpdaterService.observeConfig() 常驻监听
-            //(这里以前挂过 onChange,但页面不在屏幕上时没人监听,vim 改
-            // TOML 热加载后配置就是死的 —— 已收编进 service 本体)。
+            // autoDownloadUpdates 的同步由 UpdaterService.observeConfig() 常驻监听。
             // 检查间隔已写死 10 分钟,不再可配。
 
             // (Cron Jobs 的「History per cron job」08-09 搬去 Display 页最下面,
@@ -211,8 +209,7 @@ enum CacheScanner {
 }
 
 /// 版本号小药丸 —— Settings → General → Current version 用。
-/// fill/stroke 跟 colorScheme 切:light 主题底色奶白,之前钉死
-/// `Color.white.opacity(0.05)` 在白底上完全不可见。
+/// fill/stroke 跟 colorScheme 切:钉死单一颜色会在浅色主题下不可见。
 private struct VersionChip: View {
     let text: String
     @Environment(\.colorScheme) private var colorScheme

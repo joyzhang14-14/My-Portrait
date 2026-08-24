@@ -4,8 +4,7 @@ import Foundation
 
 /// 菜单栏三盏采集灯的实时状态。
 ///
-/// **这是一盏隐私指示灯,不是装饰** —— 有用户反馈"我不信 ignored app 真的生效"。
-/// 所以规则只有一条:**灯亮 ⇔ 此时此刻这一路真的在记当前这个 app**。任何一个
+/// 规则:**灯亮 ⇔ 此时此刻这一路真的在记当前这个 app**。任何一个
 /// 环节被挡住(功能关 / 没权限 / 前台 app 在忽略名单 / 各路自己的暂停)灯就灭。
 /// 宁可该亮时灭,绝不该灭时亮。
 ///
@@ -28,8 +27,8 @@ final class CaptureLampState: ObservableObject {
     /// 一盏灯:亮 / 灭 + 灭的原因(tooltip 用)。
     ///
     /// ⚠️ **必须 Equatable** —— `@Published` 每次赋值都发 objectWillChange,
-    /// 不管值变没变。订阅方(StatusBarMenu)收到又会回头刷新,不做变化检测就是
-    /// 一个无条件死循环,主线程 100% CPU、UI 冻死(08-01 真炸过一次)。
+    /// 不管值变没变。订阅方(StatusBarMenu)收到又会回头刷新,不做变化检测会
+    /// 无条件死循环,主线程 100% CPU、UI 冻死。
     struct Lamp: Equatable {
         var on: Bool
         /// 灭的原因;亮着时为 nil。
@@ -66,16 +65,14 @@ final class CaptureLampState: ObservableObject {
 
     private init() {
         adoptFrontmost(NSWorkspace.shared.frontmostApplication)
-        // 前台 app 一变就重算 —— 这是"切到 1Password 灯就灭"的触发点。
+        // 前台 app 一变就重算。
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil, queue: .main
         ) { [weak self] note in
             // ⚠️ **必须用通知里带的那个 app**,不能回头查
             // `NSWorkspace.shared.frontmostApplication` —— 通知投递的那一刻
-            // 那个系统属性**还没 settle**,查到的常常是上一个 app。症状:切到
-            // 微信,灯还停在 Terminal 的状态,得再切第三个 app 才更新,而且
-            // 时灵时不灵(08-01 update 实测)。
+            // 那个系统属性**还没 settle**,查到的常常是上一个 app。
             // 先把三个标量取出来再进 MainActor —— Notification / NSRunningApplication
             // 都不是 Sendable,整个传进去编译器会报 data race。
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -131,9 +128,8 @@ final class CaptureLampState: ObservableObject {
         }
     }
 
-    /// 外部信号源接线。Services 起来之后调一次 —— MusicPlaybackMonitor 是
-    /// 运行期才有的实例,拿不到就只是少一个刷新触发点,不影响正确性
-    /// (recompute 读的是它的当前值)。
+    /// 外部信号源接线。Services 起来之后调一次;MusicPlaybackMonitor 拿不到
+    /// 只是少一个刷新触发点,不影响正确性(recompute 读的是它的当前值)。
     func attach(musicMonitor: MusicPlaybackMonitor?, permissions: PermissionMonitor?) {
         self.musicMonitor = musicMonitor
         self.permissions = permissions
@@ -158,7 +154,7 @@ final class CaptureLampState: ObservableObject {
     /// 只读内存 + 几个子串比较,可忽略;有变化才发通知。
     ///
     /// ⚠️ **绝不要反过来让 StatusBarMenu 在 refreshIcon 里调 recompute** ——
-    /// 它订阅了本类的变化,那样就是自激死循环(08-01 炸过)。
+    /// 它订阅了本类的变化,那样会自激死循环。
     private func startPolling() {
         Timer.publish(every: 2, on: .main, in: .common)
             .autoconnect()
@@ -169,8 +165,7 @@ final class CaptureLampState: ObservableObject {
                     // 这里最多 2s 就纠正回来(此刻系统属性一定已 settle)。
                     self.adoptFrontmost(NSWorkspace.shared.frontmostApplication)
                     self.recompute()
-                    // 换标签页不发任何系统通知,只能靠这个 tick 兜 —— 所以浏览器里
-                    // 切到/切离屏蔽站,灯最多滞后一个 tick。
+                    // 换标签页不发任何系统通知,只能靠这个 tick 兜,灯最多滞后一个 tick。
                     self.refreshBrowserURL()
                 }
             }
@@ -208,7 +203,7 @@ final class CaptureLampState: ObservableObject {
             // IgnoreGate 把 ignoredUrls 当"URL / 窗口标题子串"用,这里同口径。
             s = Lamp(on: false, reason: "“\(hit)” is on your Ignored URLs list — the screenshot is still taken, but this window is blanked out of it.")
         }
-        if screen != s { screen = s }        // 只在真变了才发通知,见 Lamp 的告警
+        if screen != s { screen = s }        // 只在真变了才发通知
 
         // ---- 音频(黄) ----
         var a = Lamp(on: true, reason: nil)

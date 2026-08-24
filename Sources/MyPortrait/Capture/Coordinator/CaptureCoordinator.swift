@@ -10,8 +10,7 @@ import os.log
 ///   2. 启停采集流水线
 ///   3. 把每帧入库完成事件通过 `frameEvents` AsyncStream 推给订阅方
 ///
-/// P2 起改为事件驱动：
-///   订阅 EventSources.stream → 每个 trigger 触发一次抓帧。
+/// 事件驱动：订阅 EventSources.stream → 每个 trigger 触发一次抓帧。
 ///   重复 / 高频事件由 minCaptureIntervalMs 防抖 + FrameComparer 去重吸收。
 actor CaptureCoordinator {
 
@@ -28,7 +27,6 @@ actor CaptureCoordinator {
     private let ocrCache: OCRCache
     private let ocr: OCRService
     private let drm: DRMGate
-    // (07-21 拆掉 IncognitoGate 接线:无痕跳帧开关删除、永久关闭。)
     /// 锁屏 / login window 时跳帧。Services 在 config 变化时推。
     private var pauseWhenLocked: Bool = true
     /// 亮度最低时跳帧。Services 在 config 变化时推。
@@ -48,7 +46,7 @@ actor CaptureCoordinator {
 
     /// 帧入库事件输出流。stop() 会 finish 它;coordinator 被 Services 跨 capture
     /// off/on toggle 复用,故 start() 每次重建(镜像 EventSources/DRMWatcher),否则
-    /// toggle 一次后订阅方收不到事件。当前无订阅方,此改为前瞻性正确。
+    /// toggle 一次后订阅方收不到事件。
     private(set) var frameEvents: AsyncStream<FrameEvent>
     private var _continuation: AsyncStream<FrameEvent>.Continuation
 
@@ -97,8 +95,6 @@ actor CaptureCoordinator {
     nonisolated func setIgnoredCategories(_ cats: [String]) {
         ignore.setIgnoredCategories(cats)
     }
-
-    // (07-21 删 setMaskingEnabled:遮挡永远开,IgnoreGate 默认 true 不再改。)
 
     /// Services 在 ConfigStore.privacy.pauseCaptureApps/Urls 变化时调。
     /// drm 是共享的 class 实例(coordinator 与 drmWatcher 同一个),一次更新两边生效。
@@ -293,7 +289,7 @@ actor CaptureCoordinator {
         // 2b. 锁屏 / login window → 整帧跳过(用户不在电脑前,拍到的只有锁屏
         //     壁纸)。记 intentionalSkip:这帧是**故意**不写库,别让 StallDetector
         //     把它算进 silent_loss,误报 "Capturing screen but DB writes have
-        //     stopped"。(07-21 新 gate;原来这里是 incognito gate,已删。)
+        //     stopped"。
         if pauseWhenLocked, ScreenLockMonitor.queryLocked() {
             await VisionMetrics.shared.recordIntentionalSkip()
             return

@@ -5,9 +5,6 @@ import os.log
 
 /// 30s 周期跑一次 `StallDetector.evaluate`,新 verdict → 写 health.log +
 /// (如果用户开了通知开关) post 到 NotificationCenterService。
-///
-/// 借鉴 upstream `health.rs` 的 1s 缓存 + 60s log throttle 思路,但 My-Portrait
-/// 没有 HTTP 客户端常轮的需求,只用一个后台 task 拉数据。
 @MainActor
 final class StallDetectorDriver {
 
@@ -15,9 +12,7 @@ final class StallDetectorDriver {
     private let permissions: PermissionMonitor
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "stall-detector")
 
-    /// 30s ≥ Driver tick 间隔。短于此 evaluate 会跑很多次但 verdict 节流挡住,
-    /// 只是浪费 CPU。30s 给 audio backlog freshness 留时间;短于 10s 会刷
-    /// healthLog 太频繁。
+    /// Driver tick 间隔。⚠️ 低于 10s 会刷 healthLog 太频繁。
     private let tickIntervalSec: TimeInterval = 30
 
     private var task: Task<Void, Never>?
@@ -29,9 +24,8 @@ final class StallDetectorDriver {
     private var activeFaults: Set<StallVerdict.Kind> = []
 
     /// 恢复窗口:某 kind 连续这么久没新 verdict → 视为已恢复,清状态栏黄标。
-    /// 60s 跟 StallDetector.warnThrottleSec 对齐 —— 条件持续存在时每 60s
-    /// 会有一条新 verdict 进 recent,recoveryWindow 永远刷不到尾;条件真消失
-    /// 后 ~1-1.5 个 driver tick(30s 一次)就能 clear,体感"亮一会儿就灭"。
+    /// ⚠️ 需与 StallDetector.warnThrottleSec(60s)对齐,否则条件持续存在时
+    /// recoveryWindow 永远清不到。
     private let recoveryWindowSec: TimeInterval = 60
 
     init(db: PortraitDB, permissions: PermissionMonitor) {
@@ -84,13 +78,12 @@ final class StallDetectorDriver {
             pendingAudio = (0, 0)
         }
 
-        // App 是否被遮挡(后台不可见)。遮挡 = macOS App Nap 领地,30s idle
-        // 心跳的 Task.sleep 会被拖长 → vision frozen 误判,故传给 evaluate 跳过。
+        // App 是否被遮挡(后台不可见)。⚠️ 遮挡时 App Nap 会拖长 Task.sleep 心跳,
+        // 需传给 evaluate 跳过,否则误判 vision frozen。
         // .visible 不在 occlusionState 里 = 完全被挡 / 最小化 / 退后台。
         let appOccluded = !NSApp.occlusionState.contains(.visible)
 
-        // 诊断包需要趋势而不只是导出瞬间的一张快照。每 30s 留一条纯数字
-        // 资源样本，能看出 CPU 锁死 / 内存线性上涨发生在什么时间段。
+        // 每 30s 留一条资源样本,供诊断包看出 CPU 锁死 / 内存线性上涨的时间段。
         let resources = ProcessResourceSnapshot.capture()
         var resourceContext: [String: Any] = [
             "physical_footprint_bytes": resources.physicalFootprintBytes,
@@ -149,8 +142,7 @@ final class StallDetectorDriver {
         }
 
         // 5) 自动恢复:某 kind 已经 recoveryWindowSec 没新 verdict → 视为
-        // 解除,清 HealthMonitor 让状态栏黄标变回。原本只 report 不 clear,
-        // 一次警告之后图标永久卡在黄色。
+        // 解除,清 HealthMonitor 让状态栏黄标变回。
         let now = Date()
         let recent = StallDetector.shared.recent
         for kind in activeFaults {
@@ -212,9 +204,9 @@ private struct ProcessResourceSnapshot {
     }
 }
 
-/// `SIGKILL` / OOM 时进程没有机会写“我被杀了”。因此运行中持续覆盖一份很小的
-/// 状态文件，正常退出时改成 clean_exit；下次启动若仍是 running，就把上次最后
-/// 一份资源快照写进历史。这里只能证明“没有走正常退出”，不能单凭它断言原因。
+/// `SIGKILL` / OOM 时进程没机会写"被杀了"。运行中持续覆盖一份状态文件,正常退出时
+/// 改成 clean_exit;下次启动若仍是 running,把上次最后一份资源快照写进历史。
+/// ⚠️ 只能证明"没有走正常退出",不能单凭它断言原因。
 @MainActor
 final class RunTerminationTracker {
     static let shared = RunTerminationTracker()
@@ -349,9 +341,8 @@ final class RunTerminationTracker {
     }
 }
 
-/// 后台队列每 2 秒 ping 一次主线程。主线程连续 8 秒不响应时，自动用系统
-/// `sample` 抓一份调用栈。这样用户强退 / 重启后，诊断包仍能解释“刚才卡在哪”，
-/// 不需要用户在卡死时自己打开 Instruments。
+/// 后台队列每 2 秒 ping 一次主线程。主线程连续 8 秒不响应时,自动用系统
+/// `sample` 抓一份调用栈,写进诊断包。
 private final class MainThreadHangWatchdog: @unchecked Sendable {
     static let shared = MainThreadHangWatchdog()
 

@@ -184,9 +184,9 @@ struct NotificationCardView: View {
             ?? AttributedString(notification.body)
     }
 
-    /// 跟 colorScheme 切的 fill/stroke/shadow。原来钉死的全是 dark
-     /// 风格(black 30% 底 + white stroke + black 38% shadow),在 light
-     /// 主题下看着是"灰底 + 黑影晕开",非常突兀。
+    /// 跟 colorScheme 切换 fill/stroke/shadow —— 固定用 dark 风格
+     /// (black 30% 底 + white stroke + black 38% shadow)的话,在 light
+     /// 主题下会是"灰底 + 黑影晕开",很突兀。
     private var bgFill: Color {
         colorScheme == .light ? Color.white.opacity(0.85) : Color.black.opacity(0.30)
     }
@@ -264,7 +264,7 @@ struct NotificationCardView: View {
             .frame(height: 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // **clipShape 套在 VStack 整体上**——之前只 clip 了 background,
+        // **clipShape 套在 VStack 整体上** —— 只 clip background 的话,
         // 内容里的进度条 Rectangle 在底部直边,会"漏"出圆角之外露白。
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .background(
@@ -303,7 +303,7 @@ struct NotificationCardView: View {
         }
         // 进度条 + 自动消失由这个(可暂停)tick 驱动:hover 时暂停累加 elapsed
         // (见下面 onChange),跑满 timeout → service.timeoutReached 触发
-        // onTimeout + dismiss。原来用墙钟,hover 停不下来。
+        // onTimeout + dismiss。累加 tick 而非墙钟,这样 hover 能真正暂停倒计时。
         .onAppear { startTick() }
         .onDisappear { stopTick() }
         .onChange(of: hover) { _, hovering in

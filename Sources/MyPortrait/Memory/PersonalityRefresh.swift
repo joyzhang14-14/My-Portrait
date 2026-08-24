@@ -3,7 +3,7 @@ import os.log
 
 private let prLog = Logger(subsystem: "com.myportrait.memory", category: "personality-refresh")
 
-/// Personality 流水线 v2 总装 —— 不再三源齐发,改成 events 主导 + OCR 验证:
+/// Personality 流水线总装 —— events 主导 + OCR 验证:
 ///   1. events 源: 只看 weight > minEventWeight 的高权重事件
 ///   2. PersonalityAgent → 每个 tag 自带 ocr_keywords(LLM 给的搜索词)
 ///   3. OCR 验证: 当天命中 ocr_keywords 的帧数必须 ≥ minOCRFrames,
@@ -22,8 +22,6 @@ final class PersonalityRefresh {
     nonisolated static let minEventWeight: Double = 3.0
     /// OCR 验证门槛: tag.ocr_keywords 命中的当天帧数 ≥ 这个值才落盘。
     /// 15 帧 ~= 45 秒屏幕时间(15s/帧抽样),仍够说明"不是偶然飘过一眼"。
-    /// 原来 20(=1min)太严:LLM 常提抽象/概念关键词,逐字命中难凑够 20 帧,
-    /// 导致整天 tag 全被丢、personality 返回空。降到 15 减少误丢。
     nonisolated static let minOCRFrames: Int = 15
 
     struct Report: Sendable {

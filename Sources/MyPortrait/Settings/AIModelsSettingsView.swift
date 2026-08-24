@@ -1,10 +1,8 @@
 import SwiftUI
 
 /// AI Models — 本地采集模型的下载/状态面板(语音转录 / 声纹 / VAD)。
-/// 原 Connected providers 段(chat picker 可见性 + 单 model 勾选)已删 ——
-/// chat picker / Memory Parameter / Onboarding 现在直接读 Connections,
-/// 连了的 provider 一律列出,所有 model 都可选。schema 里 disabledProviderIds /
-/// enabledModelsByProvider 已一并下线。
+/// chat picker / Memory Parameter / Onboarding 直接读 Connections,连了的
+/// provider 一律列出,所有 model 都可选。
 struct AIModelsSettingsView: View {
     @State private var config = ConfigStore.shared
     /// 本地模型 ready 状态轮询(SpeakerModelStore.isOnDisk / WhisperKitWrapper.isOnDisk

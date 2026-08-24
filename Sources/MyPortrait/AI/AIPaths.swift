@@ -1,9 +1,7 @@
 import Foundation
 
 /// AI 子系统的文件布局。跟 capture 层一样统一在 `~/.portrait/` 下 ——
-/// 单一数据目录,易于备份 / 清理 / 迁移。旧版本曾分到
-/// `~/.portrait/`,启动时 `PathMigration` 把
-/// 旧位置的文件搬过来。
+/// 单一数据目录,易于备份 / 清理 / 迁移。
 enum AIPaths {
     static var supportDir: URL { Storage.rootURL }
 
@@ -11,7 +9,7 @@ enum AIPaths {
     /// 直接能用(TOML 里只有引用名),既不用重新绑定供应商,也不会把 API key
     /// 多复制一份到演示目录里。
     static var secretsDB: URL { supportDir.appendingPathComponent("secrets.sqlite") }
-    /// 聊天记录跟 dev mode 走("ai chat 的数据也会换成 dev 的")。
+    /// 聊天记录跟 dev mode 走。
     static var chatDB: URL    { Storage.uiRootURL.appendingPathComponent("chat.sqlite") }
     static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }
@@ -20,8 +18,8 @@ enum AIPaths {
     static var piModelsJSON: URL { piDir.appendingPathComponent("models.json") }
 
     /// AI agent 用的 CLI 工具目录(注入到 spawned subprocess 的 PATH 里)。
-    /// 启动时把 app 主二进制 symlink 进这里成 `mp-query`,agent 通过 bash
-    /// 直接调用拿屏幕数据。
+    /// 启动时在这里写一个 shell wrapper 成 `mp-query`(exec 主二进制),
+    /// agent 通过 bash 直接调用拿屏幕数据。
     static var binDir: URL { supportDir.appendingPathComponent("bin", isDirectory: true) }
     static var mpQueryLink: URL { binDir.appendingPathComponent("mp-query") }
     static var mpFoldersLink: URL { binDir.appendingPathComponent("mp-folders") }

@@ -143,8 +143,7 @@ final class ChatController {
 
         agent?.stop()
         agent = nil
-        // 转发用户在编辑态实际带的 chips/附件/PII 开关(caller 是真相来源),
-        // 不再丢掉编辑时新加的附件和改过的 chips。
+        // 转发用户在编辑态实际带的 chips/附件/PII 开关(caller 是真相来源)。
         send(newText, chips: chips, attachments: attachments, redactPII: redactPII)
     }
 
@@ -328,9 +327,8 @@ final class ChatController {
                     self.store.renameConversation(convId, to: Self.titleFromText(trimmed))
                     self.pendingTitleFromFirstMessage = false
                 } else if let convId = self.currentConvId {
-                    // RECENTS 顶部 = 真发消息(saveMessages 不再自动 touch,
-                    // 切对话 / picker 改 model 不算"活动")。第一条消息走 rename
-                    // 路径已经 UPDATE updated_at,这里只补后续 send。
+                    // RECENTS 顶部 = 真发消息(切对话 / picker 改 model 不算"活动")。
+                    // 第一条消息走 rename 路径已经 UPDATE updated_at,这里只补后续 send。
                     self.store.touchConversation(convId)
                 }
 

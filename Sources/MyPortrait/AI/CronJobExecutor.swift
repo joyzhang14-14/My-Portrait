@@ -103,9 +103,7 @@ enum CronJobExecutor {
         CronJobStore.shared.appendRun(runPlaceholder, to: cronJob.id)
 
         // 3. Persist user message **right now** so user can open the conv
-        //    while it's still running and see at least the prompt. 之前
-        //    一直等到 LLM 全跑完才 save,过程中点进去看到的是空 conv,
-        //    用户体验跟普通 chat 完全不对齐。
+        //    while it's still running and see at least the prompt.
         let userMsg = ChatMessage(role: .user, text: cronJob.prompt, time: startedAt)
         let assistantId = UUID()
         var assistant = ChatMessage(
@@ -141,8 +139,7 @@ enum CronJobExecutor {
             if !force, now.timeIntervalSince(lastPersist) < persistThrottle { return }
             lastPersist = now
             // userMsg 在上面已落盘一次且不再变;流式期间只有 assistant 在长,
-            // 单行 upsert 即可。之前每次全量 DELETE+重插整个 conv ——
-            // 不断变大的 parts_json 被重编码重写几百次,O(回复长度²) 写放大。
+            // 单行 upsert 即可(避免每次全量重写整个 conv 造成 O(回复长度²) 写放大)。
             store.upsertMessage(assistant, for: conv.id)
             // 通知前端:若正在看这条 conv,live 重读(像普通 chat 一样逐段刷)。
             Self.onConvUpdated(conv.id)
@@ -167,7 +164,6 @@ enum CronJobExecutor {
             // SKILL preamble — cron agent 也需要知道 mp-query / mp-folders
             // 子命令存在,否则它只能用注入的固定时间窗,没法跨日/跨模态查
             // (e.g. mp-query memories --scope portrait / mp-query writing)。
-            // 之前没注入是 cron 路径"惊艳感缺失"的主要原因之一。
             let skillPreamble = "\(MPQuerySkill.preamble)\n\n\(FoldersSkill.preamble)\n\n"
             let body = context.markdown.isEmpty
                 ? cronJob.prompt
@@ -301,15 +297,13 @@ enum CronJobExecutor {
     /// 抓回复里最后一个 `### Notify` **区块标题(行首 markdown heading)** 的
     /// 区块内容。返回 nil = LLM 没写真正的区块 → 跳过通知。
     ///
-    /// 三道边界(都来自真实翻车场景):
-    /// 1. **行首 heading**,不能裸 `range(of: "### Notify")`:LLM 解释自己
-    ///    "这次不追加 ### Notify"时那句话字面含它,旧逻辑把句尾当通知发出去。
-    /// 2. **fence 内不算**:cron prompt 教格式时 LLM 常在 ``` 代码块里写
-    ///    `### Notify\n<content>` 示例 —— fence 里的行首 heading 是引用,
-    ///    不是真区块,命中会发出一条由格式示例拼成的假通知。
-    /// 3. **到下一个 heading 为止**:LLM 把 Notify 放回复中间、后面还接
-    ///    `### Next steps` 等 section 时,不能把后续无关内容一并发出。
-    /// 最后要求 body 含**实质字符**(字母/数字/CJK),只剩标点空白也不发。
+    /// 三道边界:
+    /// 1. **行首 heading**,不能裸 `range(of: "### Notify")` 匹配:LLM 解释
+    ///    自己"这次不追加 ### Notify"时那句话字面含它,会被误判为通知。
+    /// 2. **fence 内不算**:``` 代码块里的格式示例不算真区块。
+    /// 3. **到下一个 heading 为止**:后面接的 `### Next steps` 等 section
+    ///    不能被一并当成通知发出去。
+    /// body 须含实质字符(字母/数字/CJK),只剩标点空白不发。
     static func extractNotifyBody(from buf: String) -> String? {
         // 行首(可有缩进)+ 2~6 个 # + Notify 词界 + 可选冒号(逐行匹配,锚定行首)。
         guard let notifyRe = try? NSRegularExpression(

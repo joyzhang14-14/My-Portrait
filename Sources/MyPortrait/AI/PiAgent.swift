@@ -144,9 +144,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
                 credential = try await ProviderAuth.resolveEnvValue(for: provider)
             }
         } catch {
-            // 这里以前把**所有**错误(401 refresh 失败 / 网络超时)都压成
-            // "credential missing",凭证明明在、只是刷不动时文案完全误导,
-            // 且真实原因彻底丢失。带上原因。
+            // 带上原因(401 刷新失败 / 网络超时等),不要笼统报 credential missing。
             DiagLog.warn("piagent.credential_failed", ctx: [
                 "provider": provider.piName, "error": error.localizedDescription,
             ])

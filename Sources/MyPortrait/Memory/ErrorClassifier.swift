@@ -11,8 +11,7 @@ import Foundation
 ///     solved 才清 retry_count → 立即重试;不点的话仍按 backoff cap 24h 自动试
 ///
 /// 设计原则:
-///   - 永不放弃 —— commit 1 删了 dead_letter,所有失败都会重试,只是频率受
-///     backoff 控制
+///   - 永不放弃 —— 所有失败都会重试,只是频率受 backoff 控制
 ///   - 不跨 provider 切 —— repair / fallback 只在用户当前 parameter 配的 provider
 ///     里完成
 ///   - 分类规则**保守**:不确定就归 .unknownTransient(默认桶 A,继续重试),

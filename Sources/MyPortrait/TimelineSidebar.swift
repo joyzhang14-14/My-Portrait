@@ -50,8 +50,7 @@ struct TimelineSidebar: View {
 
     private var focusedTimestamp: Date? { focusedFrame?.timestamp }
 
-    /// Solid dark backdrop. 原来还有个 translucent(毛玻璃)分支由
-    /// `translucentSidebar` toggle 切换,该开关已下线 —— 固定实色。
+    /// Solid dark backdrop —— 固定实色,不可切换。
     @ViewBuilder private var sidebarBackground: some View {
         SidebarBackdrop()
     }
@@ -147,9 +146,8 @@ struct TimelineSidebar: View {
 
     // MARK: section card wrapper
 
-    /// Wraps a section's header + rows in a solid 深色卡片。原来还有个
-    /// Liquid Glass 分支由 "Translucent sidebar" toggle 切换,该开关已下线 ——
-    /// 固定实色(可读性优先)。
+    /// Wraps a section's header + rows in a solid 深色卡片 —— 固定实色
+    /// (可读性优先),不可切换。
     @ViewBuilder
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         let card = VStack(alignment: .leading, spacing: Theme.Space.sm) {
@@ -158,9 +156,9 @@ struct TimelineSidebar: View {
         .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        // **fill / stroke 必须跟着 colorScheme 切** —— 之前钉死 white-on-X
-        // 在 Light 主题侧栏(奶白 + 浅薰衣草)上完全融成一片,看不见卡片
-        // 边界。Dark 仍是白底浮起,Light 改成 black 低透明做"压下去"的卡边。
+        // **fill / stroke 必须跟着 colorScheme 切** —— 固定成同一组值会在
+        // Light 主题侧栏(奶白 + 浅薰衣草)上跟背景融成一片,看不见卡片边界。
+        // Dark 是白底浮起,Light 用 black 低透明做"压下去"的卡边。
         let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
         let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
         card.background(
@@ -556,7 +554,7 @@ struct TimelineSidebar: View {
                     // 只在 chevron+文字像素上,点标题右边的空白没反应,显得"不灵敏"。
                     // 撑满 + contentShape 让整条都是命中区。y 轴命中区靠下面
                     // header HStack 的 minHeight(24)撑出来,**不再用 padding 撑高
-                    // 卡片本身** —— padding 会把卡片实际变高(用户反馈)。
+                    // 卡片本身** —— padding 会把卡片实际变高。
                     // 命中形状用 minHeight 高度的 Rectangle,撑满整个 header 行。
                     .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
                     .contentShape(Rectangle())
@@ -581,7 +579,7 @@ struct TimelineSidebar: View {
             }
             // header 行锁定最小高 24(= SidebarIconButton 高)。展开时搜索/垃圾桶
             // 图标(24pt)才出现,不锁高度的话 header 会从"一行小字"撑到 24pt,
-            // 把下面内容往下顶 —— 就是用户说的"展开往下蹭一点"。
+            // 把下面内容往下顶(展开时观感是往下蹭一点)。
             .frame(minHeight: 24)
 
             if !cronJobHistoryCollapsed {

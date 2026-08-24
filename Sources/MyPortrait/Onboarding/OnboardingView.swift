@@ -84,13 +84,10 @@ struct OnboardingView: View {
     /// 尺寸,等一个 runloop tick 让 NSHostingView / SwiftUI 完成对新尺寸的
     /// layout 传播,再翻 onboardingCompleted flag 切到 mainContent。
     ///
-    /// 之前的版本用了 `animate: true` 做 setFrame —— animate 会让 NSWindow
-    /// 在 runloop 里调度一个动画,过程中 contentView 的 frame 不会立刻
-    /// 是目标尺寸。等 onFinish() 翻 flag,SwiftUI 立刻重算 mainContent,
-    /// 这时拿到的 hosting view 尺寸还在动画的起点附近(老 720x560),
-    /// mainContent 第一帧就按那个尺寸 layout → 用户看到的"缩水主 UI"。
-    /// 动画跑完 hosting frame 才到 1200x835,但 SwiftUI 已经按小尺寸算完
-    /// 不会自动重排。点 sidebar 强制刷新 layout 才纠正过来。
+    /// ⚠️ 不能用 `animate: true` 做 setFrame —— animate 期间 contentView 的
+    /// frame 不会立刻是目标尺寸;若这时 onFinish() 翻 flag 让 SwiftUI 重算
+    /// mainContent,拿到的 hosting view 尺寸还在动画起点附近,第一帧就按小
+    /// 尺寸 layout,且动画跑完后 SwiftUI 不会自动重排,造成"缩水主 UI"。
     ///
     /// 修法:animate:false 让 setContentSize 同步走完;再用
     /// DispatchQueue.main.async 把 flag 翻动推到下个 runloop tick,
@@ -205,11 +202,8 @@ struct OnboardingView: View {
 
 // MARK: - Step header
 
-/// 每步的标题行 —— 标题 + ⓘ。
-///
-/// 原来每步标题下面都挂一段 13pt 灰字长解释,一上来就是一堵字,而且跟设置页
-/// 现在的做法(灰字一律收进 ⓘ)不一致。想看的人点一下就有,不想看的人
-/// 直接看下面的控件。
+/// 每步的标题行 —— 标题 + ⓘ。说明收进 ⓘ,不铺灰字长解释,跟设置页一致:
+/// 想看的人点一下就有,不想看的人直接看下面的控件。
 private struct StepHeader: View {
     let title: String
     var info: String? = nil

@@ -2,8 +2,7 @@ import Foundation
 
 /// Pipeline owner 标签 —— 让 "Stop" 能只停某一条 pipeline 的 LLM 子进程,
 /// 并发时不误杀别的 pipeline / chat。值在 PiAgentRegistry.$owner 这个
-/// task-local 上传播(经审计,所有 memory/writing LLM 生成点都是直接 await /
-/// 结构化并发,task-local 能传到 → 分组可靠)。
+/// task-local 上传播。
 enum PipelineOwner {
     static let event          = "event"
     static let distill        = "distill"
@@ -20,9 +19,9 @@ enum PipelineOwner {
 /// agent; `stopGroup(owner)` only those tagged with a pipeline owner (chat
 /// agents have owner == nil, so a per-pipeline Stop never touches chat).
 ///
-/// ⚠️ 别再按具体类型收窄:registry 曾只收 PiAgent,ClaudeCodeAgent 从不
-/// 注册 → memory provider 切到 claude-code 后 Stop / 60-min 兜底全是空枪
-/// ("killed 0 LLM process(es)"),任务杀不掉、进度条卡死。
+/// ⚠️ 别按具体类型收窄:必须同时收 PiAgent 和 ClaudeCodeAgent,否则
+/// Stop / 60-min 兜底会打空("killed 0 LLM process(es)"),任务杀不掉、
+/// 进度条卡死。
 ///
 /// Thread-safe (NSLock) because agents are not actor-isolated and spawn from
 /// whatever context the pipeline runs on.

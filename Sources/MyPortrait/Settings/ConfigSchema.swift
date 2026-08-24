@@ -120,12 +120,8 @@ struct MyPortraitConfig: Codable, Equatable {
         scheduler.portrait.modelLight = ""
     }
 
-    /// 一次性迁移(08-05 回退):`[capture.screen] transparent_wallpaper` 那个
-    /// 独立开关已经下线 —— 壁纸重新回到 `privacy.ignored_apps` 名单里
-    /// (ignoredApps 的语义改回"抠窗口、帧照拍"之后,壁纸挂在上面完全说得通)。
-    ///
-    /// 中间那版把 "Wallpaper" 从名单里摘掉过,直接删代码的话老 config 里
-    /// 壁纸就再也不遮了 —— 静默行为丢失。所以这里按旧开关的值补回来:
+    /// 一次性迁移(08-05 回退):`[capture.screen] transparent_wallpaper` 独立
+    /// 开关已下线,壁纸并入 `privacy.ignored_apps` 名单。按旧开关的值补回:
     /// 开着 → 补回名单;用户明确关过 → 不补。读完不回写旧 key,下次保存
     /// 自动从文件消失。
     private mutating func migrateWallpaperToggle(
@@ -401,10 +397,9 @@ struct SchedulerSettings: Codable, Equatable {
                                                 dayOfWeek: 0, dayOfMonth: 1)
     var personality:    SchedulerConfig = .init(frequency: .weekly, timeOfDay: "05:00",
                                                 dayOfWeek: 0, dayOfMonth: 1)
-    // 07-30 update:writingCapture 整块从 scheduler 配置里摘掉 —— typing capture 从零
-    // 重写,新逻辑不跑模型,既不需要 provider/model 也不需要定时批处理。
-    // 旧 config.toml 里残留的 [scheduler.writing_capture] 会被忽略
-    //(dflt 解码只认 CodingKeys 里列出的键)。
+    // (07-30 update)writingCapture 已从 scheduler 配置摘掉:typing capture 不跑
+    // 模型,不需要 provider/model 或定时批处理。旧 config.toml 里残留的
+    // [scheduler.writing_capture] 会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
     /// writing_style 提炼链路。auto 模式 → 直接落 portrait/writing_style/,不审。
     /// 默认 off。
     var writingStyle:    SchedulerConfig = .init(frequency: .off,    timeOfDay: "04:30",

@@ -2,7 +2,6 @@ import Foundation
 
 /// Vision 采集流水线的累计指标。actor 隔离写入,snapshot() 拍快照给 StallDetector。
 ///
-/// 借鉴 upstream `crates/screenpipe-engine/src/routes/health.rs` 的 vision_snap 结构。
 /// 三类计数器组合可以区分:
 ///   - 活跃健康(attempts↑ persisted↑ dedup≈0)
 ///   - 静屏误报(attempts↑ persisted 平 dedup↑)
@@ -98,12 +97,9 @@ actor AudioMetrics {
     private(set) var chunksTranscribed: UInt64 = 0
     private(set) var startedAtMs: Int64 = 0
 
-    /// 起点 = **用户把 Audio Capture 打开的那一刻**(Services 里订阅
-    /// `audioCaptureEnabled` 推过来),不是 app 启动、也不是转录器 boot。
+    /// 起点 = 用户把 Audio Capture 打开的那一刻,不是 app 启动、也不是转录器 boot。
     /// 关掉 → `markStopped()` 清零,Health 页显示 "—",再打开重新计时。
-    ///
-    /// StallDetector 也读 `startedAtMs`:>0 现在等于"用户开着音频采集",
-    /// 比原来的"转录调度器起来了"更贴它想要的语义(采集关着报音频卡死没意义)。
+    /// StallDetector 也读 `startedAtMs`:>0 等于"用户开着音频采集"。
     func markStarted() {
         if startedAtMs == 0 { startedAtMs = VisionMetrics.nowMs() }
     }

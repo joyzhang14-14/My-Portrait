@@ -191,7 +191,7 @@ enum RetranscribeQwenCLI {
                     return
                 }
 
-                // 5. APPLY:默认跳过 2GB+ 全库备份(用户原话:bak 占空间)。
+                // 5. APPLY:默认跳过 2GB+ 全库备份(占空间)。
                 // 真要回滚开 MYPORTRAIT_KEEP_BAK=1。
                 try await pool.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
                 if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {

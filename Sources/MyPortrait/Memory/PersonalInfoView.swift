@@ -103,9 +103,7 @@ struct PersonalInfoView: View {
     private var languagesEditor: some View {
         let langs = config.current.personalInfo.languages
         // spacing **必须是 0** —— SettingsCard 的内容槽本身是 VStack(spacing: 0),
-        // Name / Identity 那两张卡的行和分隔线因此是贴死的。这里原来写了 8,
-        // 等于每行之间多塞 8pt,分隔线悬在空档中间而不是紧贴上下行,
-        // 整张 Languages 卡的行距就跟别的卡对不上。
+        // Name / Identity 那两张卡的行和分隔线因此是贴死的,非 0 会跟别的卡行距对不上。
         VStack(alignment: .leading, spacing: 0) {
             if langs.isEmpty {
                 Text("No languages added.")
@@ -115,12 +113,8 @@ struct PersonalInfoView: View {
                     .padding(.vertical, 4)
             } else {
                 // 直接复用 SettingsRow,跟上面 First name / Nationality 等字段
-                // 用同一套排版,SwiftUI Text 对齐细节由组件负责,不再自己拼
-                // HStack(避免 SF Symbol 字形重心 + 单行 vs 双行的视觉错位)。
-                // icon 用 character.book.closed.fill —— 之前 character.bubble.fill
-                // 有向下小尾巴,bounding box 比文字高、视觉重心偏上,HStack
-                // center 之后整行内容跑到上半,下半留空看着不平衡。book 这个
-                // 图标 bounds 矩形对称无尾巴,跟文字 center 对齐严丝合缝。
+                // 用同一套排版。icon 用 character.book.closed.fill —— bounds
+                // 矩形对称无尾巴,跟文字 center 对齐严丝合缝。
                 ForEach(Array(langs.enumerated()), id: \.offset) { idx, lang in
                     SettingsRow(lang, icon: "character.book.closed.fill") {
                         Button {

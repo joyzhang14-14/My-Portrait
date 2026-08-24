@@ -187,8 +187,7 @@ struct GraphRendererView: View {
     @Binding var hoveredId: Int?
     /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
     let contextNodeId: Int?
-    /// 开着浮窗卡片的球(nil = 无):与 hover 同款闪烁持续提示(07-10
-    /// "有显示卡片的球也需要持续闪光")。
+    /// 开着浮窗卡片的球(nil = 无):与 hover 同款闪烁持续提示(07-10 update)。
     let cardNodeId: Int?
     /// 主球自定义照片(已圆形裁剪,07-11):非 nil 时叠画在主球上。
     let mainBallImage: NSImage?
@@ -209,14 +208,12 @@ struct GraphRendererView: View {
     @State private var dragMode: DragMode = .idle
     @State private var lastDragTranslation: CGSize = .zero
     /// 被拖球的实时指针世界坐标(引用盒)。⚠️ 不能用 @State 存值:
-    /// 120Hz 指针事件逐个写 @State 会在 TimelineView 60fps 之外再触发
-    /// 全画布重绘+视图 diff —— 拖球卡而平移不卡的真凶(07-02 update 实测)。
+    /// 120Hz 指针事件逐帧写 @State 会触发全画布重绘,导致拖球卡顿(07-02 update)。
     /// class 挂在 @State 上只保身份,改字段不惊动 SwiftUI,渲染每帧读。
     private final class DragWorldBox {
         var world: SIMD2<Float>?
         /// 被拖球对主球的禁区半径(hub=主球+隐形圆+净空;叶=主球+球径+pad)。
-        /// 07-02 交互修:物理会把闯进来的球顶回去而渲染钉指针,两边打架
-        /// 显示成"球在主球里、叶和线在外面";指针目标先夹出禁区,两边一致。
+        /// 指针目标先夹出禁区,与物理碰撞侧保持一致,避免显示与物理错位(07-02 update)。
         var minDist: Float = 0
         /// 本段手势的起点(自愈用:手势被系统取消时 onEnded 不回调,
         /// 状态机会卡在上一段拖拽 —— 新手势起点变了即强制复位)。
@@ -226,11 +223,10 @@ struct GraphRendererView: View {
         var leafBallR: Float = 0
     }
     @State private var dragWorldBox = DragWorldBox()
-    /// 光标屏幕位(07-09 update "鼠标不 hover 在球上就不该闪"):hover 只在
-    /// 鼠标**移动**时判定,但球自己会动(拖后归位/物理沉降),球从静止
-    /// 光标下挪走后判定不更新 → 在新位置继续闪。存光标位,每帧用它对
-    /// **当前**球位重新命中,球挪出光标即不闪。引用盒:onContinuousHover
-    /// 写它不额外触发重绘(hoveredId 的更新已负责触发)。
+    /// 光标屏幕位(07-09 update):hover 只在鼠标**移动**时判定,但球自己会动
+    /// (拖后归位/物理沉降),需要每帧用光标位对**当前**球位重新命中,球挪出
+    /// 光标即不闪。引用盒:onContinuousHover 写它不额外触发重绘
+    /// (hoveredId 的更新已负责触发)。
     private final class HoverBox { var screen: CGPoint? = nil }
     @State private var hoverBox = HoverBox()
     @State private var lastMagnification: CGFloat = 1
@@ -461,10 +457,8 @@ struct GraphRendererView: View {
         guard !hideLinks else { return }   // 极简观感:不画连接线(07-11 update)
         switch GraphConstants.edgeStyle {
         case .line:
-            // 纯线模式(2026-07-01 update:锥形卡顿且效果不明显,先用等宽细线)。
-            // 全部边合进**一条 Path 一次 stroke**:同一路径内重叠只画一遍
-            // (天然不加深),无离屏层,像素量最小 —— 也是修卡顿的关键
-            // (旧方案的 drawLayer 每帧强制全屏离屏合成)。
+            // 纯线模式(2026-07-01 update)。全部边合进**一条 Path 一次 stroke**:
+            // 同一路径内重叠只画一遍(天然不加深),无离屏层,像素量最小。
             var linePath = Path()
             // 橡皮筋也全并**一条 Path 一次 fill**(07-02 update:带与带重叠
             // 不加深;细线是另一次 stroke,线×带重叠照旧加深)。
@@ -473,8 +467,7 @@ struct GraphRendererView: View {
                 let pa = camera.worldToScreen(snap[e.a], viewSize: size)
                 let pb = camera.worldToScreen(snap[e.b], viewSize: size)
                 if culled(pa, pb, size) { continue }
-                // hub↔主球 = 橡皮筋(07-02 update 点名恢复,仅这 ≤11 条;
-                // 当年卡顿是 960 条全锥形+离屏层,几条无感);叶边保持细线
+                // hub↔主球 = 橡皮筋(仅这 ≤11 条,07-02 update);叶边保持细线
                 if e.b == 0, scene.nodes[e.a].kind.isHub {
                     appendTaperedEdge(&bandPath, e: e, pa: pa, pb: pb)
                 } else {
@@ -508,19 +501,15 @@ struct GraphRendererView: View {
         let len = max((dx * dx + dy * dy).squareRoot(), 0.001)
         dx /= len; dy /= len
         let nx = -dy, ny = dx
-        // 橡皮筋是实体,宽度随缩放走(世界单位×zoom,07-02 update:锚屏幕
-        // 像素的话缩得很小时连接处显得巨大);上限仍 = 球的屏幕半径。
+        // 橡皮筋是实体,宽度随缩放走(世界单位×zoom,07-02 update);上限仍 = 球的屏幕半径。
         // 单边锥形(07-02 update):只有主球端(b)粗,连到对面球(a)最细。
-        // 拉伸变细(07-02 update:像橡皮筋被拉长):粗端不变,细端 ÷ 拉伸比。
+        // 拉伸变细(07-02 update):粗端不变,细端 ÷ 拉伸比。
         let wb = min(e.halfWidthB, scene.nodes[e.b].radius) * zoom
         let stretch = max(Double(len) / zoom / max(e.restLength, 1), 1)
         let wa = wb * GraphConstants.waistRatio / stretch
         let wm = wa
-        // 粗端锚在主球**球面附近**不锚球心(07-02 update:拉伸时主球端视觉
-        // 变粗 —— 锚球心时可见根部 = 锥形在球缘处的采样,线越长采样越贴
-        // 近球心全宽);再往球心埋进弦深 √(R²−w²)(07-02 二次反馈:正锚球
-        // 面时平头切口两角在圆外,连接处清晰可见 —— 埋到弦上切口整个藏进
-        // 球里)。可见根部恒宽,拉伸只动细端。
+        // 粗端锚在主球**球面附近**不锚球心(07-02 update),再往球心埋进弦深
+        // √(R²−w²),让切口整个藏进球里。可见根部恒宽,拉伸只动细端。
         let ballR = scene.nodes[e.b].radius * zoom
         let bury = max(ballR * ballR - wb * wb, 0).squareRoot()
         let rim = min(bury, Double(len) * 0.5)
@@ -572,8 +561,7 @@ struct GraphRendererView: View {
                 let tk = min(max(t + off / len, 0), 1)
                 let x = pa.x + (pb.x - pa.x) * tk
                 let y = pa.y + (pb.y - pa.y) * tk
-                // 杠全长 = 连线**实际渲染粗细** × pulseTickLengthScale
-                //(07-01 二次反馈:不能用锥形概念宽度,线改细后严重超标)。
+                // 杠全长 = 连线**实际渲染粗细**(非锥形概念宽度) × pulseTickLengthScale(07-01 update)。
                 let halfLen = localHalfWidth(edge: e, forward: forward, t: tk,
                                              fromNode: p.fromNode, toNode: to,
                                              screenLen: Double(len))
@@ -681,10 +669,9 @@ struct GraphRendererView: View {
                 }
             }
         }
-        // 对比色闪烁(正弦脉动):浅色闪黑、深色闪白。hover 中的球
-        // (需求 §5)+ 开着浮窗卡片的球
-        // (07-10 update "有显示卡片的球也需要持续闪光提示")。两者可能是
-        // 不同的球 → 各闪各的;同一颗只画一次。
+        // 对比色闪烁(正弦脉动):浅色闪黑、深色闪白。hover 中的球 + 开着浮窗
+        // 卡片的球都持续闪烁(07-10 update)。两者可能是不同的球 → 各闪各的;
+        // 同一颗只画一次。
         var blinkIds: [Int] = []
         if let hid = hoveredId { blinkIds.append(hid) }
         if let cid = cardNodeId, cid != hoveredId { blinkIds.append(cid) }
@@ -699,7 +686,7 @@ struct GraphRendererView: View {
         // 脉冲抵达 → 被击中的球点亮闪一下(07-11 update)。抵达时刻 = start+duration,
         // 之后 pulseArriveFlashSec 内对比色线性淡出。**沿途每一跳都闪**(含 folder/
         // 分区 hub):主球 2 跳级联时 folder 先亮、脉冲再从它散向自家 event 球逐个
-        // 亮起 = 连锁激活的观感(用户要的"壮观")。同一球被多发命中取最亮的那发。
+        // 亮起,形成连锁激活的观感。同一球被多发命中取最亮的那发。
         if !pulses.isEmpty {
             let elapsed = date.timeIntervalSince(pulseStart)
             var flash: [Int: Double] = [:]
@@ -783,10 +770,9 @@ struct GraphRendererView: View {
                 }
                 if dragMode == .idle {
                     dragWorldBox.startLoc = v.startLocation
-                    // 起拖即清 hover(07-09 update "拖球松手后球还在原地闪白光"):
-                    // 拖拽期 onContinuousHover 冻结(下面 guard),hoveredId 若不
-                    // 清会一直指着起拖前那颗球 —— 松手后鼠标不动无事件重判,那颗
-                    // 球就在归位后的老位置持续闪。拖拽/平移都不算悬停,清掉;
+                    // 起拖即清 hover(07-09 update):拖拽期 onContinuousHover 冻结
+                    // (下面 guard),hoveredId 若不清会一直指着起拖前那颗球,松手后
+                    // 鼠标不动也会在老位置持续闪。拖拽/平移都不算悬停,清掉;
                     // 松手后移动鼠标重新命中才恢复。
                     hoveredId = nil
                     hoverBox.screen = nil
@@ -796,10 +782,9 @@ struct GraphRendererView: View {
                         dragMode = .node(idx)
                         onCameraInterrupt()   // 起拖:中止残留的自动取景
                         let node = scene.nodes[idx]
-                        // 拖拽碰撞箱=球本身(07-08 update "想玩拖动时蓝球穿插在
-                        // 灰球丛中"):hub 拖拽禁区也降为球级(原为主球+隐形圆
-                        // +最大叶径)—— 引擎侧被拖 hub 的隐形圆同步全关,
-                        // 指针能带球钻进别家叶丛;禁区只剩主球和别家 hub 球本体
+                        // 拖拽碰撞箱=球本身(07-08 update):hub 拖拽禁区降为球级,
+                        // 引擎侧被拖 hub 的隐形圆同步全关,指针能带球钻进别家叶丛;
+                        // 禁区只剩主球和别家 hub 球本体
                         dragWorldBox.minDist = Float(GraphConstants.mainRadius + node.radius)
                             + GraphConstants.mainCollisionPadding
                         dragWorldBox.leafBallR = Float(node.radius)

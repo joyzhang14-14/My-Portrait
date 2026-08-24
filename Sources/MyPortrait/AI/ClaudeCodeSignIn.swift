@@ -38,8 +38,8 @@ enum ClaudeCodeSignIn {
         UserDefaults.standard.removeObject(forKey: key)
     }
 
-    // 08-09 update 删掉了 refreshInBackground():定时重读钥匙串会隔三差五弹一次系统
-    // 授权框,而且完全没必要 —— 存的是**绝对时间戳**,"还剩几天"自己会往下走。
-    // 只有用户重新 `claude login` 之后那个值才变,那时他会去点 Detect,由
-    // refreshFromKeychain() 刷新。**别再加回定时重读。**
+    // 08-09 update:别再加定时重读钥匙串 —— 会隔三差五弹系统授权框且没必要,
+    // 存的是**绝对时间戳**,"还剩几天"自己会往下走。只有用户重新
+    // `claude login` 之后那个值才变,那时他会去点 Detect,由
+    // refreshFromKeychain() 刷新。
 }
