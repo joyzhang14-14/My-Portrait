@@ -100,12 +100,12 @@ Read this before picking something up — it is the difference between "add a fe
 
 Four SwiftPM targets, one product:
 
-| Target                | Kind           | Role                                                                                                                                                                            |
-| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MyPortrait`          | executable     | The app. Everything below lives here.                                                                                                                                           |
-| `GraphPhysics` | library | The Neural Graph force simulation, kept separate so it can be reasoned about (and iterated on) without dragging in the app. Pure simulation — no persistence, no app state. |
-| `MyPortraitObjC`      | library (ObjC) | A `@try/@catch` shim. `AVAudioEngine.installTap` / `engine.start` throw `NSException` on format mismatch, which would terminate a Swift process; this converts it to `NSError`. |
-| `PortraitSleepHelper` | executable | Privileged root LaunchDaemon, launched on demand via `SMAppService`. Its only job is running `pmset disablesleep` so a lid-closed Mac on AC stays awake long enough to finish a long call — and **auto-resetting** when the app crashes, quits or is killed, so the machine is never left pinned awake. |
+| Target                | Kind           | Role                                                                                                                                                                                                                                                                                                    |
+| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MyPortrait`          | executable     | The app. Everything below lives here.                                                                                                                                                                                                                                                                   |
+| `GraphPhysics`        | library        | The Neural Graph force simulation, kept separate so it can be reasoned about (and iterated on) without dragging in the app. Pure simulation — no persistence, no app state.                                                                                                                             |
+| `MyPortraitObjC`      | library (ObjC) | A `@try/@catch` shim. `AVAudioEngine.installTap` / `engine.start` throw `NSException` on format mismatch, which would terminate a Swift process; this converts it to `NSError`.                                                                                                                         |
+| `PortraitSleepHelper` | executable     | Privileged root LaunchDaemon, launched on demand via `SMAppService`. Its only job is running `pmset disablesleep` so a lid-closed Mac on AC stays awake long enough to finish a long call — and **auto-resetting** when the app crashes, quits or is killed, so the machine is never left pinned awake. |
 
 ### Module map
 
@@ -431,6 +431,13 @@ move or delete anything under `~/.screenpipe` — `cp`, never `mv`.
 `.xcodeproj` does not.
 
 **Trust `swift build`, not SourceKit** for same-module symbol errors.
+
+**Release builds go through `scripts/release/build.sh` only — never Xcode's Product → Archive.**
+GUI archives force every SwiftPM package to build a x86_64 slice (project-level `ARCHS` /
+`ONLY_ACTIVE_ARCH` do not propagate to packages), and `qwen3-asr-swift` uses `Float16`, a type
+that does not exist on macOS x86_64 — so a GUI archive fails to compile. The script passes
+`ARCHS=arm64` on the `xcodebuild` command line, which does reach packages. Known and accepted;
+the app is arm64-only.
 
 **When a transitive pin blocks a package you need, trace it to the offending direct dependency
 and consider dropping it.** Precedent: the bge-m3 embedding package held old upper bounds on
