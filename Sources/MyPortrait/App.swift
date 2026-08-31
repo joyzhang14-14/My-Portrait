@@ -639,6 +639,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 配合 applicationShouldTerminateAfterLastWindowClosed = false。
         window.isReleasedWhenClosed = false
 
+        // 关窗 / ⌘H 隐藏 → 卸掉 Timeline 缩略图缓存(NSCache 上限 512MB)。
+        // 视图树关窗后原地存活,NSCache 又只认系统内存压力,后台常驻进程
+        // 等不到回收 —— 不主动清,翻过 Timeline 的几百 MB 会一直挂在
+        // 后台(实测 ~700MB)。重开窗口只需从磁盘重新解码缩略图,无感。
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { _ in ImageThumbnailCache.shared.removeAll() }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didHideNotification, object: nil, queue: .main
+        ) { _ in ImageThumbnailCache.shared.removeAll() }
+
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

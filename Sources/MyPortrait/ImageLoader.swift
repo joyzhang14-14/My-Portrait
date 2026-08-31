@@ -17,6 +17,11 @@ final class ImageThumbnailCache {
     }()
 
     func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
+
+    /// 全清。窗口关闭 / app 隐藏时调 —— NSCache 只在系统内存压力下才自动
+    /// 回收,后台常驻进程等不到那一天,不主动清就一直占着(实测可达数百 MB)。
+    /// 代价只是重开窗口后缩略图从磁盘重新解码。
+    func removeAll() { cache.removeAllObjects() }
     func store(_ image: NSImage, for key: String) {
         // cost = 解码后近似字节数(像素宽×高×4),让 totalCostLimit 生效
         let rep = image.representations.first
