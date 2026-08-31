@@ -3,7 +3,7 @@ import SwiftUI
 /// Neural Graph 时间线的底部控制条(07-11 用户:仿 git / timeline,看每天的变化)。
 ///
 /// 直接在柱状图上按住拖动擦洗日期(比滑块更接近 Timeline 的手感);柱高 =
-/// 那天新诞生的 event 数。左右方向键逐日微调,空格播放/暂停。
+/// 那天新诞生的 event 数。逐日微调走左右方向键(在 GraphRootView 收键)。
 struct GraphTimelineBar: View {
     let index: EventTimeline.Index
     @Binding var day: Date

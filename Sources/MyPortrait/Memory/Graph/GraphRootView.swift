@@ -129,6 +129,8 @@ struct GraphRootView: View {
     @State private var timelineDay: Date = .distantPast
     @State private var timelineLoading = false
     @State private var timelinePlaying = false
+    /// 时间线模式下把键盘焦点抓过来,左右方向键才收得到(macOS 15 onKeyPress)。
+    @FocusState private var timelineFocused: Bool
 
     /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
     private var pulseScale: Double {
@@ -228,6 +230,12 @@ struct GraphRootView: View {
         // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 update)。
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
         .background(WindowDragBlocker())
+        // 左右方向键逐日切换(07-11 用户:不止用鼠标点)。只在时间线模式抢
+        // 焦点 —— 否则 focusable 会干扰浮窗里的输入控件。
+        .focusable(timelineIndex != nil)
+        .focused($timelineFocused)
+        .onKeyPress(.leftArrow) { stepTimeline(-1) }
+        .onKeyPress(.rightArrow) { stepTimeline(1) }
         .task(id: zone) { await reload() }
         // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
         .onChange(of: timelineDay) { _, d in
@@ -918,6 +926,22 @@ struct GraphRootView: View {
         timelineIndex = idx
         timelineDay = idx.range.upperBound
         applyTimelineDay(idx.range.upperBound)
+        timelineFocused = true
+    }
+
+    /// 左右方向键:逐日前后挪一天,夹在数据范围内。按键即停播放
+    /// (与拖动擦洗同样的语义:手动介入就不再自动跑)。
+    private func stepTimeline(_ delta: Int) -> KeyPress.Result {
+        guard let idx = timelineIndex else { return .ignored }
+        timelinePlaying = false
+        let cal = Calendar(identifier: .gregorian)
+        guard let nx = cal.date(byAdding: .day, value: delta, to: timelineDay) else {
+            return .handled
+        }
+        let clamped = min(max(cal.startOfDay(for: nx), idx.range.lowerBound),
+                          idx.range.upperBound)
+        if clamped != timelineDay { timelineDay = clamped }
+        return .handled
     }
 
     /// 退出 → 回到 live 图。
