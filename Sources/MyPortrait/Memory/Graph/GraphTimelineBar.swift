@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Neural Graph 时间线的底部控制条(07-11 用户:仿 git / timeline,看每天的变化)。
 ///
-/// 直接在柱状图上按住拖动擦洗日期(比滑块更接近 Timeline 的手感);柱高 =
-/// 那天新诞生的 event 数。逐日微调走左右方向键(在 GraphRootView 收键)。
+/// 柱高 = 那天新诞生的 event 数;**点**柱状图跳到那天。
+/// 换日三条路:点击、左右方向键(GraphRootView 订阅 AppKeyboard 广播)、播放。
 struct GraphTimelineBar: View {
     let index: EventTimeline.Index
     @Binding var day: Date
@@ -106,13 +106,13 @@ struct GraphTimelineBar: View {
                 ctx.stroke(head, with: .color(Theme.accent), lineWidth: 1.5)
             }
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { v in
-                        playing = false
-                        seek(toX: v.location.x, width: w)
-                    }
-            )
+            // 只接**点击**,不接拖动擦洗(08-31 用户):按住拖会连续换日,
+            // 快到陨石根本来不及归位,画面全是半路上的球。换日只剩三条路:
+            // 点柱状图、左右方向键、播放。
+            .onTapGesture(coordinateSpace: .local) { loc in
+                playing = false
+                seek(toX: loc.x, width: w)
+            }
             .frame(width: w, height: h)
         }
         .frame(height: 34)
