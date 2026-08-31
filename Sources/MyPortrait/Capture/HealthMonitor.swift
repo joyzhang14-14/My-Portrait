@@ -24,7 +24,48 @@ final class HealthMonitor: ObservableObject {
     private let log = Logger(subsystem: "com.joyzhang.myportrait", category: "health")
     private let healthLogQueue = DispatchQueue(label: "com.myportrait.health.log")
 
-    private init() {}
+    /// 当前停在哪个页面(ContentView 切页时更新)—— 内存采样行带上它,
+    /// 排查「RSS 缓慢膨胀跟哪个页面相关」。
+    var currentPage: String = "unknown"
+
+    private var memSamplerTimer: Timer?
+
+    private init() {
+        startMemorySampler()
+    }
+
+    // MARK: - 内存采样(排查 RSS 缓慢膨胀)
+
+    /// 每 5 分钟往 health.log 写一行 `MEM <footprint>MB page=<页面>`。
+    /// footprint = phys_footprint,与 Activity Monitor 的「内存」列同口径。
+    /// 复现「膨胀到 700MB」时翻日志即可看到增长曲线与页面的对应关系。
+    private func startMemorySampler() {
+        let t = Timer(timeInterval: 300, repeats: true) { _ in
+            Task { @MainActor in
+                let mb = Self.physFootprintMB()
+                guard mb > 0 else { return }
+                HealthMonitor.shared.appendLog(
+                    line: "[\(Self.iso(Date()))] MEM \(mb)MB page=\(HealthMonitor.shared.currentPage)")
+            }
+        }
+        t.tolerance = 30
+        RunLoop.main.add(t, forMode: .common)
+        memSamplerTimer = t
+    }
+
+    /// 本进程 phys_footprint(MB)。取不到返回 -1。
+    nonisolated static func physFootprintMB() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return -1 }
+        return Int(info.phys_footprint / (1024 * 1024))
+    }
 
     /// 报告异常。`component` 例:"KeystrokeLedger.tap";`reason` 自由文本。
     /// 同名 component 重复 report 只刷新时间不重复写 log(降噪)。

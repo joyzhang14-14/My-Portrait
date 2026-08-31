@@ -59,6 +59,14 @@ struct ContentView: View {
     /// theme = "system" 时用它把系统外观解析成具体的 light/dark。
     @State private var systemAppearance = SystemAppearanceMonitor.shared
 
+    /// health.log 内存采样行用的页面名。memories 再分图谱/文字 ——
+    /// 排查「停在图谱页内存涨」这类问题时粒度刚好。
+    private var pageName: String {
+        guard let sel = selection else { return "none" }
+        if sel == .memories { return "memories(\(String(describing: memoryViewMode)))" }
+        return sel.rawValue
+    }
+
     var body: some View {
         // 首启:onboardingCompleted == false → 主 view 完全不渲染,只显示
         // OnboardingView 填满整个窗口;走完 flag 置 true → SwiftUI 重新计算
@@ -86,7 +94,13 @@ struct ContentView: View {
         // 直接告诉 SwiftUI 切。"system" → nil 跟 macOS 走。
         .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme,
                                                    systemIsDark: systemAppearance.isDark))
-        .onAppear { bindProviderResolver() }
+        .onAppear {
+            bindProviderResolver()
+            HealthMonitor.shared.currentPage = pageName
+        }
+        // 内存采样行(health.log 的 MEM)要标当前页面 —— 切页/切图谱模式时更新。
+        .onChange(of: selection) { _, _ in HealthMonitor.shared.currentPage = pageName }
+        .onChange(of: memoryViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
         }
