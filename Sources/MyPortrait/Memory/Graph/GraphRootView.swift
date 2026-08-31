@@ -195,6 +195,7 @@ struct GraphRootView: View {
                                     pulseStart: pulseStart,
                                     pulseFlashSec: pulseFlashSec,
                                     hideLinks: config.current.display.graphHideLinks,
+                                    interactive: !timelinePlaying,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
                                     contextNodeId: contextNodeId,
@@ -213,6 +214,8 @@ struct GraphRootView: View {
                                     onContextRecolor: beginRecolor,
                                     onContextDelete: beginFolderDelete)
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
+                        // 08-31 用户:播放期间整块画布不可点击、不可 hover。
+                        .allowsHitTesting(!timelinePlaying)
 
                     // 浮窗:锚在球旁,物理在动时跟着球走(同一时钟)。
                     if let fid = floatNodeId, fid < scene.nodes.count {
@@ -233,6 +236,14 @@ struct GraphRootView: View {
                     }
                 } else {
                     Color.clear
+                }
+                // 播放护盾:画布已 allowsHitTesting(false),这层负责把"任何点击"
+                // 变成暂停(08-31 用户)。层级在浮窗/时间线条/HUD 之下 ——
+                // 条上的播放键、擦洗与 HUD 按钮不受影响。
+                if timelinePlaying {
+                    Color.black.opacity(0.001)
+                        .contentShape(Rectangle())
+                        .onTapGesture { timelinePlaying = false }
                 }
                 if let tidx = timelineIndex {
                     VStack {
@@ -279,6 +290,8 @@ struct GraphRootView: View {
         // 播放:逐日推进,到头自停
         .task(id: timelinePlaying) {
             guard timelinePlaying, let tidx = timelineIndex else { return }
+            hoveredId = nil
+            floatNodeId = nil
             let cal = Calendar(identifier: .gregorian)
             while timelinePlaying, !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(220))

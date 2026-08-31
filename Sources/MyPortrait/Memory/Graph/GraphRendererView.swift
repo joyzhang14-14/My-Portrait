@@ -183,6 +183,9 @@ struct GraphRendererView: View {
     /// 极简观感(07-11 update):隐藏全部连接线 + 脉冲白杠。**纯展示** —— 脉冲照常
     /// 级联、球仍按原时序逐个点亮(连锁激活保留),只是传播过程不可见。
     let hideLinks: Bool
+    /// false = 画布整体不可交互(08-31 用户:时间线播放期间)。命中/hover 全停 ——
+    /// 光标位置也不再记,否则球自己动到停在原处的光标下还会闪。
+    let interactive: Bool
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
     /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
@@ -248,6 +251,7 @@ struct GraphRendererView: View {
          pulses: [GraphPulse], pulseStart: Date,
          pulseFlashSec: Double = GraphConstants.pulseArriveFlashSec,
          hideLinks: Bool = false,
+         interactive: Bool = true,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
          contextNodeId: Int? = nil,
          cardNodeId: Int? = nil,
@@ -267,6 +271,7 @@ struct GraphRendererView: View {
         self.pulseStart = pulseStart
         self.pulseFlashSec = pulseFlashSec
         self.hideLinks = hideLinks
+        self.interactive = interactive
         self._camera = camera
         self._hoveredId = hoveredId
         self.contextNodeId = contextNodeId
@@ -333,6 +338,12 @@ struct GraphRendererView: View {
                 )
             )
             .onContinuousHover { phase in
+                // 不可交互(播放中)→ 清掉并且不记光标位。
+                guard interactive else {
+                    if hoverBox.screen != nil { hoverBox.screen = nil }
+                    if hoveredId != nil { hoveredId = nil }
+                    return
+                }
                 // 拖拽中不做 hover 命中(无意义且每事件都是一次全量扫)。
                 guard dragMode == .idle else { return }
                 switch phase {
@@ -432,7 +443,7 @@ struct GraphRendererView: View {
             // 每帧按当前光标位重判 hover(球会自己动;球挪出光标即不闪,
             // 挪进即闪)。与 hoveredId 不同才异步同步(off 渲染路径,避免
             // "更新态在视图更新中";flash/label 下一帧即跟上,肉眼无差)。
-            if dragMode == .idle, let hs = hoverBox.screen {
+            if interactive, dragMode == .idle, let hs = hoverBox.screen {
                 let live = hitTest(screen: hs, snap: snap, viewSize: size)
                 if live != hoveredId { DispatchQueue.main.async { hoveredId = live } }
             }
