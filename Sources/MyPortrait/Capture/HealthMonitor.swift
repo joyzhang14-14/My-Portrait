@@ -44,8 +44,14 @@ final class HealthMonitor: ObservableObject {
             Task { @MainActor in
                 let mb = Self.physFootprintMB()
                 guard mb > 0 else { return }
+                // build 标记:debug(⌘R)与正式包写同一个 health.log,不标分不清。
+                #if DEBUG
+                let flavor = "debug"
+                #else
+                let flavor = "release"
+                #endif
                 HealthMonitor.shared.appendLog(
-                    line: "[\(Self.iso(Date()))] MEM \(mb)MB page=\(HealthMonitor.shared.currentPage)")
+                    line: "[\(Self.iso(Date()))] MEM \(mb)MB page=\(HealthMonitor.shared.currentPage) build=\(flavor)")
             }
         }
         t.tolerance = 30
