@@ -1120,8 +1120,12 @@ struct GraphRootView: View {
         // 前一天的数走轻量算法(只遍历 weight 字典,不跑几何装配)。
         let cal = Calendar(identifier: .gregorian)
         let day0 = cal.startOfDay(for: d)
+        // ⚠️ Unclassified 是**虚拟**分区球,节点 kind 同样是 .folder
+        // (slug = unclassifiedSlug),不能算进 folder 数 —— 否则当天多算 1、
+        // 而前一天走的 liveFolderCount 只数真 folder,没变化的日子会常显 (+1)。
         let folders = built.nodes.reduce(into: 0) {
-            if case .folder = $1.kind { $0 += 1 }
+            if case .folder(let slug) = $1.kind,
+               slug != GraphSceneBuilder.unclassifiedSlug { $0 += 1 }
         }
         let prev = cal.date(byAdding: .day, value: -1, to: day0).map {
             $0 < idx.range.lowerBound ? 0 : EventTimeline.liveFolderCount(idx, on: $0)
