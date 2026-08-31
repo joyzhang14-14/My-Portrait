@@ -627,7 +627,7 @@ struct ScreenCaptureSettingsView: View {
     var body: some View {
         // dev mode:capture / privacy 属于后台 section,永远读真实 config,
         // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
-        SettingsPage("Screen Capture",
+        SettingsPage("Screen Capture & Timeline",
                      onResetCurrentPage: {
                          config.mutate {
                              $0.capture.screen = .init()
@@ -792,10 +792,13 @@ struct ScreenCaptureSettingsView: View {
         }
     }
 
-    /// 采集总开关单独一张卡,排在页面最上面(与下面的「什么时候暂停」区分开)。
+    /// 全局采集总开关单独一张卡,排在页面最上面(与下面的「什么时候暂停」区分开)。
+    /// 屏幕帧是 timeline 的骨架 —— 没有它,音频/打字采集到的东西挂不到任何
+    /// 时间线上,所以这个开关同时门控**所有**采集(音频/打字跟着停)。
     private var screenToggleCard: some View {
         SettingsCard {
-            SettingsRow("Screen Capture",
+            SettingsRow("Screen capture & other captures",
+                        info: "Screen capture is the backbone of your timeline — every other capture (audio, typing) hangs on it. Turning this off stops **all** capture; the individual audio and typing switches keep their positions and come back when you turn this on again.",
                         icon: "display") {
                 Toggle("", isOn: config.binding(\.capture.screen.enabled)).labelsHidden().toggleStyle(.switch)
             }

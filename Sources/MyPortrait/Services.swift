@@ -337,19 +337,25 @@ final class Services {
             }
             .store(in: &settingsCancellables)
 
-        // 音频采集订阅。effective = enabled && mic granted && !music && !锁屏暂停。
+        // 音频采集订阅。effective = 全局总开关 && enabled && mic granted && !music && !锁屏暂停。
+        // capture.screen.enabled 是**全局采集总开关**:关掉时音频也停(音频自己的
+        // 开关保持原位,总开关重开后自动恢复)。
         // music 在播 → 整体暂停采集（pauseOnMusicApp；关闭时 musicDetected 恒 false）。
         // 锁屏 且 recordAudioWhileLocked 关 → 暂停（解锁后 sink 重评估自动恢复）。
-        Publishers.CombineLatest4(
-            settings.$audioCaptureEnabled,
-            permissions.$microphone,
-            musicMonitor.$musicDetected,
-            screenLockMonitor.$screenLocked
+        Publishers.CombineLatest(
+            Publishers.CombineLatest4(
+                settings.$audioCaptureEnabled,
+                permissions.$microphone,
+                musicMonitor.$musicDetected,
+                screenLockMonitor.$screenLocked
+            ),
+            settings.$screenCaptureEnabled
         )
-            .map { [logger] enabled, perm, music, locked in
+            .map { [logger] tuple, master in
+                let (enabled, perm, music, locked) = tuple
                 let lockPause = locked && !ConfigStore.shared.privacy.recordAudioWhileLocked
-                let effective = !music && !lockPause && perm.isGranted && enabled
-                logger.notice("audio sink: enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) lockPause=\(lockPause, privacy: .public) → effective=\(effective, privacy: .public)")
+                let effective = master && !music && !lockPause && perm.isGranted && enabled
+                logger.notice("audio sink: master=\(master, privacy: .public) enabled=\(enabled, privacy: .public) micPerm=\(perm.isGranted, privacy: .public) music=\(music, privacy: .public) lockPause=\(lockPause, privacy: .public) → effective=\(effective, privacy: .public)")
                 return effective
             }
             .removeDuplicates()
@@ -374,21 +380,22 @@ final class Services {
             .store(in: &settingsCancellables)
 
         // 系统音频订阅。系统音频也需要 microphone 权限（CATapDescription 路径）。
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             Publishers.CombineLatest4(
                 settings.$systemAudioCaptureEnabled,
                 permissions.$microphone,
                 musicMonitor.$musicDetected,
                 screenLockMonitor.$screenLocked
             ),
-            settings.$audioCaptureEnabled
+            settings.$audioCaptureEnabled,
+            settings.$screenCaptureEnabled
         )
-            .map { tuple, masterEnabled in
+            .map { tuple, audioEnabled, master in
                 let (sysEnabled, perm, music, locked) = tuple
-                // 系统音频是 Audio Capture 的子功能 —— master 关掉时也必须停。
-                // 否则关了 Audio Capture,loopback tap(走 CATapDescription,要 mic
-                // 权限)仍在跑,菜单栏 mic 指示灯一直亮。
-                guard masterEnabled else { return false }
+                // 系统音频是 Audio Capture 的子功能 —— 音频开关或全局总开关
+                // 任一关掉时都必须停。否则 loopback tap(走 CATapDescription,
+                // 要 mic 权限)仍在跑,菜单栏 mic 指示灯一直亮。
+                guard master, audioEnabled else { return false }
                 if music { return false }
                 if locked && !ConfigStore.shared.privacy.recordAudioWhileLocked { return false }
                 guard perm.isGranted else { return false }
@@ -425,7 +432,7 @@ final class Services {
         if ProcessInfo.processInfo.environment["MYPORTRAIT_NO_TYPING"] == "1" {
             logger.info("TypingObserver SKIPPED (MYPORTRAIT_NO_TYPING=1)")
         } else {
-            applyTypingCapture(enabled: ConfigStore.shared.capture.typingCaptureEnabled)
+            applyTypingCapture(enabled: Self.typingEffectiveEnabled())
             observeTypingCapture()
             // AX 权限是 typing observer 的硬门禁。用户在系统设置里授权后，
             // PermissionMonitor 3 秒轮询会捕获到 → 把 idle 的 observer 拾起。
@@ -433,7 +440,7 @@ final class Services {
                 .removeDuplicates()
                 .sink { [weak self] status in
                     guard let self, status == .granted,
-                          ConfigStore.shared.capture.typingCaptureEnabled else { return }
+                          Self.typingEffectiveEnabled() else { return }
                     self.logger.info("accessibility granted — starting typing observer")
                     self.typingObserver.start()
                 }
@@ -441,8 +448,15 @@ final class Services {
         }
     }
 
-    /// 监听 ConfigStore.capture.typingCaptureEnabled（vim 改 TOML / UI 编辑都走它），
-    /// 翻 true → typingObserver.start()，翻 false → stop()。
+    /// 打字采集的**有效**开关 = 自己的开关 && 全局采集总开关(capture.screen.enabled)。
+    /// 总开关关掉 = 所有采集停;打字自己的开关保持原位,总开关重开后恢复。
+    private static func typingEffectiveEnabled() -> Bool {
+        let c = ConfigStore.shared.capture
+        return c.typingCaptureEnabled && c.screen.enabled
+    }
+
+    /// 监听 typingCaptureEnabled 与全局总开关（vim 改 TOML / UI 编辑都走它），
+    /// 有效值翻 true → typingObserver.start()，翻 false → stop()。
     /// withObservationTracking 一次性，onChange 里递归重注册。
     private func observeTypingCapture() {
         let store = ConfigStore.shared
@@ -450,13 +464,14 @@ final class Services {
         // 任意无关设置变更都会进 onChange。必须 diff 真值再调 applyTypingCapture,
         // 否则 typing 开着但 AX 未授权时,改任何设置(切主题 / vim 改 TOML)都会
         // 重新 requestAccessibility + 弹 modal 权限对话框。
-        let seen = store.current.capture.typingCaptureEnabled
+        let seen = Self.typingEffectiveEnabled()
         withObservationTracking {
             _ = store.capture.typingCaptureEnabled
+            _ = store.capture.screen.enabled
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                let now = ConfigStore.shared.capture.typingCaptureEnabled
+                let now = Self.typingEffectiveEnabled()
                 if now != seen {
                     self.applyTypingCapture(enabled: now)
                 }

@@ -38,10 +38,14 @@ final class CaptureLampState: ObservableObject {
     @Published private(set) var screen = Lamp(on: false, reason: "off")
     @Published private(set) var audio = Lamp(on: false, reason: "off")
     @Published private(set) var typing = Lamp(on: false, reason: "off")
+    /// 全局采集总开关(capture.screen.enabled)关着 —— 图标连橙色大球一起熄灭。
+    @Published private(set) var masterOff = false
 
-    /// 三盏灯的组合 → 资源名 `MenuBarLamp-S1-A0-T1`。
+    /// 三盏灯的组合 → 资源名 `MenuBarLamp-S1-A0-T1`;总开关关掉 → 全灭变体
+    /// (大球也是灰的)。
     var assetName: String {
-        "MenuBarLamp-S\(screen.on ? 1 : 0)-A\(audio.on ? 1 : 0)-T\(typing.on ? 1 : 0)"
+        masterOff ? "MenuBarLamp-Off"
+                  : "MenuBarLamp-S\(screen.on ? 1 : 0)-A\(audio.on ? 1 : 0)-T\(typing.on ? 1 : 0)"
     }
 
     private var cancellables = Set<AnyCancellable>()
@@ -183,11 +187,14 @@ final class CaptureLampState: ObservableObject {
         }
         let appName = frontName
         let bundleId = frontBundleId
+        // capture.screen.enabled 是**全局采集总开关**:关了三路全停。
+        let master = cfg.capture.screen.enabled
+        if masterOff != !master { masterOff = !master }
 
         // ---- 屏幕(紫) ----
         var s = Lamp(on: true, reason: nil)
-        if !cfg.capture.screen.enabled {
-            s = Lamp(on: false, reason: "Screen capture is switched off.")
+        if !master {
+            s = Lamp(on: false, reason: "All capture is switched off.")
         } else if !granted(\.screenRecording) {
             s = Lamp(on: false, reason: "No screen-recording permission — nothing can be captured.")
         } else if pause.screenAsleep {
@@ -207,7 +214,9 @@ final class CaptureLampState: ObservableObject {
 
         // ---- 音频(黄) ----
         var a = Lamp(on: true, reason: nil)
-        if !cfg.capture.audio.enabled {
+        if !master {
+            a = Lamp(on: false, reason: "All capture is switched off.")
+        } else if !cfg.capture.audio.enabled {
             a = Lamp(on: false, reason: "Audio capture is switched off.")
         } else if !granted(\.microphone) {
             a = Lamp(on: false, reason: "No microphone permission — nothing can be recorded.")
@@ -218,7 +227,9 @@ final class CaptureLampState: ObservableObject {
 
         // ---- 打字(蓝) ----
         var t = Lamp(on: true, reason: nil)
-        if !cfg.capture.typingCaptureEnabled {
+        if !master {
+            t = Lamp(on: false, reason: "All capture is switched off.")
+        } else if !cfg.capture.typingCaptureEnabled {
             t = Lamp(on: false, reason: "Typing capture is switched off.")
         } else if !granted(\.accessibility) {
             t = Lamp(on: false, reason: "No accessibility permission — keystrokes can't be read.")

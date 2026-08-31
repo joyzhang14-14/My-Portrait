@@ -42,7 +42,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         self.menu = NSMenu()
         self.statusHeader = NSMenuItem(title: "—", action: nil, keyEquivalent: "")
         self.statusHeader.isEnabled = false
-        self.screenToggle = NSMenuItem(title: "Screen Capture", action: nil, keyEquivalent: "")
+        self.screenToggle = NSMenuItem(title: "All Capture (Screen)", action: nil, keyEquivalent: "")
         self.audioToggle = NSMenuItem(title: "Audio Capture", action: nil, keyEquivalent: "")
         self.inputDeviceMenuItem = NSMenuItem(title: "Input device", action: nil, keyEquivalent: "")
         self.typingToggle = NSMenuItem(title: "Typing Capture", action: nil, keyEquivalent: "")
@@ -109,8 +109,12 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // MARK: - 真实录音状态（= 意图开关 && 没暂停 && 权限已授）
 
     /// capture 开关的单一真相是 ConfigStore，不读 settings 镜像（镜像可能 desync）。
+    /// screen.enabled 是**全局采集总开关**:关掉 = 音频/打字也全停(各自的开关
+    /// 保持原位,总开关重开后恢复)。
     private var screenCaptureWanted: Bool { ConfigStore.shared.capture.screen.enabled }
-    private var audioCaptureWanted: Bool { ConfigStore.shared.capture.audio.enabled }
+    private var audioCaptureWanted: Bool {
+        ConfigStore.shared.capture.audio.enabled && screenCaptureWanted
+    }
 
     /// 屏幕**实际**是否在录。菜单勾选 / 图标 tooltip 用这个，不用裸的 toggle 意图。
     private var screenRecordingActive: Bool {
@@ -122,8 +126,10 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         audioCaptureWanted && permissions.microphone.isGranted
     }
 
-    /// 打字采集开关意图（单一真相 ConfigStore）。
-    private var typingCaptureWanted: Bool { ConfigStore.shared.capture.typingCaptureEnabled }
+    /// 打字采集开关意图（单一真相 ConfigStore;受全局总开关门控）。
+    private var typingCaptureWanted: Bool {
+        ConfigStore.shared.capture.typingCaptureEnabled && screenCaptureWanted
+    }
 
     /// 打字采集**实际**是否在跑。需要 Accessibility 权限。
     private var typingCaptureActive: Bool {
@@ -326,7 +332,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
         // 开关 on 但实际没录 → 标题给出原因，别让用户以为坏了。
         screenToggle.title = Self.toggleTitle(
-            base: "Screen Capture",
+            base: "All Capture (Screen)",
             wanted: screenCaptureWanted,
             active: screenRecordingActive,
             permission: permissions.screenRecording
