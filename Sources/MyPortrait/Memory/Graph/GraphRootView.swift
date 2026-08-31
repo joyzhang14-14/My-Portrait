@@ -32,6 +32,34 @@ final class GraphSession {
     }
 }
 
+/// 时间线的方向键监听(只在时间线模式存活)。SwiftUI 的 focusable/onKeyPress
+/// 在这个画布上拿不到第一响应者,沿用项目里的本地事件监听惯例。
+@MainActor
+final class TimelineKeyMonitor {
+    private var monitor: Any?
+
+    func start(onLeft: @escaping () -> Void, onRight: @escaping () -> Void) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { ev in
+            // 正在编辑文本(folder 重命名 / 改色输入框)→ 原样放行,
+            // 否则方向键被吞掉、光标动不了。
+            if let r = NSApp.keyWindow?.firstResponder,
+               r is NSTextView || r is NSTextField { return ev }
+            // 123 = ←,124 = →(keyCode 与键盘布局无关,比字符可靠)
+            switch ev.keyCode {
+            case 123: onLeft();  return nil   // 吞掉,免得系统响一声
+            case 124: onRight(); return nil
+            default:  return ev
+            }
+        }
+    }
+
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+    }
+}
+
 /// 图谱区域的「拖背景移动窗口」拦截器:AppKit 的窗口拖动机制会 hitTest 到
 /// 光标下最深的 NSView 并查它的 mouseDownCanMoveWindow —— 这里返回 false,
 /// SwiftUI 手势(平移/拖球)不受影响(走 hosting view 的手势识别)。
@@ -129,8 +157,8 @@ struct GraphRootView: View {
     @State private var timelineDay: Date = .distantPast
     @State private var timelineLoading = false
     @State private var timelinePlaying = false
-    /// 时间线模式下把键盘焦点抓过来,左右方向键才收得到(macOS 15 onKeyPress)。
-    @FocusState private var timelineFocused: Bool
+    /// 方向键监听句柄(只在时间线模式挂着)。
+    @State private var timelineKeyMonitor: TimelineKeyMonitor? = nil
 
     /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
     private var pulseScale: Double {
@@ -230,13 +258,10 @@ struct GraphRootView: View {
         // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 update)。
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
         .background(WindowDragBlocker())
-        // 左右方向键逐日切换(07-11 用户:不止用鼠标点)。只在时间线模式抢
-        // 焦点 —— 否则 focusable 会干扰浮窗里的输入控件。
-        .focusable(timelineIndex != nil)
-        .focused($timelineFocused)
-        .onKeyPress(.leftArrow) { stepTimeline(-1) }
-        .onKeyPress(.rightArrow) { stepTimeline(1) }
         .task(id: zone) { await reload() }
+        // ⚠️ 监听器留着会**全局**吞掉方向键(离开图谱后别处也按不动),
+        // 所以视图消失 / 换画布都必须摘掉。
+        .onDisappear { leaveTimeline(zone: zone) }
         // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
         .onChange(of: timelineDay) { _, d in
             guard timelineIndex != nil, d != .distantPast else { return }
@@ -268,6 +293,8 @@ struct GraphRootView: View {
         }
         // 换画布:相机存回会话;浮窗/脉冲不跨画布。
         .onChange(of: zone) { oldZone, _ in
+            // 换画布 → 退出时间线(portrait 没有 event 日期轴)。
+            leaveTimeline(zone: oldZone)
             GraphSession.shared.entries[oldZone]?.camera = camera
             floatNodeId = nil
             pulses = []
@@ -926,22 +953,49 @@ struct GraphRootView: View {
         timelineIndex = idx
         timelineDay = idx.range.upperBound
         applyTimelineDay(idx.range.upperBound)
-        timelineFocused = true
+        startTimelineKeys()
     }
 
     /// 左右方向键:逐日前后挪一天,夹在数据范围内。按键即停播放
     /// (与拖动擦洗同样的语义:手动介入就不再自动跑)。
-    private func stepTimeline(_ delta: Int) -> KeyPress.Result {
-        guard let idx = timelineIndex else { return .ignored }
+    private func stepTimeline(_ delta: Int) {
+        guard let idx = timelineIndex else { return }
         timelinePlaying = false
         let cal = Calendar(identifier: .gregorian)
-        guard let nx = cal.date(byAdding: .day, value: delta, to: timelineDay) else {
-            return .handled
-        }
+        guard let nx = cal.date(byAdding: .day, value: delta, to: timelineDay) else { return }
         let clamped = min(max(cal.startOfDay(for: nx), idx.range.lowerBound),
                           idx.range.upperBound)
         if clamped != timelineDay { timelineDay = clamped }
-        return .handled
+    }
+
+    /// 挂方向键监听。**不用 SwiftUI 的 .focusable/.onKeyPress** —— 画布里有
+    /// NSViewRepresentable 子视图在抢第一响应者,那套拿不到焦点(实测按键无
+    /// 反应)。改用本项目已有的本地事件监听惯例(RightClickHighlight /
+    /// GraphRendererView 同款),绕开焦点系统。
+    private func startTimelineKeys() {
+        timelineKeyMonitor?.stop()
+        let m = TimelineKeyMonitor()
+        m.start(onLeft: { stepTimeline(-1) }, onRight: { stepTimeline(1) })
+        timelineKeyMonitor = m
+    }
+
+    private func stopTimelineKeys() {
+        timelineKeyMonitor?.stop()
+        timelineKeyMonitor = nil
+    }
+
+    /// 离开时间线态的统一收口(退出按钮 / 换画布 / 视图消失三个出口共用)。
+    /// ⚠️ 必须作废会话缓存的指纹:引擎此刻停在**某一天**的节点集合上,若不作废,
+    /// 下次 reload 会走"指纹没变→复用引擎"那条去调 updateScene,而那道
+    /// `count == n` 门会因节点数对不上而**静默 return**,留下场景与引擎错位的
+    /// 坏状态(画面停在旧的一天且再也不更新)。改掉指纹 → 走重建分支。
+    private func leaveTimeline(zone z: GraphZone) {
+        guard timelineIndex != nil else { return }
+        timelinePlaying = false
+        stopTimelineKeys()
+        timelineIndex = nil
+        timelineDay = .distantPast
+        GraphSession.shared.entries[z]?.fingerprint = ["__timeline_exit__"]
     }
 
     /// 退出 → 回到 live 图。
@@ -951,10 +1005,7 @@ struct GraphRootView: View {
     /// 走重建分支(旧引擎正常 shutdown + 新引擎重新炸开)。
     @MainActor
     private func exitTimeline() async {
-        timelinePlaying = false
-        timelineIndex = nil
-        timelineDay = .distantPast
-        GraphSession.shared.entries[zone]?.fingerprint = ["__timeline_exit__"]
+        leaveTimeline(zone: zone)
         await reload()
     }
 
