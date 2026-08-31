@@ -161,6 +161,8 @@ struct GraphRootView: View {
     @State private var timelineKeyMonitor: TimelineKeyMonitor? = nil
     /// 正在淡出(⑤ 不要一下子消失)。淡出期间条还在但不接事件。
     @State private var timelineFading = false
+    /// 当日变化统计(换日时算一次,给底条显示)。
+    @State private var timelineStats = EventTimeline.DayStats.zero
 
     /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
     private var pulseScale: Double {
@@ -252,10 +254,7 @@ struct GraphRootView: View {
                             index: tidx,
                             day: $timelineDay,
                             playing: $timelinePlaying,
-                            nodeCount: scene.nodes.count,
-                            folderCount: scene.nodes.filter {
-                                if case .folder = $0.kind { return true } else { return false }
-                            }.count,
+                            stats: timelineStats,
                             onExit: { exitTimelineWithFade(thenFocus: nil) })
                             .padding(.bottom, 18)
                             .opacity(timelineFading ? 0 : 1)
@@ -1115,8 +1114,23 @@ struct GraphRootView: View {
         guard let idx = timelineIndex else { return }
         let info = ConfigStore.shared.current.personalInfo
         let name = [info.alias, info.firstName].first { !$0.isEmpty } ?? "Me"
-        applyRemappedScene(
-            GraphSceneBuilder.buildEventsTimeline(index: idx, on: d, userName: name))
+        let built = GraphSceneBuilder.buildEventsTimeline(index: idx, on: d, userName: name)
+        applyRemappedScene(built)
+        // 当日变化:folder 数直接数刚建好的场景(免费且必与画面一致);
+        // 前一天的数走轻量算法(只遍历 weight 字典,不跑几何装配)。
+        let cal = Calendar(identifier: .gregorian)
+        let day0 = cal.startOfDay(for: d)
+        let folders = built.nodes.reduce(into: 0) {
+            if case .folder = $1.kind { $0 += 1 }
+        }
+        let prev = cal.date(byAdding: .day, value: -1, to: day0).map {
+            $0 < idx.range.lowerBound ? 0 : EventTimeline.liveFolderCount(idx, on: $0)
+        } ?? 0
+        timelineStats = EventTimeline.DayStats(
+            born: idx.birthsPerDay[day0] ?? 0,
+            merged: idx.mergesPerDay[day0] ?? 0,
+            folders: folders,
+            folderDelta: folders - prev)
     }
 
     private func reload() async {

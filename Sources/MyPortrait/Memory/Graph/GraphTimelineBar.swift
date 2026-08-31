@@ -8,9 +8,9 @@ struct GraphTimelineBar: View {
     let index: EventTimeline.Index
     @Binding var day: Date
     @Binding var playing: Bool
-    /// 当天的图谱规模(由 root 传入,省得这里再算一遍)。
-    let nodeCount: Int
-    let folderCount: Int
+    /// 当日变化(root 在换日时算一次传进来 —— 放在 body 里算会每次渲染
+    /// 都全量重算 weight)。
+    let stats: EventTimeline.DayStats
     var onExit: () -> Void
 
     private let cal = Calendar(identifier: .gregorian)
@@ -49,9 +49,9 @@ struct GraphTimelineBar: View {
                 .foregroundStyle(Theme.textPrimary.opacity(0.92))
                 .frame(width: 108, alignment: .leading)
 
-            Text("\(nodeCount) nodes · \(folderCount) folders")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
+            // 当天的**变化**(总数右上角 HUD 已有,这里不重复):
+            // 新增 = 那天诞生的 event;合并 = 那天并进已有 event 的重复发生。
+            dayStats
 
             Spacer()
 
@@ -116,6 +116,25 @@ struct GraphTimelineBar: View {
             .frame(width: w, height: h)
         }
         .frame(height: 34)
+    }
+
+    /// 当天变化:+新增 · 合并 · folder 数(带增减)。
+    @ViewBuilder private var dayStats: some View {
+        HStack(spacing: 8) {
+            Text("+\(stats.born)")
+                .foregroundStyle(stats.born > 0 ? Theme.accent : Color.secondary)
+            Text("\(stats.merged) merged")
+                .foregroundStyle(.secondary)
+            HStack(spacing: 3) {
+                Text("\(stats.folders) folders").foregroundStyle(.secondary)
+                if stats.folderDelta != 0 {
+                    Text(stats.folderDelta > 0 ? "(+\(stats.folderDelta))"
+                                               : "(\(stats.folderDelta))")
+                        .foregroundStyle(stats.folderDelta > 0 ? Theme.accent : .orange)
+                }
+            }
+        }
+        .font(.system(size: 10, design: .monospaced))
     }
 
     private func seek(toX x: CGFloat, width: CGFloat) {

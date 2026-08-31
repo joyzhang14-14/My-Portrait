@@ -1,4 +1,5 @@
 import Foundation
+import GraphPhysics
 
 /// 图谱时间线的历史重建(07-11 用户:给 neural graph 做时间线,看每天的变化)。
 ///
@@ -51,6 +52,15 @@ enum EventTimeline {
         let liveFolders: Set<String>
     }
 
+    /// 时间线条要显示的当日**变化**(总数右上角 HUD 已有,条上不重复)。
+    struct DayStats: Equatable {
+        var born = 0          // 那天新诞生的 event
+        var merged = 0        // 那天并进已有 event 的重复发生(Tier-1 合并)
+        var folders = 0       // 那天上画布的 folder 数
+        var folderDelta = 0   // 与前一天相比的增减
+        static let zero = DayStats()
+    }
+
     /// 解析一次的索引。拖动日期时只用它,不再碰磁盘。
     struct Index {
         let entries: [Entry]
@@ -60,6 +70,10 @@ enum EventTimeline {
         let range: ClosedRange<Date>
         /// 每天新诞生的 event 数(时间轴柱状图用)。
         let birthsPerDay: [Date: Int]
+        /// 每天**合并**进已有 event 的重复发生数(pipeline 的 Tier-1 重复检测:
+        /// 同一件事再次发生时往 occurrences 追加一天,而不是新建一条)。
+        /// = 该天出现在某条 event 的 occurrences 里、但那天不是它的诞生日。
+        let mergesPerDay: [Date: Int]
     }
 
     // MARK: - 载入
@@ -80,6 +94,7 @@ enum EventTimeline {
         // 扫全部 event 文件
         var entries: [Entry] = []
         var births: [Date: Int] = [:]
+        var merges: [Date: Int] = [:]
         let fm = FileManager.default
         guard fm.fileExists(atPath: eventsDir.path),
               let en = fm.enumerator(at: eventsDir, includingPropertiesForKeys: nil,
@@ -102,6 +117,7 @@ enum EventTimeline {
                                  impact: file.impact ?? 0,
                                  occurrenceDays: days, born: born, join: nil))
             births[born, default: 0] += 1
+            for d in days where d != born { merges[d, default: 0] += 1 }
         }
         guard !entries.isEmpty else { return nil }
         entries.sort { $0.relPath < $1.relPath }   // 规范顺序(节点身份跨天恒定)
@@ -127,7 +143,7 @@ enum EventTimeline {
         let lo = entries.map(\.born).min()!
         let hi = max(entries.map(\.born).max()!, cal.startOfDay(for: Date()))
         return Index(entries: entries, folders: folders, range: lo...hi,
-                     birthsPerDay: births)
+                     birthsPerDay: births, mergesPerDay: merges)
     }
 
     // MARK: - 按日重算
@@ -147,6 +163,19 @@ enum EventTimeline {
         }
         let live = Set(idx.folders.filter { $0.value.created <= d }.map(\.key))
         return DayState(day: d, weight: weight, folderOf: folderOf, liveFolders: live)
+    }
+
+    /// 那天真正**上画布**的 folder 数。用与场景同一道门(核心球 = weight ≥
+    /// beltWeightMax,且不少于 folderMinCoreEvents 个),所以数字与画面一致 ——
+    /// 但只遍历 weight 字典,不必为了一个数字跑整套几何装配。
+    static func liveFolderCount(_ idx: Index, on day: Date,
+                                params: WeightCalculator.Params = .default) -> Int {
+        let st = state(idx, on: day, params: params)
+        var core: [String: Int] = [:]
+        for (rel, w) in st.weight where w >= GraphConstants.beltWeightMax {
+            if let slug = st.folderOf[rel] { core[slug, default: 0] += 1 }
+        }
+        return core.values.filter { $0 >= GraphConstants.folderMinCoreEvents }.count
     }
 
     /// 某条 event 在某天的 weight —— 与 WeightCalculator 同一公式,只是把
