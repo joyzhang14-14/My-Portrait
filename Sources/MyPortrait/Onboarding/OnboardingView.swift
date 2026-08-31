@@ -278,7 +278,8 @@ private struct PermissionsStep: View {
 
     /// 「合盖时保持运行」的 root helper 是否已被系统批准(SMAppService)。**不是 TCC
     /// 权限**,PermissionMonitor 管不到,下面 .task 自己轮询。
-    @State private var helperApproved = false
+    /// nil = 首轮还没读到 → 药丸转圈,不显示"Not granted"占位。
+    @State private var helperApproved: Bool? = nil
 
     /// 4 项 **TCC** 都 granted 才算"全过"。任何一项 .denied / .unknown 都阻塞 Next。
     /// ⚠️ 合盖 helper **不计入** —— 它是可选增强(不是采集层),没批准也不该拦着用户 Next。
@@ -371,7 +372,7 @@ private struct PermissionsStep: View {
             }
             Spacer(minLength: 8)
             HStack(spacing: 6) {
-                if !item.state.isGranted, let request = item.request {
+                if !item.state.isGranted, !item.state.isPending, let request = item.request {
                     Button("Allow") { request() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)

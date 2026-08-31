@@ -1,11 +1,14 @@
 import SwiftUI
 
 /// 一项系统权限的状态。TCC 是三态;非 TCC 的后台 helper 只有开/关,映到
-/// granted / denied。
+/// granted / denied;首次状态还没读回来时用 checking(UI 转圈,不显示
+/// "Not granted" —— 那是查询结果,不是默认值)。
 enum PermissionState {
-    case granted, denied, unknown
+    case granted, denied, unknown, checking
 
     var isGranted: Bool { self == .granted }
+    /// 还在查 —— 此时不该显示 Allow / Open Settings 按钮。
+    var isPending: Bool { self == .checking }
 }
 
 /// App 用到的一项系统权限。
@@ -31,7 +34,8 @@ enum PermissionCatalog {
 
     /// `helperApproved`:合盖 helper 是 SMAppService 后台项,**不是 TCC**,
     /// PermissionMonitor 的轮询管不到,由调用方自己查了传进来。
-    static func items(monitor: PermissionMonitor, helperApproved: Bool) -> [PermissionItem] {
+    /// nil = 本次还没查到(视图刚出现,首轮读数未返回)→ 显示转圈。
+    static func items(monitor: PermissionMonitor, helperApproved: Bool?) -> [PermissionItem] {
         [
             PermissionItem(
                 id: "screen",
@@ -76,7 +80,7 @@ enum PermissionCatalog {
                 icon: "bolt.fill",
                 title: "Background activity helper",
                 why: "Runs the nightly analysis while your Mac is idle or the lid is shut. **Never while you're using it**.",
-                state: helperApproved ? .granted : .denied,
+                state: helperApproved.map { $0 ? .granted : .denied } ?? .checking,
                 request: { SleepHelperClient.shared.enable() },
                 openSettings: { SleepHelperClient.shared.openSystemSettings() }
             ),
@@ -98,18 +102,26 @@ struct PermissionStatusPill: View {
     let state: PermissionState
 
     var body: some View {
-        let (label, color): (String, Color) = {
-            switch state {
-            case .granted: return ("Granted", .green)
-            case .denied:  return ("Not granted", .orange)
-            case .unknown: return ("Unknown", .gray)
-            }
-        }()
-        return Text(label)
-            .font(.system(size: 10, weight: .medium))
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(color.opacity(0.20))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
+        if state == .checking {
+            // 查询中:转圈,不给文字结论 —— 状态未知时说"Not granted"是误报。
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.6)
+                .frame(height: 18)
+        } else {
+            let (label, color): (String, Color) = {
+                switch state {
+                case .granted:  return ("Granted", .green)
+                case .denied:   return ("Not granted", .orange)
+                case .unknown, .checking: return ("Unknown", .gray)
+                }
+            }()
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(color.opacity(0.20))
+                .foregroundStyle(color)
+                .clipShape(Capsule())
+        }
     }
 }

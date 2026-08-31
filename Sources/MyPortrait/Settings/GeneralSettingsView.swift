@@ -7,7 +7,9 @@ struct GeneralSettingsView: View {
     /// Permissions 卡片用。3s 轮询 TCC,用户在系统设置里改完这里自动跟上。
     @StateObject private var permissionMonitor = PermissionMonitor()
     /// 合盖 helper(SMAppService 后台项)是否已批准 —— 不是 TCC,单独轮询。
-    @State private var helperApproved = false
+    /// nil = 首轮还没读到(SMAppService.status 要问 launchd,慢一拍)→ 药丸转圈,
+    /// 不显示"Not granted"占位。
+    @State private var helperApproved: Bool? = nil
 
     var body: some View {
         SettingsPage("General",
@@ -131,7 +133,7 @@ struct GeneralSettingsView: View {
                 SettingsRow(item.title, info: item.why, icon: item.icon) {
                     HStack(spacing: 8) {
                         PermissionStatusPill(state: item.state)
-                        if !item.state.isGranted {
+                        if !item.state.isGranted, !item.state.isPending {
                             if let request = item.request {
                                 Button("Allow") { request() }
                                     .font(.system(size: 12, weight: .medium))
