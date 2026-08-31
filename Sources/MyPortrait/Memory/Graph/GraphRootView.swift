@@ -243,7 +243,7 @@ struct GraphRootView: View {
                             folderCount: scene.nodes.filter {
                                 if case .folder = $0.kind { return true } else { return false }
                             }.count,
-                            onExit: { Task { await exitTimeline() } })
+                            onExit: { Task { await exitTimelineKeepingLayout() } })
                             .padding(.bottom, 18)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -705,7 +705,21 @@ struct GraphRootView: View {
             // 主球没有取景变换 → 立即发。取景中途被新交互打断 → onDone 不
             // 回调,那一发作废。
             if scene.nodes[id].hubBubbleRadius != nil {
-                frameCameraToFolder(id) { triggerPulse(from: id) }
+                if timelineIndex != nil {
+                    // 07-11 用户:时间线模式下点 folder = 进 folder 视图 →
+                    // 自动退出时间线(且不重排布局)。⚠️ 换完场景节点集合会变,
+                    // 下标可能指到别的球 —— 先记住身份(slug),换完按身份重新
+                    // 定位再取景。
+                    let key = GraphSession.fingerprint(of: scene)[id]
+                    Task {
+                        await exitTimelineKeepingLayout()
+                        guard let ni = GraphSession.fingerprint(of: scene)
+                            .firstIndex(of: key) else { return }
+                        frameCameraToFolder(ni) { triggerPulse(from: ni) }
+                    }
+                } else {
+                    frameCameraToFolder(id) { triggerPulse(from: id) }
+                }
             } else {
                 triggerPulse(from: id)
             }
@@ -998,25 +1012,39 @@ struct GraphRootView: View {
         GraphSession.shared.entries[z]?.fingerprint = ["__timeline_exit__"]
     }
 
-    /// 退出 → 回到 live 图。
-    /// ⚠️ 必须先把会话缓存的指纹作废:reload 若走"指纹没变→复用引擎"那条,
-    /// 会调 updateScene,而那边的 `count == n` 门会因为节点数已被时间线改过
-    /// 而**静默 return**,留下一个场景与引擎对不上的坏状态。把指纹改掉 →
-    /// 走重建分支(旧引擎正常 shutdown + 新引擎重新炸开)。
+    /// 退出 → 回到今天的 live 图,**但不重排布局**(07-11 用户:叉掉或自动消失
+    /// 时不要刷新界面种子,可以回到今天但样式别变)。
+    ///
+    /// 所以这里**不走 reload** —— reload 会新建引擎、换一个新的随机种子、重新
+    /// 炸开,整张图的排布全变。改成把 live 场景用 `updateSceneRemapping` 换进去:
+    /// 存活的球位置逐字保留,只有"那天还没诞生、现在该出现"的球从自己 folder
+    /// 里长出来。顺带把会话缓存同步成 live,后续 reload 才不会又撞上
+    /// updateScene 的 `count == n` 门。
     @MainActor
-    private func exitTimeline() async {
-        leaveTimeline(zone: zone)
-        await reload()
-    }
-
-    /// 换到某一天:重建场景 + 按身份把位置迁移过去(存活的球不重排)。
-    @MainActor
-    private func applyTimelineDay(_ d: Date) {
-        guard let idx = timelineIndex, let engine else { return }
+    private func exitTimelineKeepingLayout() async {
+        guard timelineIndex != nil else { return }
+        timelinePlaying = false
+        stopTimelineKeys()
+        timelineIndex = nil
+        timelineDay = .distantPast
+        let z = zone
+        let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let info = ConfigStore.shared.current.personalInfo
         let name = [info.alias, info.firstName].first { !$0.isEmpty } ?? "Me"
-        let newScene = GraphSceneBuilder.buildEventsTimeline(index: idx, on: d, userName: name)
-        // carryOver[新下标] = 旧下标(按节点身份;-1 = 新生)
+        let built = await Task.detached(priority: .userInitiated) {
+            GraphSceneBuilder.build(zone: z, halfLifeDays: halfLife, userName: name)
+        }.value
+        guard z == zone else { return }   // 期间切了画布 → 丢弃
+        applyRemappedScene(built)
+        GraphSession.shared.entries[z]?.scene = built
+        GraphSession.shared.entries[z]?.fingerprint = GraphSession.fingerprint(of: built)
+    }
+
+    /// 把新场景按**节点身份**换进引擎:存活的球位置延续,新生的球从自己 hub
+    /// 长出来。时间线换日与退出时间线共用。
+    @MainActor
+    private func applyRemappedScene(_ newScene: GraphScene) {
+        guard let engine else { return }
         let oldFP = GraphSession.fingerprint(of: scene)
         var at: [String: Int] = [:]
         at.reserveCapacity(oldFP.count)
@@ -1026,6 +1054,16 @@ struct GraphRootView: View {
         engine.updateSceneRemapping(newScene, carryOver: carry)
         floatNodeId = nil
         hoveredId = nil
+    }
+
+    /// 换到某一天:重建场景 + 按身份把位置迁移过去(存活的球不重排)。
+    @MainActor
+    private func applyTimelineDay(_ d: Date) {
+        guard let idx = timelineIndex else { return }
+        let info = ConfigStore.shared.current.personalInfo
+        let name = [info.alias, info.firstName].first { !$0.isEmpty } ?? "Me"
+        applyRemappedScene(
+            GraphSceneBuilder.buildEventsTimeline(index: idx, on: d, userName: name))
     }
 
     private func reload() async {
