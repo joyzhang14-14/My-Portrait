@@ -159,6 +159,8 @@ struct GraphRootView: View {
     @State private var timelinePlaying = false
     /// 方向键监听句柄(只在时间线模式挂着)。
     @State private var timelineKeyMonitor: TimelineKeyMonitor? = nil
+    /// 正在淡出(⑤ 不要一下子消失)。淡出期间条还在但不接事件。
+    @State private var timelineFading = false
 
     /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
     private var pulseScale: Double {
@@ -243,8 +245,11 @@ struct GraphRootView: View {
                             folderCount: scene.nodes.filter {
                                 if case .folder = $0.kind { return true } else { return false }
                             }.count,
-                            onExit: { Task { await exitTimelineKeepingLayout() } })
+                            onExit: { exitTimelineWithFade(thenFocus: nil) })
                             .padding(.bottom, 18)
+                            .opacity(timelineFading ? 0 : 1)
+                            .allowsHitTesting(!timelineFading)
+                            .animation(.easeOut(duration: 0.28), value: timelineFading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -266,6 +271,10 @@ struct GraphRootView: View {
         .onChange(of: timelineDay) { _, d in
             guard timelineIndex != nil, d != .distantPast else { return }
             applyTimelineDay(d)
+            // ③ 逐日图谱规模差很多(几百 → 一千多球),焦点必须跟着重取,
+            // 否则停在旧视角上看不全。frameCameraToRing 是**跟随实时目标的
+            // lerp**,连续拨动会自然平滑过渡(新的一发取消上一发)。
+            frameCameraToRing(animated: true)
         }
         // 播放:逐日推进,到头自停
         .task(id: timelinePlaying) {
@@ -360,18 +369,29 @@ struct GraphRootView: View {
 
     /// 由环心+半径算取景相机:center=环心,zoom=让环基准直径占视口较短边
     /// cameraFrameFill。半径≈0 / 尺寸未知返回 nil。
+    /// - Parameter bottomInset: 底部被遮挡的高度(时间线条)。取景改成把内容
+    ///   居中到 **[0, H−inset]** 这块真正可见的区域:缩放按缩短后的短边算,
+    ///   相机中心再下移 inset/(2·zoom)(世界 y 与屏幕 y 同向)→ 画面整体上抬,
+    ///   边缘陨石不会被条盖住(07-11 用户)。
     private func frameFor(_ vs: CGSize, center: SIMD2<Float>, radius: Float,
-                          fill: Double = GraphConstants.cameraFrameFill)
+                          fill: Double = GraphConstants.cameraFrameFill,
+                          bottomInset: CGFloat = 0)
         -> GraphCamera? {
         guard radius > 1, vs.width > 1, vs.height > 1 else { return nil }
-        let minDim = min(vs.width, vs.height)
+        let usableH = max(1, vs.height - bottomInset)
+        let minDim = min(vs.width, usableH)
         let z = Double(minDim) * fill / (2 * Double(radius))
         var cam = GraphCamera()
-        cam.center = center
         cam.zoom = min(max(z, GraphCamera.zoomRange.lowerBound),
                        GraphCamera.zoomRange.upperBound)
+        cam.center = center
+        cam.center.y += Float(bottomInset / (2 * cam.zoom))
         return cam
     }
+
+    /// 时间线条占掉的底部高度(条高 ~80 + 底边距 18,留点余量)。
+    /// 只影响**总览**取景;folder / 小球视角不动(用户要求)。
+    private var timelineBarInset: CGFloat { timelineIndex != nil ? 104 : 0 }
 
     /// 开局取景目标:**优先预加载环**(界面显示前算好,即时可用,免等引擎
     /// ~50ms 钉环,且切回时不读旧环 → 不闪);portrait 无预加载时回退引擎
@@ -390,7 +410,8 @@ struct GraphRootView: View {
         guard let engine else { return nil }
         let ring = engine.readRingSnapshot()
         if ring.radius > 1 {
-            return frameFor(vs, center: ring.center, radius: ring.radius)
+            return frameFor(vs, center: ring.center, radius: ring.radius,
+                            bottomInset: timelineBarInset)
         }
         let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count, !snap.isEmpty else { return nil }
@@ -401,7 +422,7 @@ struct GraphRootView: View {
         for i in snap.indices {
             r = max(r, simd_length(snap[i] - c) + Float(scene.nodes[i].radius))
         }
-        return frameFor(vs, center: c, radius: r)
+        return frameFor(vs, center: c, radius: r, bottomInset: timelineBarInset)
     }
 
     /// 取景到隐形环。两态共用"lerp 跟随引擎实时环、跟到物理定稳"的收敛
@@ -706,17 +727,9 @@ struct GraphRootView: View {
             // 回调,那一发作废。
             if scene.nodes[id].hubBubbleRadius != nil {
                 if timelineIndex != nil {
-                    // 07-11 用户:时间线模式下点 folder = 进 folder 视图 →
-                    // 自动退出时间线(且不重排布局)。⚠️ 换完场景节点集合会变,
-                    // 下标可能指到别的球 —— 先记住身份(slug),换完按身份重新
-                    // 定位再取景。
-                    let key = GraphSession.fingerprint(of: scene)[id]
-                    Task {
-                        await exitTimelineKeepingLayout()
-                        guard let ni = GraphSession.fingerprint(of: scene)
-                            .firstIndex(of: key) else { return }
-                        frameCameraToFolder(ni) { triggerPulse(from: ni) }
-                    }
+                    // 时间线模式下点 folder = 进 folder 视图 → 淡出退出,
+                    // 取景与淡出同时起步(⑤)。
+                    exitTimelineWithFade(thenFocus: id)
                 } else {
                     frameCameraToFolder(id) { triggerPulse(from: id) }
                 }
@@ -920,13 +933,18 @@ struct GraphRootView: View {
             .help("Reload from disk")
             // 时间线入口:只有 events 画布有历史可看(portrait 无 event 日期轴)。
             if zone == .events {
-                Button { Task { await enterTimeline() } } label: {
-                    Image(systemName: timelineLoading
-                          ? "clock.badge.questionmark" : "clock.arrow.circlepath")
+                Button {
+                    // ④ 再点一次 = 关闭(与叉掉等价)
+                    if timelineIndex != nil { exitTimelineWithFade(thenFocus: nil) }
+                    else { Task { await enterTimeline() } }
+                } label: {
+                    Image(systemName: timelineLoading ? "clock.badge.questionmark"
+                          : (timelineIndex != nil ? "clock.fill" : "clock.arrow.circlepath"))
                 }
                 .buttonStyle(.bouncyIcon)
                 .disabled(timelineLoading)
-                .help("Timeline — watch the graph change day by day")
+                .help(timelineIndex != nil ? "Close timeline"
+                      : "Timeline — watch the graph change day by day")
             }
         }
         .padding(.horizontal, 14)
@@ -964,10 +982,13 @@ struct GraphRootView: View {
         floatNodeId = nil
         pulses = []
         cancelCameraTracking()
+        timelineFading = false
         timelineIndex = idx
         timelineDay = idx.range.upperBound
         applyTimelineDay(idx.range.upperBound)
         startTimelineKeys()
+        // ② 进时间线 → 回主视角(顺带按新的底条 inset 重新取景)
+        frameCameraToRing(animated: true)
     }
 
     /// 左右方向键:逐日前后挪一天,夹在数据范围内。按键即停播放
@@ -1009,6 +1030,7 @@ struct GraphRootView: View {
         stopTimelineKeys()
         timelineIndex = nil
         timelineDay = .distantPast
+        timelineFading = false
         GraphSession.shared.entries[z]?.fingerprint = ["__timeline_exit__"]
     }
 
@@ -1025,8 +1047,6 @@ struct GraphRootView: View {
         guard timelineIndex != nil else { return }
         timelinePlaying = false
         stopTimelineKeys()
-        timelineIndex = nil
-        timelineDay = .distantPast
         let z = zone
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let info = ConfigStore.shared.current.personalInfo
@@ -1038,6 +1058,26 @@ struct GraphRootView: View {
         applyRemappedScene(built)
         GraphSession.shared.entries[z]?.scene = built
         GraphSession.shared.entries[z]?.fingerprint = GraphSession.fingerprint(of: built)
+        // 状态最后才清 —— 淡出期间条要一直在,否则会"啪"地消失(⑤)
+        timelineIndex = nil
+        timelineDay = .distantPast
+        timelineFading = false
+    }
+
+    /// ⑤ 淡出式退出:**淡出、取景、换回 live 场景三件事同时开跑**,不排队。
+    /// 取景目标用**当前**场景算好后就固定住,而换场景是按身份迁移位置(存活的
+    /// 球不动),所以镜头飞到一半把场景换掉也不会跑偏 —— 这是"丝滑"的关键。
+    private func exitTimelineWithFade(thenFocus hubId: Int?) {
+        guard timelineIndex != nil, !timelineFading else { return }
+        timelinePlaying = false
+        stopTimelineKeys()
+        timelineFading = true
+        if let hubId, hubId < scene.nodes.count {
+            frameCameraToFolder(hubId) { triggerPulse(from: hubId) }
+        } else {
+            frameCameraToRing(animated: true)   // 没指定目标 = 回主视角
+        }
+        Task { await exitTimelineKeepingLayout() }
     }
 
     /// 把新场景按**节点身份**换进引擎:存活的球位置延续,新生的球从自己 hub
