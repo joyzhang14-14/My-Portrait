@@ -122,6 +122,14 @@ struct GraphRootView: View {
     /// 观察 config:脉冲速度档位改了要即时反映到渲染(闪光时长)与下次点击。
     @State private var config = ConfigStore.shared
 
+    // MARK: - 时间线(07-11 用户:看每天的图谱变化)
+    /// 非 nil = 在时间线模式。索引一次解析,拖动时零 IO。
+    @State private var timelineIndex: EventTimeline.Index? = nil
+    /// 当前停在哪一天(仅时间线模式有意义)。
+    @State private var timelineDay: Date = .distantPast
+    @State private var timelineLoading = false
+    @State private var timelinePlaying = false
+
     /// 神经脉冲速度倍率(config;1=中等=现状,>1 更快)。
     private var pulseScale: Double {
         config.current.display.graphPulseSpeed.pulseScale
@@ -194,6 +202,22 @@ struct GraphRootView: View {
                 } else {
                     Color.clear
                 }
+                if let tidx = timelineIndex {
+                    VStack {
+                        Spacer()
+                        GraphTimelineBar(
+                            index: tidx,
+                            day: $timelineDay,
+                            playing: $timelinePlaying,
+                            nodeCount: scene.nodes.count,
+                            folderCount: scene.nodes.filter {
+                                if case .folder = $0.kind { return true } else { return false }
+                            }.count,
+                            onExit: { Task { await exitTimeline() } })
+                            .padding(.bottom, 18)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 hud
             }
             // 内容区尺寸(取景算缩放要用);initial 捕获首帧,之后随窗变。
@@ -205,6 +229,24 @@ struct GraphRootView: View {
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
         .background(WindowDragBlocker())
         .task(id: zone) { await reload() }
+        // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
+        .onChange(of: timelineDay) { _, d in
+            guard timelineIndex != nil, d != .distantPast else { return }
+            applyTimelineDay(d)
+        }
+        // 播放:逐日推进,到头自停
+        .task(id: timelinePlaying) {
+            guard timelinePlaying, let tidx = timelineIndex else { return }
+            let cal = Calendar(identifier: .gregorian)
+            while timelinePlaying, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(220))
+                guard timelinePlaying, !Task.isCancelled else { break }
+                if timelineDay >= tidx.range.upperBound { timelinePlaying = false; break }
+                if let nx = cal.date(byAdding: .day, value: 1, to: timelineDay) {
+                    timelineDay = cal.startOfDay(for: nx)
+                }
+            }
+        }
         // 主球照片:进入即加载;Settings 上传/移除发通知 → 立即重载(07-11 update)。
         .task { await loadMainBallImage() }
         .onReceive(NotificationCenter.default.publisher(for: .mainBallPhotoChanged)) { _ in
@@ -827,6 +869,16 @@ struct GraphRootView: View {
             }
             .buttonStyle(.bouncyIcon)
             .help("Reload from disk")
+            // 时间线入口:只有 events 画布有历史可看(portrait 无 event 日期轴)。
+            if zone == .events {
+                Button { Task { await enterTimeline() } } label: {
+                    Image(systemName: timelineLoading
+                          ? "clock.badge.questionmark" : "clock.arrow.circlepath")
+                }
+                .buttonStyle(.bouncyIcon)
+                .disabled(timelineLoading)
+                .help("Timeline — watch the graph change day by day")
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -846,6 +898,59 @@ struct GraphRootView: View {
             NSImage(contentsOfFile: p)
         }.value
         mainBallImage = img
+    }
+
+    // MARK: - 时间线
+
+    /// 进时间线模式:解析一次索引(后台),停在最新一天。
+    @MainActor
+    private func enterTimeline() async {
+        guard timelineIndex == nil, !timelineLoading, zone == .events else { return }
+        timelineLoading = true
+        defer { timelineLoading = false }
+        let idx = await Task.detached(priority: .userInitiated) {
+            EventTimeline.load()
+        }.value
+        guard let idx else { return }
+        floatNodeId = nil
+        pulses = []
+        cancelCameraTracking()
+        timelineIndex = idx
+        timelineDay = idx.range.upperBound
+        applyTimelineDay(idx.range.upperBound)
+    }
+
+    /// 退出 → 回到 live 图。
+    /// ⚠️ 必须先把会话缓存的指纹作废:reload 若走"指纹没变→复用引擎"那条,
+    /// 会调 updateScene,而那边的 `count == n` 门会因为节点数已被时间线改过
+    /// 而**静默 return**,留下一个场景与引擎对不上的坏状态。把指纹改掉 →
+    /// 走重建分支(旧引擎正常 shutdown + 新引擎重新炸开)。
+    @MainActor
+    private func exitTimeline() async {
+        timelinePlaying = false
+        timelineIndex = nil
+        timelineDay = .distantPast
+        GraphSession.shared.entries[zone]?.fingerprint = ["__timeline_exit__"]
+        await reload()
+    }
+
+    /// 换到某一天:重建场景 + 按身份把位置迁移过去(存活的球不重排)。
+    @MainActor
+    private func applyTimelineDay(_ d: Date) {
+        guard let idx = timelineIndex, let engine else { return }
+        let info = ConfigStore.shared.current.personalInfo
+        let name = [info.alias, info.firstName].first { !$0.isEmpty } ?? "Me"
+        let newScene = GraphSceneBuilder.buildEventsTimeline(index: idx, on: d, userName: name)
+        // carryOver[新下标] = 旧下标(按节点身份;-1 = 新生)
+        let oldFP = GraphSession.fingerprint(of: scene)
+        var at: [String: Int] = [:]
+        at.reserveCapacity(oldFP.count)
+        for (i, f) in oldFP.enumerated() where at[f] == nil { at[f] = i }
+        let carry = GraphSession.fingerprint(of: newScene).map { at[$0] ?? -1 }
+        scene = newScene
+        engine.updateSceneRemapping(newScene, carryOver: carry)
+        floatNodeId = nil
+        hoveredId = nil
     }
 
     private func reload() async {
