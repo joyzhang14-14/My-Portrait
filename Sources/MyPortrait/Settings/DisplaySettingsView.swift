@@ -452,7 +452,7 @@ private struct MenuBarLampCard: View {
     var body: some View {
         SettingsCard(
             title: "Menu bar icon",
-            info: "Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list."
+            info: "Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list. The orange hub is the **All Capture** master switch — when it goes hollow, every channel is stopped."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
@@ -481,6 +481,7 @@ private struct MenuBarLampCard: View {
                             LampGlyph(screen: lamps.screen.on,
                                       audio: lamps.audio.on,
                                       typing: lamps.typing.on,
+                                      hub: !lamps.masterOff,
                                       now: tl.date,
                                       ink: dark ? .white : .black)
                                 .padding(10)
@@ -490,6 +491,13 @@ private struct MenuBarLampCard: View {
                         .frame(width: 128, height: 128)
 
                         VStack(alignment: .leading, spacing: 9) {
+                            // 橙色中心球 = 全局采集总开关。灭的那句说明放这里
+                            // (三盏灯灭时只说"被总开关关掉",不再各自重复)。
+                            legendRow("All Capture", LampGlyph.hubColor,
+                                      CaptureLampState.Lamp(
+                                          on: !lamps.masterOff,
+                                          reason: "All capture is switched off."),
+                                      onText: "On — every capture channel is allowed to run.")
                             legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
                             legendRow("Audio",   LampGlyph.audioColor,  lamps.audio)
                             legendRow("Typing",  LampGlyph.typingColor, lamps.typing)
@@ -497,8 +505,6 @@ private struct MenuBarLampCard: View {
                         Spacer(minLength: 0)
                     }
                 }
-
-                // 中心橙点那句说明先不写 —— 它之后要挂功能,现在讲不清楚。
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -507,7 +513,8 @@ private struct MenuBarLampCard: View {
 
     @ViewBuilder
     private func legendRow(_ name: String, _ color: Color,
-                           _ lamp: CaptureLampState.Lamp) -> some View {
+                           _ lamp: CaptureLampState.Lamp,
+                           onText: String = "Recording this app right now.") -> some View {
         HStack(alignment: .top, spacing: 9) {
             Circle()
                 .fill(lamp.on ? color : Color.clear)
@@ -516,7 +523,7 @@ private struct MenuBarLampCard: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.system(size: 12, weight: .medium))
-                Text(lamp.on ? "Recording this app right now." : (lamp.reason ?? "Off."))
+                Text(lamp.on ? onText : (lamp.reason ?? "Off."))
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.textPrimary.opacity(lamp.on ? 0.55 : 0.42))
                     .fixedSize(horizontal: false, vertical: true)
@@ -531,6 +538,8 @@ private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
     var typing: Bool
+    /// 中心橙球 = 全局采集总开关。false(总开关关)= 挖空,与灭灯同款。
+    var hub: Bool = true
     /// 呼吸相位由外层墙钟 TimelineView 传进来 —— 自己再套一个 TimelineView
     /// 会多一条动画时钟,而且外层已经保证了后台也在 tick。
     var now: Date
@@ -605,8 +614,15 @@ private struct LampGlyph: View {
                     ctx.fill(disc(P(p), R(Self.rDot)), with: .color(ink))
                 }
 
-                // 2) 内圆:中心恒亮橙;三盏灯亮=本色(带辉光)、灭=挖空成底色
-                ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(Self.hubColor))
+                // 2) 内圆:中心球亮=橙(总开关开着)、灭=挖空;三盏灯亮=本色
+                //    (带辉光)、灭=挖空成底色
+                if hub {
+                    ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(Self.hubColor))
+                } else {
+                    ctx.blendMode = .destinationOut
+                    ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(.black))
+                    ctx.blendMode = .normal
+                }
                 for (p, kp, color) in Self.dots {
                     let c = P(p)
                     let ri = R(Self.rDot - Self.stroke)

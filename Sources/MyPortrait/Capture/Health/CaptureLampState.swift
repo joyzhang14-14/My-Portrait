@@ -194,7 +194,7 @@ final class CaptureLampState: ObservableObject {
         // ---- 屏幕(紫) ----
         var s = Lamp(on: true, reason: nil)
         if !master {
-            s = Lamp(on: false, reason: "All capture is switched off.")
+            s = Lamp(on: false, reason: "Switched off by the All Capture switch.")
         } else if !granted(\.screenRecording) {
             s = Lamp(on: false, reason: "No screen-recording permission — nothing can be captured.")
         } else if pause.screenAsleep {
@@ -215,7 +215,7 @@ final class CaptureLampState: ObservableObject {
         // ---- 音频(黄) ----
         var a = Lamp(on: true, reason: nil)
         if !master {
-            a = Lamp(on: false, reason: "All capture is switched off.")
+            a = Lamp(on: false, reason: "Switched off by the All Capture switch.")
         } else if !cfg.capture.audio.enabled {
             a = Lamp(on: false, reason: "Audio capture is switched off.")
         } else if !granted(\.microphone) {
@@ -228,7 +228,7 @@ final class CaptureLampState: ObservableObject {
         // ---- 打字(蓝) ----
         var t = Lamp(on: true, reason: nil)
         if !master {
-            t = Lamp(on: false, reason: "All capture is switched off.")
+            t = Lamp(on: false, reason: "Switched off by the All Capture switch.")
         } else if !cfg.capture.typingCaptureEnabled {
             t = Lamp(on: false, reason: "Typing capture is switched off.")
         } else if !granted(\.accessibility) {
