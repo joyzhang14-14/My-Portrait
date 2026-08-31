@@ -19,6 +19,8 @@ struct MyPortraitApp: App {
         // 否则与正在运行的 GUI app 双跑:Services.init 会把 app 在途的 writing run
         // 标 failed、resetInProgressAudioChunks 把在转的 chunk 打回 pending 导致
         // 重复转录,还会并发跑第二套 compactor/transcriber/scheduler worker。
+        // 图谱时间线重建自检(07-11):纯文件读,不开 DB / 不构造 Services。
+        if args.contains("--graph-timeline-dump") { EventTimeline.dumpCLI() }
         if args.contains("--rebuild-frames-fts") {
             print("=== rebuild-frames-fts ===")
             fflush(stdout)
