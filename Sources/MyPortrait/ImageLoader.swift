@@ -12,7 +12,12 @@ final class ImageThumbnailCache {
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
         c.countLimit = 600
-        c.totalCostLimit = 512 * 1024 * 1024  // 字节上限:主图一张解码后可达 ~25MB,只靠 countLimit 理论可膨胀 15GB
+        // 字节上限。⚠️ 这个数直接决定 app 的常驻内存水位:NSCache 不随切页
+        // 释放、也等不到后台进程的系统内存压力,充到上限就一直攥着(实测
+        // 512MB 上限时全 app 持续 500-700MB,heap 里 31 块 ~11.5MB 解码位图)。
+        // 128MB ≈ 十来张主图或几百张条带缩略图,翻 Timeline 的体感够用;
+        // 超出的只是重新从磁盘解码,换来常驻水位低 ~380MB。
+        c.totalCostLimit = 128 * 1024 * 1024
         return c
     }()
 
