@@ -32,34 +32,6 @@ final class GraphSession {
     }
 }
 
-/// 时间线的方向键监听(只在时间线模式存活)。SwiftUI 的 focusable/onKeyPress
-/// 在这个画布上拿不到第一响应者,沿用项目里的本地事件监听惯例。
-@MainActor
-final class TimelineKeyMonitor {
-    private var monitor: Any?
-
-    func start(onLeft: @escaping () -> Void, onRight: @escaping () -> Void) {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { ev in
-            // 正在编辑文本(folder 重命名 / 改色输入框)→ 原样放行,
-            // 否则方向键被吞掉、光标动不了。
-            if let r = NSApp.keyWindow?.firstResponder,
-               r is NSTextView || r is NSTextField { return ev }
-            // 123 = ←,124 = →(keyCode 与键盘布局无关,比字符可靠)
-            switch ev.keyCode {
-            case 123: onLeft();  return nil   // 吞掉,免得系统响一声
-            case 124: onRight(); return nil
-            default:  return ev
-            }
-        }
-    }
-
-    func stop() {
-        if let m = monitor { NSEvent.removeMonitor(m) }
-        monitor = nil
-    }
-}
-
 /// 图谱区域的「拖背景移动窗口」拦截器:AppKit 的窗口拖动机制会 hitTest 到
 /// 光标下最深的 NSView 并查它的 mouseDownCanMoveWindow —— 这里返回 false,
 /// SwiftUI 手势(平移/拖球)不受影响(走 hosting view 的手势识别)。
@@ -157,8 +129,6 @@ struct GraphRootView: View {
     @State private var timelineDay: Date = .distantPast
     @State private var timelineLoading = false
     @State private var timelinePlaying = false
-    /// 方向键监听句柄(只在时间线模式挂着)。
-    @State private var timelineKeyMonitor: TimelineKeyMonitor? = nil
     /// 正在淡出(⑤ 不要一下子消失)。淡出期间条还在但不接事件。
     @State private var timelineFading = false
     /// 当日变化统计(换日时算一次,给底条显示)。
@@ -277,6 +247,17 @@ struct GraphRootView: View {
         // ⚠️ 监听器留着会**全局**吞掉方向键(离开图谱后别处也按不动),
         // 所以视图消失 / 换画布都必须摘掉。
         .onDisappear { leaveTimeline(zone: zone) }
+        // 方向键逐日切换。⚠️ **不能自己装 NSEvent 监听** —— App 级的
+        // AppKeyboard 在启动时就装了 keyDown 监听,捕获左右键后广播通知并
+        // `return nil` 吞掉事件,排在后面的监听永远收不到(这正是上一版
+        // 按键没反应的原因)。这里按项目既定架构订阅它广播的通知。
+        // 文本框里的方向键 AppKeyboard 已放行,不会走到这。
+        .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { _ in
+            stepTimeline(-1)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { _ in
+            stepTimeline(1)
+        }
         // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
         .onChange(of: timelineDay) { _, d in
             guard timelineIndex != nil, d != .distantPast else { return }
@@ -998,7 +979,6 @@ struct GraphRootView: View {
         timelineIndex = idx
         timelineDay = idx.range.upperBound
         applyTimelineDay(idx.range.upperBound)
-        startTimelineKeys()
         // ② 进时间线 → 回主视角(顺带按新的底条 inset 重新取景)
         frameCameraToRing(animated: true)
     }
@@ -1015,22 +995,6 @@ struct GraphRootView: View {
         if clamped != timelineDay { timelineDay = clamped }
     }
 
-    /// 挂方向键监听。**不用 SwiftUI 的 .focusable/.onKeyPress** —— 画布里有
-    /// NSViewRepresentable 子视图在抢第一响应者,那套拿不到焦点(实测按键无
-    /// 反应)。改用本项目已有的本地事件监听惯例(RightClickHighlight /
-    /// GraphRendererView 同款),绕开焦点系统。
-    private func startTimelineKeys() {
-        timelineKeyMonitor?.stop()
-        let m = TimelineKeyMonitor()
-        m.start(onLeft: { stepTimeline(-1) }, onRight: { stepTimeline(1) })
-        timelineKeyMonitor = m
-    }
-
-    private func stopTimelineKeys() {
-        timelineKeyMonitor?.stop()
-        timelineKeyMonitor = nil
-    }
-
     /// 离开时间线态的统一收口(退出按钮 / 换画布 / 视图消失三个出口共用)。
     /// ⚠️ 必须作废会话缓存的指纹:引擎此刻停在**某一天**的节点集合上,若不作废,
     /// 下次 reload 会走"指纹没变→复用引擎"那条去调 updateScene,而那道
@@ -1039,7 +1003,6 @@ struct GraphRootView: View {
     private func leaveTimeline(zone z: GraphZone) {
         guard timelineIndex != nil else { return }
         timelinePlaying = false
-        stopTimelineKeys()
         timelineIndex = nil
         timelineDay = .distantPast
         timelineFading = false
@@ -1058,7 +1021,6 @@ struct GraphRootView: View {
     private func exitTimelineKeepingLayout() async {
         guard timelineIndex != nil else { return }
         timelinePlaying = false
-        stopTimelineKeys()
         let z = zone
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let info = ConfigStore.shared.current.personalInfo
@@ -1082,7 +1044,6 @@ struct GraphRootView: View {
     private func exitTimelineWithFade(thenFocus hubId: Int?) {
         guard timelineIndex != nil, !timelineFading else { return }
         timelinePlaying = false
-        stopTimelineKeys()
         timelineFading = true
         if let hubId, hubId < scene.nodes.count {
             frameCameraToFolder(hubId) { triggerPulse(from: hubId) }
