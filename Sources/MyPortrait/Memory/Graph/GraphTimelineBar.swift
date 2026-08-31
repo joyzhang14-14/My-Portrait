@@ -120,17 +120,19 @@ struct GraphTimelineBar: View {
 
     /// 当天变化:+新增 · 合并 · folder 数(带增减)。
     @ViewBuilder private var dayStats: some View {
-        HStack(spacing: 8) {
+        // 三组之间拉开间距 —— 挤在一起容易看成一句话(08-31 用户)。
+        // 值为 0 时压成次要灰:0 不是"变化",不该跟真有变化的数字一样抢眼。
+        HStack(spacing: 18) {
             Text("+\(stats.born)")
-                .foregroundStyle(stats.born > 0 ? Theme.accent : Color.secondary)
+                .foregroundStyle(stats.born > 0 ? Color.green : Color.secondary)
             Text("\(stats.merged) merged")
-                .foregroundStyle(.secondary)
-            HStack(spacing: 3) {
+                .foregroundStyle(stats.merged > 0 ? Color.yellow : Color.secondary)
+            HStack(spacing: 4) {
                 Text("\(stats.folders) folders").foregroundStyle(.secondary)
                 if stats.folderDelta != 0 {
                     Text(stats.folderDelta > 0 ? "(+\(stats.folderDelta))"
                                                : "(\(stats.folderDelta))")
-                        .foregroundStyle(stats.folderDelta > 0 ? Theme.accent : .orange)
+                        .foregroundStyle(stats.folderDelta > 0 ? Color.green : Color.red)
                 }
             }
         }
