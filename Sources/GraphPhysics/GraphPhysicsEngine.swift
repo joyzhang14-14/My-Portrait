@@ -612,6 +612,80 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         wake()
     }
 
+    /// 时间线专用(07-11 用户:给 neural graph 做时间线):**节点集合可变**的
+    /// 场景切换。与 `updateScene` 的唯一差别是允许 `nodes.count` 变化 ——
+    /// 其余每节点数组本来就在那边全量重建,真正需要处理的只有 n/pos/vel/
+    /// snapshot 这四样。
+    ///
+    /// 存活节点的位置与速度**逐字延续**(不炸开、不重排);新生节点从自己
+    /// hub 的当前位置长出来(所以 event 是从 folder 里"冒"出来的,不是从
+    /// 屏幕外飞进来)。逐日拖动时配合这条,球只会长大/缩小/迁徙,
+    /// 布局不会重排 —— 这是"星图填充"观感的基础。
+    ///
+    /// - Parameter carryOver: 与 `scene.nodes` 等长;`carryOver[新下标]` = 旧
+    ///   下标,`-1` = 新生节点。调用方按节点身份(main / folder slug /
+    ///   event relPath)算好,引擎不猜。
+    public func updateSceneRemapping(_ scene: GraphScene, carryOver: [Int]) {
+        guard carryOver.count == scene.nodes.count else { return }
+        simLock.lock()
+        let oldPos = pos, oldVel = vel, oldN = n
+        let m = scene.nodes.count
+        var newPos = [SIMD2<Float>](repeating: .zero, count: m)
+        var newVel = [SIMD2<Float>](repeating: .zero, count: m)
+        var filled = [Bool](repeating: false, count: m)
+        // ① 存活节点:位置速度原样搬过来
+        for i in 0..<m {
+            let o = carryOver[i]
+            if o >= 0, o < oldN {
+                newPos[i] = oldPos[o]; newVel[i] = oldVel[o]; filled[i] = true
+            }
+        }
+        // ② 新生节点:落在自己 hub 上(hub 已填则用它,否则回退主球/原点),
+        //    加一点确定性抖动免得同一 tick 生一堆球完全重合、斥力爆炸。
+        for i in 0..<m where !filled[i] {
+            let h = scene.nodes[i].hubIndex
+            let base = (h >= 0 && h < m && filled[h]) ? newPos[h]
+                     : (filled.first == true ? newPos[0] : .zero)
+            let a = Float(i) * 2.399963   // 黄金角,确定性散开
+            newPos[i] = base + SIMD2<Float>(cos(a), sin(a)) * 2
+            newVel[i] = .zero
+        }
+        n = m
+        pos = newPos
+        vel = newVel
+        sceneRef = scene
+        nodeRadius = scene.nodes.map { Float($0.radius) }
+        nodeCharge = Self.chargeArray(scene: scene)
+        nodeCenterScale = Self.centerScaleArray(scene: scene)
+        nodeFamily = Self.familyIdArray(scene: scene)
+        (edgesA, edgesB, linkStrength, linkBias, linkRest) = Self.linkArrays(scene: scene)
+        (hubIndices, hubBubbleR, hubMass, hubMainClear) = Self.hubArrays(scene: scene)
+        mainEnclosureR = Float(max(scene.nodes.first?.hubBubbleRadius ?? 0,
+                                   scene.nodes.first?.radius ?? 0))
+        (leafIndices, leafOwnHub, leafMaxDist) = Self.leafArrays(scene: scene)
+        (familyLeaf, familyRange) = Self.familyArrays(scene: scene)
+        (beltIdx, beltHub, beltRing, beltAng, beltHubSlot, beltFamW, beltFamReach)
+            = Self.beltArrays(scene: scene)
+        nodeBelt = scene.nodes.map { $0.beltTier != nil }
+        nodeTransit = .init(repeating: false, count: n)
+        // 一切按旧下标记的状态全部作废(节点集合变了,留着会张冠李戴)
+        beltDragHome = []
+        settleTeamIdx = []
+        settleTeamPrev = []
+        releaseSettleEpisode = false
+        beltPredDirty = true
+        beltRayCorrectedToActual = false
+        shadowLock.lock(); shadowGen &+= 1; shadowLock.unlock()
+        ringDirty = true
+        hubPrev = []
+        hubQuietRef = []
+        famPrev = []
+        alpha = max(alpha, 0.1)   // 轻推一下,别炸开
+        publishSnapshot()
+        simLock.unlock()
+        wake()
+    }
+
     // MARK: - 物理线程
 
     private func loop() {

@@ -202,6 +202,24 @@ enum EventTimeline {
             d = nx; step += 1
         }
         print("")
+        print("=== 按日建场景(节点/边/hub/陨石)===")
+        print("日期            节点     边    hub   核心球   陨石")
+        var d2 = idx.range.lowerBound
+        var st2 = 0
+        while d2 <= idx.range.upperBound {
+            if st2 % 20 == 0 || d2 == idx.range.upperBound {
+                let sc = GraphSceneBuilder.buildEventsTimeline(index: idx, on: d2, userName: "Me")
+                let hubs = sc.nodes.filter { $0.kind.isHub }.count
+                let belt = sc.nodes.filter { $0.beltTier != nil }.count
+                let core = sc.nodes.count - hubs - belt - 1
+                print(String(format: "%@ %8d %6d %6d %8d %6d",
+                             fmt.string(from: d2), sc.nodes.count, sc.edges.count,
+                             hubs, core, belt))
+            }
+            guard let nx = cal.date(byAdding: .day, value: 1, to: d2) else { break }
+            d2 = nx; st2 += 1
+        }
+        print("")
         print("=== folder 诞生日收编的存量 event ===")
         for (slug, meta) in idx.folders.sorted(by: { $0.value.created < $1.value.created }) {
             let n = idx.entries.filter { $0.join?.slug == slug && $0.join?.day == meta.created }.count

@@ -124,14 +124,58 @@ enum GraphSceneBuilder {
         let scanned = scanDir(Storage.uiEventsDir, halfLifeDays: halfLifeDays)
             .sorted { $0.relPath < $1.relPath }
         let folders = EventFolderStore.loadAll().sorted { $0.slug < $1.slug }
-        let unclassifiedColor = EventGraphStyleStore.loadUnclassifiedColor()
-            .map { rgbFromHex($0) } ?? ungroupedGray
-
         // relPath → folder slug(一个 event 只归一个 folder;数据层保证不重叠)
         var folderOf: [String: String] = [:]
         for f in folders {
             for rel in f.events where folderOf[rel] == nil { folderOf[rel] = f.slug }
         }
+        return assembleEvents(scanned: scanned,
+                              folders: folders.map { ($0.slug, $0.name, $0.colorHex) },
+                              folderOf: folderOf, userName: userName)
+    }
+
+    /// 时间线:某一天的 events 场景(07-11 用户)。
+    ///
+    /// 节点集合**只含那天已诞生的 event** —— 还没诞生的压根不进场景,于是
+    /// 天然不参与物理(电荷是按种类给的,放进去哪怕半径为 0 也会产生全额
+    /// 斥力)、不参与命中与交互。逐日切换靠 `updateSceneRemapping` 按身份
+    /// 迁移位置,所以存活的球不会重排,只有新生/迁徙/胀缩。
+    ///
+    /// folder 存活门(核心球 ≥3)复用 live 那一套:某天还没创建的 folder
+    /// 那天没有任何成员 → 0 个核心 → 自动落选,不必另设判断。
+    static func buildEventsTimeline(index: EventTimeline.Index, on day: Date,
+                                    userName: String) -> GraphScene {
+        let st = EventTimeline.state(index, on: day)
+        var scanned: [ScannedFile] = []
+        scanned.reserveCapacity(st.weight.count)
+        for e in index.entries {
+            guard let w = st.weight[e.relPath] else { continue }   // 那天还没诞生
+            let occ = e.occurrenceDays.filter { $0 <= st.day }
+            let anchor = occ.last ?? e.born
+            scanned.append(ScannedFile(
+                url: e.url, relPath: e.relPath, title: e.title, weight: w,
+                occurrences: occ.count,
+                daysAgo: max(0, st.day.timeIntervalSince(anchor) / 86_400)))
+        }
+        scanned.sort { $0.relPath < $1.relPath }
+        let folders = index.folders
+            .map { (slug: $0.key, name: $0.value.name, colorHex: $0.value.colorHex) }
+            .sorted { $0.slug < $1.slug }
+        return assembleEvents(scanned: scanned, folders: folders,
+                              folderOf: st.folderOf, userName: userName)
+    }
+
+    /// events 画布的装配段(live 与**时间线**共用 —— 唯一差别就是喂进来的
+    /// `scanned`(按日重算的 weight)和 `folderOf`(按日重算的归属),
+    /// 几何规则、folder 存活门、Unclassified 成区门全部同一套,不会漂移。
+    private static func assembleEvents(
+        scanned: [ScannedFile],
+        folders: [(slug: String, name: String, colorHex: String?)],
+        folderOf: [String: String],
+        userName: String
+    ) -> GraphScene {
+        let unclassifiedColor = EventGraphStyleStore.loadUnclassifiedColor()
+            .map { rgbFromHex($0) } ?? ungroupedGray
         var membersOf: [String: [ScannedFile]] = [:]
         var unclassifiedMembers: [ScannedFile] = []
         for s in scanned {
