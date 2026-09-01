@@ -86,7 +86,19 @@ final class SleepHelperClient {
         } catch {
             log.info("launch sync register threw code=\((error as NSError).code, privacy: .public), status=\(self.statusName, privacy: .public)")
         }
+        // 批准被打回检测:上次记录已批准、这次却 requiresApproval(app 更新后
+        // BTM 认不出新 cdhash,或上次会话的自愈重注册)→ 弹通知引导重批,
+        // 不再静默。批准状态每次启动落 UserDefaults,重批后自动归位。
+        let ud = UserDefaults.standard
+        let wasApproved = ud.bool(forKey: Self.wasApprovedKey)
+        if wasApproved, service.status == .requiresApproval {
+            log.error("helper 批准被打回 requiresApproval(更新/重注册)→ 弹通知")
+            NotificationCenterService.shared.post(.helperApprovalLost)
+        }
+        ud.set(service.status == .enabled, forKey: Self.wasApprovedKey)
     }
+
+    private static let wasApprovedKey = "SleepHelper.wasApproved"
 
     /// 注册与 launchd 脱钩时的自愈。
     ///
@@ -114,6 +126,10 @@ final class SleepHelperClient {
         do { try service.register(); log.notice("repair register OK") }
         catch { log.notice("repair register threw code=\((error as NSError).code, privacy: .public)") }
         log.notice("repair done, status=\(self.statusName, privacy: .public) —— 若为 requiresApproval 需用户重新批准")
+        if service.status == .requiresApproval {
+            UserDefaults.standard.set(false, forKey: Self.wasApprovedKey)
+            NotificationCenterService.shared.post(.helperApprovalLost)
+        }
     }
 
     // MARK: - keep-awake(MemoryScheduler.refreshKeepAwake 驱动)

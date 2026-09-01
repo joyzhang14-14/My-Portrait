@@ -38,6 +38,10 @@ final class NotificationCenterService {
         /// 连接的 AI 账号快到期(剩 ≤2 天)。到期后那条 provider 上的 pipeline
         /// 会整条停摆,所以这条默认开着。点一下跳 Settings → Connections。
         case credentialExpiring(provider: String, daysLeft: Int)
+        /// 合盖 helper 的批准被系统打回(自签名无 Team ID,BTM 不跨版本迁移
+        /// 信任,更新/自愈重注册都会触发)。点击直接跳系统设置 ▸ 登录项与扩展。
+        /// 不挂 toggle:最多每次更新一条,不重批的话合盖保活整条静默失效。
+        case helperApprovalLost
         /// 自动更新倒计时 banner —— 用户开了 autoDownloadUpdates,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
@@ -146,6 +150,12 @@ final class NotificationCenterService {
             body = daysLeft <= 0
                 ? "It expires today. Reconnect it in Settings → Connections, or the pipelines using it will stop."
                 : "\(daysLeft) day\(daysLeft == 1 ? "" : "s") left. Reconnect it in Settings → Connections before it lapses."
+
+        case .helperApprovalLost:
+            title = "⚡ Background activity helper needs re-approval"
+            body = "The update reset its permission. Click here, then switch **My Portrait** back on under \"Allow in the Background\"."
+            timeout = 60
+            onTap = { SleepHelperClient.shared.openSystemSettings() }
         }
 
         let notif = InAppNotification(

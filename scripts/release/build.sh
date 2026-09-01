@@ -76,6 +76,24 @@ if [[ ! -d "$APP_PATH" ]]; then
     exit 1
 fi
 
+# 3.5) helper 二进制跨版本复用:源码没变就用上一版发过的已签名二进制。
+#      自签名没有 Team ID,BTM 不跨 cdhash 迁移信任 —— helper 二进制一变,
+#      更新后「后台活动」批准就被打回。字节级复用让 cdhash 不变,批准保住。
+#      缓存丢失/源码有变时退回新编二进制,代价只是那一版需要重批一次。
+HELPER_CACHE="build/helper-cache"
+HELPER_BIN="$APP_PATH/Contents/MacOS/PortraitSleepHelper"
+HELPER_HASH=$(cat Sources/PortraitSleepHelper/*.swift \
+                  Sources/MyPortrait/Capture/Power/SleepHelperProtocol.swift \
+                  Support/PortraitSleepHelper-Info.plist \
+                  Support/com.joyzhang.myportrait.SleepHelper.plist 2>/dev/null \
+              | shasum -a 256 | cut -d' ' -f1)
+if [[ -f "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper" ]]; then
+    echo "→ helper 源码未变,复用上一版已签名二进制(cdhash 不变,保 BTM 批准)"
+    cp "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper" "$HELPER_BIN"
+else
+    echo "→ helper 无缓存或源码有变,用新编二进制(本次更新后需重批一次)"
+fi
+
 # 4) 重签:从内向外。Sparkle.framework 内嵌的 XPC services + Updater.app
 #    有自己的 entitlements,要 --preserve-metadata 保留;最后外层 app
 #    覆盖完整 entitlements。--options runtime 全程保留 hardened runtime。
@@ -128,6 +146,10 @@ if [[ "$AUTH" != "$SIGN_IDENTITY" ]]; then
     echo "ERROR: expected Authority='$SIGN_IDENTITY', got '$AUTH'" >&2
     exit 1
 fi
+
+# 7) 回存 helper 缓存(签名验证都过了才存,坏产物不入缓存)
+mkdir -p "$HELPER_CACHE/$HELPER_HASH"
+cp "$HELPER_BIN" "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper"
 
 echo ""
 echo "=================================================="
