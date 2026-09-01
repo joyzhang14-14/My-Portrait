@@ -28,6 +28,10 @@ final class HealthMonitor: ObservableObject {
     /// 排查「RSS 缓慢膨胀跟哪个页面相关」。
     var currentPage: String = "unknown"
 
+    /// 主窗口是否可见(App.swift 的关窗/隐藏/重开钩子维护)。
+    /// 后台无窗时的内存占用才是干扰用户用电脑的部分,MEM 行标 fg/bg 区分。
+    var windowVisible = true
+
     private var memSamplerTimer: Timer?
 
     private init() {
@@ -50,8 +54,9 @@ final class HealthMonitor: ObservableObject {
                 #else
                 let flavor = "release"
                 #endif
+                let state = HealthMonitor.shared.windowVisible ? "fg" : "bg"
                 HealthMonitor.shared.appendLog(
-                    line: "[\(Self.iso(Date()))] MEM \(mb)MB page=\(HealthMonitor.shared.currentPage) build=\(flavor)")
+                    line: "[\(Self.iso(Date()))] MEM \(mb)MB \(state) page=\(HealthMonitor.shared.currentPage) build=\(flavor)")
             }
         }
         t.tolerance = 30

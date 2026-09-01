@@ -645,10 +645,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 后台(实测 ~700MB)。重开窗口只需从磁盘重新解码缩略图,无感。
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: window, queue: .main
-        ) { _ in ImageThumbnailCache.shared.removeAll() }
+        ) { _ in
+            ImageThumbnailCache.shared.removeAll()
+            HealthMonitor.shared.windowVisible = false
+        }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didHideNotification, object: nil, queue: .main
-        ) { _ in ImageThumbnailCache.shared.removeAll() }
+        ) { _ in
+            ImageThumbnailCache.shared.removeAll()
+            HealthMonitor.shared.windowVisible = false
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didUnhideNotification, object: nil, queue: .main
+        ) { _ in HealthMonitor.shared.windowVisible = true }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -730,6 +739,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window else { return }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // 关窗/隐藏后再打开的唯一入口(Dock 重开与菜单栏 Open 都走这里)。
+        // AppDelegate 没标 @MainActor,但本方法只会在主线程被调(AppKit 约定)。
+        MainActor.assumeIsolated { HealthMonitor.shared.windowVisible = true }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
