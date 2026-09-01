@@ -350,6 +350,10 @@ actor CaptureCoordinator {
             logger.warning("OCR failed: \(String(describing: error), privacy: .public)")
             ocrResult = nil
         }
+        // 全分辨率 OCR 一帧要开几份十几 MB 的工作缓冲,用完 malloc 会把这些
+        // 空闲大块攒着不还系统,后台进程等不到内存压力信号,footprint 就一直
+        // 挂在 300-600MB。每帧干完主动交还,只动空闲块,不影响 OCR 本身。
+        malloc_zone_pressure_relief(nil, 0)
 
         // 9. 入库。
         let record = FrameRecord(

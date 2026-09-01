@@ -33,9 +33,31 @@ final class HealthMonitor: ObservableObject {
     var windowVisible = true
 
     private var memSamplerTimer: Timer?
+    private var memPressureSource: DispatchSourceMemoryPressure?
 
     private init() {
         startMemorySampler()
+        startMemoryPressureRelief()
+    }
+
+    /// 系统内存压力(warning/critical)一来:清缩略图缓存 + 让 malloc 交还空闲
+    /// 大块,并在 health.log 记一行前后 footprint,事后能核对回收了多少。
+    private func startMemoryPressureRelief() {
+        let src = DispatchSource.makeMemoryPressureSource(
+            eventMask: [.warning, .critical], queue: .main)
+        src.setEventHandler {
+            MainActor.assumeIsolated {
+                let level = src.data.contains(.critical) ? "critical" : "warning"
+                let before = Self.physFootprintMB()
+                ImageThumbnailCache.shared.removeAll()
+                malloc_zone_pressure_relief(nil, 0)
+                let after = Self.physFootprintMB()
+                HealthMonitor.shared.appendLog(
+                    line: "[\(Self.iso(Date()))] MEMPRESSURE \(level) \(before)MB -> \(after)MB")
+            }
+        }
+        src.resume()
+        memPressureSource = src
     }
 
     // MARK: - 内存采样(排查 RSS 缓慢膨胀)
