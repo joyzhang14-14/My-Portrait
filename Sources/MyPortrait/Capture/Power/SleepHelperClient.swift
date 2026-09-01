@@ -78,7 +78,19 @@ final class SleepHelperClient {
     /// 老的 config 开关闸门 —— 现在唯一真相就是注册/批准状态本身);② **不弹系统设置**
     /// (首次批准由 onboarding 里的 enable() 负责);③ **不 unregister**(只 register,
     /// 幂等;稳定 build 上 no-op,已批准的不需重新批准)。
+    /// 自动注册/自愈只允许 /Applications 里的正式版做。BTM 只有一条记录,
+    /// 谁 register 谁改绑 bundle 路径 —— DerivedData 的 debug 构建路径随重建
+    /// 漂移,抢到绑定就把正式版的注册变成孤儿,批准反复被打回。
+    /// 手动 Allow(enable())不受限:那是明确的用户意图。
+    private var mayAutoRegister: Bool {
+        Bundle.main.bundlePath.hasPrefix("/Applications/")
+    }
+
     func syncRegistration() {
+        guard mayAutoRegister else {
+            log.info("launch sync skipped — 非 /Applications 构建不自动注册(防抢绑定)")
+            return
+        }
         guard service.status != .notRegistered else { return }
         do {
             try service.register()
@@ -118,6 +130,10 @@ final class SleepHelperClient {
     /// ⚠️ 代价:重新注册后 daemon 回到 `.requiresApproval`,需用户在系统设置里
     /// 再批准一次。所以只在**确实连不上**时做,且一次启动只做一次。
     private func repairRegistration() {
+        guard mayAutoRegister else {
+            log.error("XPC 连不上,但非 /Applications 构建不自愈重注册(防抢绑定+防打回批准)")
+            return
+        }
         guard !didRepairRegistration, service.status == .enabled else { return }
         didRepairRegistration = true
         log.error("helper 报 .enabled 却连不上 → 注册与 launchd 脱钩,重新注册")
