@@ -527,7 +527,9 @@ struct AudioCaptureSettingsView: View {
 
     @State private var devicesMonitor = AudioDevicesMonitor.shared
     /// 跟 ProgressView 的脉动 —— 真在录时绿点 pulse,没在录就 hide。
+    /// 窗口不可见时也停:repeatForever 动画在隐藏的窗口里照样逐帧重绘。
     @State private var pulseOn: Bool = false
+    @ObservedObject private var health = HealthMonitor.shared
 
     /// 输入源 card。Mic picker + 实时 active device + 并行 system audio loopback。
     /// 用户视角:这些都是"声音从哪进来" → 都归 Input。
@@ -568,7 +570,11 @@ struct AudioCaptureSettingsView: View {
                         .frame(width: 7, height: 7)
                         .scaleEffect(pulseOn ? 1.3 : 1.0)
                         .opacity(pulseOn ? 0.55 : 1.0)
-                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                        // 停下时换成一次性动画:repeatForever 对「变 false」这次
+                        // 变化也会永远来回,必须换掉动画本身才真停。
+                        .animation(pulseOn
+                                   ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                                   : .easeInOut(duration: 0.2),
                                    value: pulseOn)
                     Text(activeUID.isEmpty
                          ? "Not capturing"
@@ -578,8 +584,11 @@ struct AudioCaptureSettingsView: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .frame(maxWidth: 240, alignment: .trailing)
-                .onAppear { pulseOn = !activeUID.isEmpty }
-                .onChange(of: activeUID) { _, new in pulseOn = !new.isEmpty }
+                .onAppear { pulseOn = !activeUID.isEmpty && health.windowVisible }
+                .onChange(of: activeUID) { _, new in pulseOn = !new.isEmpty && health.windowVisible }
+                .onChange(of: health.windowVisible) { _, visible in
+                    pulseOn = !activeUID.isEmpty && visible
+                }
             }
 
             // System audio 是并行 loopback 路 —— 跟 mic 同时存在,不互斥。

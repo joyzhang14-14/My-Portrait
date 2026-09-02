@@ -30,7 +30,9 @@ final class HealthMonitor: ObservableObject {
 
     /// 主窗口是否可见(App.swift 的关窗/隐藏/重开钩子维护)。
     /// 后台无窗时的内存占用才是干扰用户用电脑的部分,MEM 行标 fg/bg 区分。
-    var windowVisible = true
+    /// @Published:关窗只是隐藏,页面视图树还活着,永动动画会继续按刷新率
+    /// 重绘看不见的窗口(实测主线程 35% CPU)。视图观察它,不可见时停动画。
+    @Published var windowVisible = true
 
     private var memSamplerTimer: Timer?
     private var memPressureSource: DispatchSourceMemoryPressure?
