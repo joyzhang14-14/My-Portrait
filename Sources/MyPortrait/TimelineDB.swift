@@ -1138,6 +1138,21 @@ struct TimelineDB: Sendable {
         return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
     }
 
+    /// 正在转录中的音频 chunk 数(status = in_progress)。> 0 = 模型真在跑;
+    /// 队列非空但这里为 0 = 在攒批等待。给转录状态行区分 Transcribing / Waiting。
+    func inProgressAudioCount() -> Int {
+        guard exists else { return 0 }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_close(db) }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db,
+            "SELECT count(*) FROM audio_chunks WHERE status = 'in_progress'",
+            -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
     /// 找声音相似的说话人（centroid 余弦相似度 > 0.25，按相似度降序取前 limit）。
     /// 用于在 Speakers 页建议「这俩是不是同一个人 → 合并」。
     func similarSpeakers(to speakerId: Int64, limit: Int = 5) -> [SimilarSpeaker] {
