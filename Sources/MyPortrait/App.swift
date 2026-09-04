@@ -708,6 +708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Empty options keeps the window size fixed regardless of content.
         hosting.sizingOptions = []
         window.contentView = hosting
+        lifecycleLog.notice("main content installed")
     }
 
     /// 卸掉视图树,换一个空 NSView。异步执行:willClose / didHide 时 AppKit
@@ -730,6 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainContentInstalled = false
         ImageThumbnailCache.shared.removeAll()
         window.contentView = NSView(frame: window.frame)
+        lifecycleLog.notice("main content torn down (window hidden)")
     }
 
     /// 启动时如果 FDA 没授权,弹一个 NSAlert 引导用户去 System Settings 加
