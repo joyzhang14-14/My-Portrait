@@ -110,7 +110,7 @@ final class ConfigApplier {
             // 走 showMainWindow 而不是直接 orderFront:窗口关着时视图树是卸掉的
             // (见 AppDelegate.installMainContent),直接拉到前台会是一张空窗。
             if display.showDockIcon {
-                (NSApp.delegate as? AppDelegate)?.showMainWindow()
+                AppDelegate.current?.showMainWindow()
             }
         }
 

@@ -404,7 +404,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     }
 
     @objc private func openMainWindow() {
-        (NSApp.delegate as? AppDelegate)?.showMainWindow()
+        AppDelegate.current?.showMainWindow()
     }
 
     @objc private func quit() {

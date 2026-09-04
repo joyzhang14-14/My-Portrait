@@ -248,7 +248,7 @@ struct ContentView: View {
             NotificationCenterService.shared.onCronJobTap = { convId in
                 chat.switchTo(convId)
                 selection = .home
-                (NSApp.delegate as? AppDelegate)?.showMainWindow()
+                AppDelegate.current?.showMainWindow()
             }
     }
 

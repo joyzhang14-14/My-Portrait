@@ -485,6 +485,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 主窗口内容(SwiftUI 视图树)当前是否装着。关窗/隐藏卸掉,重开重建。
     private var mainContentInstalled = false
 
+    /// SwiftUI 生命周期下 `NSApp.delegate` 是 SwiftUI 自己的转发壳
+    /// (SwiftUI.AppDelegate),`as? AppDelegate` 永远 nil。要拿真实例走这里。
+    /// 仅在 applicationDidFinishLaunching(主线程)写一次 —— nonisolated(unsafe) 安全。
+    nonisolated(unsafe) private(set) static weak var current: AppDelegate?
+
     /// `--typing-observe` 模式下持有的 observer（持有它以保证存活 + 退出时 stop）。
     private var typingObserver: TypingObserver?
 
@@ -498,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.current = self
         // CLI 模式：只跑 TypingObserver 流水线，跳过 Services / 窗口创建。
         // 主 run loop 仍需活着（AX 回调靠它），所以不开窗口但不退出。
         // observe / m3 不写 DB；m4 跑完整流水线、写库。
@@ -630,7 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             MainActor.assumeIsolated {
                 HealthMonitor.shared.windowVisible = false
-                (NSApp.delegate as? AppDelegate)?.scheduleMainContentTeardown()
+                AppDelegate.current?.scheduleMainContentTeardown()
             }
         }
         NotificationCenter.default.addObserver(
@@ -638,7 +644,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             MainActor.assumeIsolated {
                 HealthMonitor.shared.windowVisible = false
-                (NSApp.delegate as? AppDelegate)?.scheduleMainContentTeardown()
+                AppDelegate.current?.scheduleMainContentTeardown()
             }
         }
         // ⌘H 取消隐藏走 willUnhide —— 在窗口真正显示前重建,避免闪一下空白。
@@ -647,7 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             MainActor.assumeIsolated {
                 HealthMonitor.shared.windowVisible = true
-                (NSApp.delegate as? AppDelegate)?.installMainContent()
+                AppDelegate.current?.installMainContent()
             }
         }
 
@@ -720,7 +726,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 到点了再从 NSApp 取回来,那时已在主线程。
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                (NSApp.delegate as? AppDelegate)?.teardownMainContentIfHidden()
+                AppDelegate.current?.teardownMainContentIfHidden()
             }
         }
     }
@@ -793,7 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 先重建视图树再 orderFront,免得闪一下空窗。
         MainActor.assumeIsolated {
             HealthMonitor.shared.windowVisible = true
-            (NSApp.delegate as? AppDelegate)?.installMainContent()
+            AppDelegate.current?.installMainContent()
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
