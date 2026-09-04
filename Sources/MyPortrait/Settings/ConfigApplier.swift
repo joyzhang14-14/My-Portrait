@@ -107,9 +107,10 @@ final class ConfigApplier {
             NSApp.setActivationPolicy(display.showDockIcon ? .regular : .accessory)
             // 切回 .regular 后 app 可能不在前台 + 窗口被压在后面 —— 主动激活并
             // 把窗口拉到前。切到 .accessory 不用动:窗口留在原位继续可见可用。
+            // 走 showMainWindow 而不是直接 orderFront:窗口关着时视图树是卸掉的
+            // (见 AppDelegate.installMainContent),直接拉到前台会是一张空窗。
             if display.showDockIcon {
-                NSApp.activate(ignoringOtherApps: true)
-                mainWindow?.makeKeyAndOrderFront(nil)
+                (NSApp.delegate as? AppDelegate)?.showMainWindow()
             }
         }
 

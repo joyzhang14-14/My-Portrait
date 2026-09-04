@@ -482,6 +482,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 写库。仅启动早期写一次 —— nonisolated(unsafe) 安全。
     nonisolated(unsafe) static var typingObserveM4Only = false
 
+    /// 主窗口内容(SwiftUI 视图树)当前是否装着。关窗/隐藏卸掉,重开重建。
+    private var mainContentInstalled = false
+
     /// `--typing-observe` 模式下持有的 observer（持有它以保证存活 + 退出时 stop）。
     private var typingObserver: TypingObserver?
 
@@ -614,50 +617,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 1200, height: 835))
 
         // Host the SwiftUI ContentView inside the AppKit window.
-        // Inject the Services container + captureSettings into the environment
-        // so any descendant view can read \.services (db / coordinator / reporter)
-        // or \.captureSettings (toggle bindings for the Settings UI).
-        //
-        // **不在这里钉 .preferredColorScheme(.dark)** —— 之前钉死的话 ContentView
-        // 自己读 config.display.theme 设的 preferredColorScheme 会被外层这条
-        // 盖掉,Settings 切 Light/Dark/System 跟没切一样。让 ContentView 决定。
-        let hosting = NSHostingView(
-            rootView: ContentView()
-                .environment(\.services, services)
-                .environment(\.captureSettings, services.settings)
-                .environmentObject(services.settings)
-        )
-        hosting.autoresizingMask = [.width, .height]
-        // Default sizingOptions let SwiftUI's intrinsic size feed back into the
-        // window — when frames reload on a date switch the intrinsic size
-        // transiently changes and the visible content "shrinks" vertically.
-        // Empty options keeps the window size fixed regardless of content.
-        hosting.sizingOptions = []
-        window.contentView = hosting
+        installMainContent()
 
         // 红绿灯关窗 = 只隐藏窗口（app 继续在后台跑采集 / 转录管线）。
         // 配合 applicationShouldTerminateAfterLastWindowClosed = false。
         window.isReleasedWhenClosed = false
 
-        // 关窗 / ⌘H 隐藏 → 卸掉 Timeline 缩略图缓存(NSCache 上限 512MB)。
-        // 视图树关窗后原地存活,NSCache 又只认系统内存压力,后台常驻进程
-        // 等不到回收 —— 不主动清,翻过 Timeline 的几百 MB 会一直挂在
-        // 后台(实测 ~700MB)。重开窗口只需从磁盘重新解码缩略图,无感。
+        // 关窗 / ⌘H 隐藏 → 卸掉整棵 SwiftUI 视图树 + Timeline 缩略图缓存;
+        // 重开时重建(见 installMainContent / teardownMainContent)。
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: window, queue: .main
         ) { _ in
-            ImageThumbnailCache.shared.removeAll()
-            HealthMonitor.shared.windowVisible = false
+            MainActor.assumeIsolated {
+                HealthMonitor.shared.windowVisible = false
+                (NSApp.delegate as? AppDelegate)?.scheduleMainContentTeardown()
+            }
         }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didHideNotification, object: nil, queue: .main
         ) { _ in
-            ImageThumbnailCache.shared.removeAll()
-            HealthMonitor.shared.windowVisible = false
+            MainActor.assumeIsolated {
+                HealthMonitor.shared.windowVisible = false
+                (NSApp.delegate as? AppDelegate)?.scheduleMainContentTeardown()
+            }
         }
+        // ⌘H 取消隐藏走 willUnhide —— 在窗口真正显示前重建,避免闪一下空白。
         NotificationCenter.default.addObserver(
-            forName: NSApplication.didUnhideNotification, object: nil, queue: .main
-        ) { _ in HealthMonitor.shared.windowVisible = true }
+            forName: NSApplication.willUnhideNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                HealthMonitor.shared.windowVisible = true
+                (NSApp.delegate as? AppDelegate)?.installMainContent()
+            }
+        }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -681,6 +673,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 内部已经触发;直接读最新状态。用户主动 dismiss 过就不再 nag,直到
         // 重新启动 + 状态从未授权过(避免每次启动都打扰)。
         promptForFullDiskAccessIfNeeded()
+    }
+
+    // MARK: - 主窗口内容装卸
+
+    /// 主窗口关着时,SwiftUI 视图树原地存活:`repeatForever` 动画和周期
+    /// `TimelineView` 会按刷新率继续重绘看不见的窗口(实测主线程 35% CPU +
+    /// 上百 MB 常驻)。关窗/隐藏卸掉整棵树,重开重建 —— 页面内状态
+    /// (滚动位置、未提交的输入)不保留,换后台真正安静。
+    ///
+    /// 逐个给动画加"窗口不可见就停"的闸也能修,但每加一处新动画就得记得加闸;
+    /// 这里一刀切,新写的动画自动受益。
+    @MainActor
+    private func installMainContent() {
+        guard let window, !mainContentInstalled else { return }
+        mainContentInstalled = true
+        // Inject the Services container + captureSettings into the environment
+        // so any descendant view can read \.services (db / coordinator / reporter)
+        // or \.captureSettings (toggle bindings for the Settings UI).
+        //
+        // **不在这里钉 .preferredColorScheme(.dark)** —— 之前钉死的话 ContentView
+        // 自己读 config.display.theme 设的 preferredColorScheme 会被外层这条
+        // 盖掉,Settings 切 Light/Dark/System 跟没切一样。让 ContentView 决定。
+        let hosting = NSHostingView(
+            rootView: ContentView()
+                .environment(\.services, services)
+                .environment(\.captureSettings, services.settings)
+                .environmentObject(services.settings)
+        )
+        hosting.autoresizingMask = [.width, .height]
+        // Default sizingOptions let SwiftUI's intrinsic size feed back into the
+        // window — when frames reload on a date switch the intrinsic size
+        // transiently changes and the visible content "shrinks" vertically.
+        // Empty options keeps the window size fixed regardless of content.
+        hosting.sizingOptions = []
+        window.contentView = hosting
+    }
+
+    /// 卸掉视图树,换一个空 NSView。异步执行:willClose / didHide 时 AppKit
+    /// 还在处理窗口状态,当场换 contentView 不安全。执行前复查可见性 ——
+    /// 关了立刻重开(或 ⌘H 后马上切回来)时不该拆。
+    @MainActor
+    private func scheduleMainContentTeardown() {
+        // 不捕获 self —— 捕获它就是把非 Sendable 的 AppDelegate 送过队列边界。
+        // 到点了再从 NSApp 取回来,那时已在主线程。
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                (NSApp.delegate as? AppDelegate)?.teardownMainContentIfHidden()
+            }
+        }
+    }
+
+    @MainActor
+    private func teardownMainContentIfHidden() {
+        guard let window, !HealthMonitor.shared.windowVisible, !window.isVisible else { return }
+        mainContentInstalled = false
+        ImageThumbnailCache.shared.removeAll()
+        window.contentView = NSView(frame: window.frame)
     }
 
     /// 启动时如果 FDA 没授权,弹一个 NSAlert 引导用户去 System Settings 加
@@ -737,11 +786,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 把主窗口拉到前台。菜单栏 "Open My Portrait" 和 Dock 重开都走这里。
     @objc func showMainWindow() {
         guard let window else { return }
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
         // 关窗/隐藏后再打开的唯一入口(Dock 重开与菜单栏 Open 都走这里)。
         // AppDelegate 没标 @MainActor,但本方法只会在主线程被调(AppKit 约定)。
-        MainActor.assumeIsolated { HealthMonitor.shared.windowVisible = true }
+        // 先重建视图树再 orderFront,免得闪一下空窗。
+        MainActor.assumeIsolated {
+            HealthMonitor.shared.windowVisible = true
+            (NSApp.delegate as? AppDelegate)?.installMainContent()
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
