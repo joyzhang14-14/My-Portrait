@@ -507,6 +507,13 @@ struct DisplayConfig: Codable, Equatable {
     /// 由读取方回落到默认,不做校验。
     var memoryLastScope:         String = ""
     var memoryLastViewMode:      String = ""
+    /// 主窗口上次停在哪个侧栏页 —— 切页写回,重开/重启直接回到这儿。关窗
+    /// 会卸掉视图树(见 AppDelegate.installMainContent),靠这个值把"停在
+    /// 哪一页"接回来,不用为此留视图在内存里。值取 `SidebarSection.rawValue`,
+    /// 认不出回落 timeline。
+    var lastPage:                String = ""
+    /// Settings 上次停在哪个子页,同上。值取 `SettingsSubsection.id`,认不出回落 General。
+    var lastSettingsPage:        String = ""
     /// CronJob 历史记录保留上限 —— sidebar CRON JOB HISTORY 区只显示前 N 条,
     /// CronJobStore.appendRun 按这个值裁 runs.json。
     /// 0 = no limit(runs.json 会无限增长,慎选)。
@@ -530,6 +537,8 @@ struct DisplayConfig: Codable, Equatable {
         case graphHideLinks           = "graph_hide_links"
         case memoryLastScope          = "memory_last_scope"
         case memoryLastViewMode       = "memory_last_view_mode"
+        case lastPage                 = "last_page"
+        case lastSettingsPage         = "last_settings_page"
         case cronJobHistoryLimit      = "cron_job_history_limit"
     }
     init(from decoder: Decoder) throws {
@@ -548,6 +557,8 @@ struct DisplayConfig: Codable, Equatable {
         graphHideLinks          = c.dflt(Bool.self, .graphHideLinks, graphHideLinks)
         memoryLastScope         = c.dflt(String.self, .memoryLastScope, memoryLastScope)
         memoryLastViewMode      = c.dflt(String.self, .memoryLastViewMode, memoryLastViewMode)
+        lastPage                = c.dflt(String.self, .lastPage, lastPage)
+        lastSettingsPage        = c.dflt(String.self, .lastSettingsPage, lastSettingsPage)
         cronJobHistoryLimit     = c.dflt(Int.self, .cronJobHistoryLimit, cronJobHistoryLimit)
     }
 }

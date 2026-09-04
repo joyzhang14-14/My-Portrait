@@ -38,7 +38,9 @@ final class SystemAppearanceMonitor {
 }
 
 struct ContentView: View {
-    @State private var selection: SidebarSection? = .timeline
+    /// 侧栏页从 config 恢复,切页写回 —— 关窗后视图树会卸掉,重开靠它回到原页。
+    @State private var selection: SidebarSection? =
+        SidebarSection(rawValue: ConfigStore.shared.current.display.lastPage) ?? .timeline
     @State private var appState = AppState()
     @State private var timeline = TimelineState()
     @State private var chat = ChatController()
@@ -51,7 +53,10 @@ struct ContentView: View {
     /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
     @State private var memoryInputJump: Int64? = nil
     @State private var cronJobSelection: UUID? = nil
-    @State private var settingsSubsection: SettingsSubsection? = .app(.general)
+    @State private var settingsSubsection: SettingsSubsection? = {
+        let raw = ConfigStore.shared.current.display.lastSettingsPage
+        return SettingsSubsection.allCases.first { $0.id == raw } ?? .app(.general)
+    }()
     /// 首启 onboarding 状态。绑定 ConfigStore.general.onboardingCompleted。
     /// false → ContentView 起来后立刻弹 onboarding sheet 挡主 UI;
     /// onFinish 把 flag 置 true → sheet 自动关。
@@ -99,7 +104,13 @@ struct ContentView: View {
             HealthMonitor.shared.currentPage = pageName
         }
         // 内存采样行(health.log 的 MEM)要标当前页面 —— 切页/切图谱模式时更新。
-        .onChange(of: selection) { _, _ in HealthMonitor.shared.currentPage = pageName }
+        .onChange(of: selection) { _, sel in
+            HealthMonitor.shared.currentPage = pageName
+            if let sel { ConfigStore.shared.mutate { $0.display.lastPage = sel.rawValue } }
+        }
+        .onChange(of: settingsSubsection) { _, sub in
+            if let sub { ConfigStore.shared.mutate { $0.display.lastSettingsPage = sub.id } }
+        }
         .onChange(of: memoryViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
