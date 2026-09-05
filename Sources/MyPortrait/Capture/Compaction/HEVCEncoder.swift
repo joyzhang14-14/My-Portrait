@@ -35,6 +35,7 @@ final class HEVCEncoder {
 
     /// 第一帧的 timestamp_ms，后续帧相对它计算 CMTime。
     private var startTsMs: Int64?
+    private var lastOffsetMs: Int64?
 
     /// 已 append 的帧数。
     private(set) var frameCount: Int = 0
@@ -103,7 +104,12 @@ final class HEVCEncoder {
         if startTsMs == nil {
             startTsMs = timestampMs
         }
-        let offsetMs = max(0, timestampMs - (startTsMs ?? timestampMs))
+        var offsetMs = max(0, timestampMs - (startTsMs ?? timestampMs))
+        // PTS 必须严格递增。库里存在同一毫秒的重复行(同一张 JPG 两条记录),
+        // 同 PTS 二次 append 让 writer 报 -11800/-16364,整块 chunk 失败后每 5
+        // 分钟重试一次永远编不过去。不递增就顶到上一帧 +1ms。
+        if let last = lastOffsetMs, offsetMs <= last { offsetMs = last + 1 }
+        lastOffsetMs = offsetMs
 
         // 等 input 准备好接收数据（背压）。
         while !input.isReadyForMoreMediaData {
