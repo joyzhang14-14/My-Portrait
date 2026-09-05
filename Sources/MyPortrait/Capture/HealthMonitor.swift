@@ -70,6 +70,9 @@ final class HealthMonitor: ObservableObject {
     private func startMemorySampler() {
         let t = Timer(timeInterval: 300, repeats: true) { _ in
             Task { @MainActor in
+                // 活跃采集留下的空闲大块只在下一次 OCR 后才交还,闲置几小时就挂
+                // 几小时(实测 355MB vs 交还后 ~250MB)。采样前顺手交还一次,几毫秒。
+                malloc_zone_pressure_relief(nil, 0)
                 let mb = Self.physFootprintMB()
                 guard mb > 0 else { return }
                 // build 标记:debug(⌘R)与正式包写同一个 health.log,不标分不清。
