@@ -92,6 +92,7 @@ enum FixBrowserURLsCLI {
                 guard var cand = addressCandidate(app: app, words: words) else {
                     stats["\(app)|no_candidate", default: 0] += 1; continue
                 }
+                cand = normalizePunctuation(cand)
                 var oh = host(cand)
                 let rh = url.flatMap(host)
                 if let rh, sameHost(oh, rh) { stats["\(app)|same_host", default: 0] += 1; continue }
@@ -166,6 +167,21 @@ enum FixBrowserURLsCLI {
         }
         guard let best = cands.min(by: { ($0.inBox, $0.negConf, $0.top) < ($1.inBox, $1.negConf, $1.top) }) else { return nil }
         return best.inBox == 0 || best.negConf <= -0.5 ? best.text : nil
+    }
+
+    /// OCR 把 URL 里的 ASCII 标点认成全角(`？tab=rm`)、file:// 路径认出竖线
+    /// (`file:/|/Users`),这里做确定性字符映射修正,不做别的猜测性改写。
+    private static let fullwidthMap: [Character: Character] = [
+        "？": "?", "＆": "&", "：": ":", "／": "/", "＝": "=", "＃": "#", "＋": "+"]
+    private static func normalizePunctuation(_ s: String) -> String {
+        var t = String(s.map { fullwidthMap[$0] ?? $0 })
+        t = t.replacingOccurrences(of: "file:/|/", with: "file:///")
+        while true {
+            if t.hasSuffix("...") { t.removeLast(3) }
+            else if let last = t.last, "|…".contains(last) { t.removeLast() }
+            else { break }
+        }
+        return t
     }
 
     private static func matches(_ re: NSRegularExpression, _ s: String) -> Bool {
