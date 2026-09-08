@@ -17,6 +17,8 @@ import GRDB
 ///      标题换成域名(旧标题肯定也是旧页的)。
 ///   4. 地址栏候选域名在下方自动补全下拉里重复出现 → 地址栏还在打字,页面没跳,跳过
 ///      (只对 Safari 生效)。
+///   5. 「正在播放」浮窗盖住地址栏中段,OCR 只读到候选的前半截(候选右侧紧挨着
+///      非 URL 的词,或候选以 `/c` 截断)→ 只写域名,不写截断的路径。`file://` 不适用。
 ///
 /// 默认 **dry-run**:打印统计 + 样例,完整清单写到
 /// `~/.portrait/logs/fix-browser-urls-dryrun.tsv`。`--apply` 前把受影响行的旧值存进
@@ -91,25 +93,31 @@ enum FixBrowserURLsCLI {
                 guard let raw: String = r["words"], let words = parseWords(raw) else {
                     stats["\(app)|no_words", default: 0] += 1; continue
                 }
-                guard var cand = addressCandidate(app: app, words: words) else {
+                guard let candResult = addressCandidate(app: app, words: words) else {
                     stats["\(app)|no_candidate", default: 0] += 1; continue
                 }
-                cand = normalizePunctuation(cand)
+                var cand = normalizePunctuation(candResult.text)
                 var oh = host(cand)
                 if isTypingDropdown(app: app, words: words, host: oh) {
                     stats["\(app)|typing_skipped", default: 0] += 1; continue
                 }
                 let rh = url.flatMap(host)
                 if let rh, sameHost(oh, rh) { stats["\(app)|same_host", default: 0] += 1; continue }
-                if let snap = snapHost(oh, known: knownHosts) {
-                    if let range = cand.range(of: oh, options: .caseInsensitive) {
-                        cand.replaceSubrange(range, with: snap)
+                let newUrl: String
+                if oh != "file", isOverlayTruncated(app: app, words: words, candText: cand, candLeft: candResult.left, candWidth: candResult.width) {
+                    stats["\(app)|overlay_truncated", default: 0] += 1
+                    newUrl = "https://\(oh)/"
+                } else {
+                    if let snap = snapHost(oh, known: knownHosts) {
+                        if let range = cand.range(of: oh, options: .caseInsensitive) {
+                            cand.replaceSubrange(range, with: snap)
+                        }
+                        oh = snap
+                        snapped += 1
                     }
-                    oh = snap
-                    snapped += 1
+                    newUrl = cand.lowercased().hasPrefix("http") || cand.lowercased().hasPrefix("file:")
+                        ? cand : "https://" + cand
                 }
-                let newUrl = cand.lowercased().hasPrefix("http") || cand.lowercased().hasPrefix("file:")
-                    ? cand : "https://" + cand
                 let kind = (url ?? "").isEmpty ? "fill_empty" : "host_mismatch"
                 let newTitle: String? = kind == "host_mismatch" ? oh : ((title ?? "").isEmpty ? oh : title)
                 stats["\(app)|\(kind)", default: 0] += 1
@@ -143,8 +151,8 @@ enum FixBrowserURLsCLI {
         return best?.host
     }
 
-    /// OCR 词 JSON → (text, top, left, confidence)。backfill 的数字有时是字符串,一并吃。
-    private static func parseWords(_ raw: String) -> [(text: String, top: Double, left: Double, conf: Double)]? {
+    /// OCR 词 JSON → (text, top, left, width, confidence)。backfill 的数字有时是字符串,一并吃。
+    private static func parseWords(_ raw: String) -> [(text: String, top: Double, left: Double, width: Double, conf: Double)]? {
         guard let data = raw.data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         func num(_ v: Any?) -> Double? {
@@ -154,30 +162,49 @@ enum FixBrowserURLsCLI {
         }
         return arr.compactMap { w in
             guard let t = w["text"] as? String, let top = num(w["top"]), let left = num(w["left"]) else { return nil }
-            return (t, top, left, num(w["confidence"]) ?? 0)
+            return (t, top, left, num(w["width"]) ?? 0, num(w["confidence"]) ?? 0)
         }
     }
 
-    private static func addressCandidate(app: String, words: [(text: String, top: Double, left: Double, conf: Double)]) -> String? {
+    private static func addressBand(_ app: String) -> ClosedRange<Double> { app == "Safari" ? 0.045...0.065 : 0.08...0.11 }
+
+    private static func addressCandidate(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)]) -> (text: String, left: Double, width: Double)? {
         // 只看地址栏那一条水平带:Safari top≈0.053、Chrome ≈0.092。带外的
         // 菜单栏(0.011)、「正在播放」浮窗歌词(0.036)、标签栏(0.096)都会有像域名的词。
-        let band: ClosedRange<Double> = app == "Safari" ? 0.045...0.065 : 0.08...0.11
+        let band = addressBand(app)
         let leftRange: ClosedRange<Double> = app == "Safari" ? 0.25...0.62 : 0.04...0.30
-        var cands: [(inBox: Int, negConf: Double, top: Double, text: String)] = []
+        var cands: [(inBox: Int, negConf: Double, top: Double, text: String, left: Double, width: Double)] = []
         for w in words where band.contains(w.top) {
             var t = w.text.trimmingCharacters(in: .whitespaces)
             while let last = t.last, ".,;:".contains(last) { t.removeLast() }
             guard matches(urlRegex, t) || matches(fileRegex, t) else { continue }
-            cands.append((leftRange.contains(w.left) ? 0 : 1, -w.conf, w.top, t))
+            cands.append((leftRange.contains(w.left) ? 0 : 1, -w.conf, w.top, t, w.left, w.width))
         }
         guard let best = cands.min(by: { ($0.inBox, $0.negConf, $0.top) < ($1.inBox, $1.negConf, $1.top) }) else { return nil }
-        return best.inBox == 0 || best.negConf <= -0.5 ? best.text : nil
+        return best.inBox == 0 || best.negConf <= -0.5 ? (best.text, best.left, best.width) : nil
+    }
+
+    /// 「正在播放」浮窗盖在地址栏中间,OCR 只读到被截断的前半段(`chatgpt.com/c`
+    /// 实际是 `chatgpt.com/c/<长 id>`)。命中信号:候选右侧、同一水平带内紧挨着
+    /// (gap<0.02,实测浮窗歌词/文件名续文都贴很近,普通工具栏图标隔得远得多)还有
+    /// 非 URL 的词;或候选本身以 `/c`(chatgpt.com、claude.ai 的会话路径前缀)截断。
+    /// `file://` 不适用(没有"域名"可回退),跳过。
+    private static func isOverlayTruncated(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)], candText: String, candLeft: Double, candWidth: Double) -> Bool {
+        if candText.hasSuffix("/c") { return true }
+        let band = addressBand(app)
+        let candRight = candLeft + candWidth
+        for w in words where band.contains(w.top) && w.left >= candRight - 0.005 {
+            let t = w.text.trimmingCharacters(in: .whitespaces)
+            guard !matches(urlRegex, t), !matches(fileRegex, t) else { continue }
+            if w.left - candRight < 0.02 { return true }
+        }
+        return false
     }
 
     /// 地址栏候选域名在下方自动补全下拉里原样重复,说明地址栏还在打字、页面其实没跳
     /// (实测:候选 anthropic.com,下拉区同时有 "Start Page"——页面还停在起始页)。
     /// 只对 Safari 生效,Chrome 没找到同类证据。
-    private static func isTypingDropdown(app: String, words: [(text: String, top: Double, left: Double, conf: Double)], host oh: String) -> Bool {
+    private static func isTypingDropdown(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)], host oh: String) -> Bool {
         guard app == "Safari" else { return false }
         let band: ClosedRange<Double> = 0.065...0.11
         let leftRange: ClosedRange<Double> = 0.25...0.62
