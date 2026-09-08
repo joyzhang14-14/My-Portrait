@@ -561,6 +561,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // 单实例:同 bundle id 的另一份已在跑(开机登录项拉起的旧 build、Xcode
+        // 又跑一份)→ 请它退出,新启动的这份接管。两份同时采集会把每帧写两遍,
+        // 旧代码的错行还会混进库。
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        for other in NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.joyzhang.myportrait")
+        where other.processIdentifier != myPid {
+            lifecycleLog.notice("another instance running (pid \(other.processIdentifier, privacy: .public)) — asking it to quit")
+            other.terminate()
+        }
+
         // 1. 服务层先起（无 UI 依赖，可在权限请求前 init）
         services = Services()
         statusBarMenu = StatusBarMenu(settings: services.settings, permissions: services.permissions)
