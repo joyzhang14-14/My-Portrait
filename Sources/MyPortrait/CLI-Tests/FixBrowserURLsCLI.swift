@@ -106,19 +106,20 @@ enum FixBrowserURLsCLI {
                 let newUrl: String
                 let joined = joinContinuation(app: app, words: words, cand: cand,
                                               candLeft: candResult.left, candWidth: candResult.width)
-                if joined.appended > 0 { stats["\(app)|joined_continuation", default: 0] += 1 }
                 cand = normalizePunctuation(joined.text)
-                if oh != "file", joined.truncated {
-                    stats["\(app)|overlay_truncated", default: 0] += 1
-                    newUrl = "https://\(oh)/"
-                } else {
-                    if let snap = snapHost(oh, known: knownHosts) {
-                        if let range = cand.range(of: oh, options: .caseInsensitive) {
-                            cand.replaceSubrange(range, with: snap)
-                        }
-                        oh = snap
-                        snapped += 1
+                if let snap = snapHost(oh, known: knownHosts) {
+                    if let range = cand.range(of: oh, options: .caseInsensitive) {
+                        cand.replaceSubrange(range, with: snap)
                     }
+                    oh = snap
+                    snapped += 1
+                }
+                // 网页 URL 只要被切过段(OCR 断开 / 浮窗遮挡)就不拼不补,落到主域名。
+                // file 路径的空格切分是文件名的一部分,照常拼回。
+                if oh != "file", joined.truncated || joined.appended > 0 {
+                    stats["\(app)|host_only", default: 0] += 1
+                    newUrl = "https://\(oh)"
+                } else {
                     newUrl = cand.lowercased().hasPrefix("http") || cand.lowercased().hasPrefix("file:")
                         ? cand : "https://" + cand
                 }
@@ -190,9 +191,9 @@ enum FixBrowserURLsCLI {
 
     private static let urlCharsRegex = try! NSRegularExpression(pattern: #"^[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%|]+$"#)
 
-    /// OCR 会把长 URL 切成两段(query 串、uuid),带空格的 file 路径也会在空格处切开。
-    /// 候选右边紧挨着(间距 < 0.02)的词:只含 URL 字符 → 拼回去;file 路径 → 按空格拼
-    /// (%20);是散文(空格 / 汉字,「正在播放」浮窗的歌词)→ 判定地址栏被遮挡,截断。
+    /// 候选右边紧挨着(间距 < 0.02)的词:只含 URL 字符 → 视为 OCR 把 URL 切了段;
+    /// file 路径 → 文件名里的空格,按 %20 拼回;是散文(空格 / 汉字,「正在播放」浮窗的
+    /// 歌词)→ 判定地址栏被遮挡。切段和遮挡在调用方都落到主域名,拼接结果只给 file 用。
     private static func joinContinuation(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)], cand: String, candLeft: Double, candWidth: Double) -> (text: String, appended: Int, truncated: Bool) {
         let band = addressBand(app)
         let isFile = cand.lowercased().hasPrefix("file:")
