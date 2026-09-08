@@ -104,7 +104,11 @@ enum FixBrowserURLsCLI {
                 let rh = url.flatMap(host)
                 if let rh, sameHost(oh, rh) { stats["\(app)|same_host", default: 0] += 1; continue }
                 let newUrl: String
-                if oh != "file", isOverlayTruncated(app: app, words: words, candText: cand, candLeft: candResult.left, candWidth: candResult.width) {
+                let joined = joinContinuation(app: app, words: words, cand: cand,
+                                              candLeft: candResult.left, candWidth: candResult.width)
+                if joined.appended > 0 { stats["\(app)|joined_continuation", default: 0] += 1 }
+                cand = normalizePunctuation(joined.text)
+                if oh != "file", joined.truncated {
                     stats["\(app)|overlay_truncated", default: 0] += 1
                     newUrl = "https://\(oh)/"
                 } else {
@@ -184,21 +188,34 @@ enum FixBrowserURLsCLI {
         return best.inBox == 0 || best.negConf <= -0.5 ? (best.text, best.left, best.width) : nil
     }
 
-    /// 「正在播放」浮窗盖在地址栏中间,OCR 只读到被截断的前半段(`chatgpt.com/c`
-    /// 实际是 `chatgpt.com/c/<长 id>`)。命中信号:候选右侧、同一水平带内紧挨着
-    /// (gap<0.02,实测浮窗歌词/文件名续文都贴很近,普通工具栏图标隔得远得多)还有
-    /// 非 URL 的词;或候选本身以 `/c`(chatgpt.com、claude.ai 的会话路径前缀)截断。
-    /// `file://` 不适用(没有"域名"可回退),跳过。
-    private static func isOverlayTruncated(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)], candText: String, candLeft: Double, candWidth: Double) -> Bool {
-        if candText.hasSuffix("/c") { return true }
+    private static let urlCharsRegex = try! NSRegularExpression(pattern: #"^[A-Za-z0-9\-._~:/?#@!$&'()*+,;=%|]+$"#)
+
+    /// OCR 会把长 URL 切成两段(query 串、uuid),带空格的 file 路径也会在空格处切开。
+    /// 候选右边紧挨着(间距 < 0.02)的词:只含 URL 字符 → 拼回去;file 路径 → 按空格拼
+    /// (%20);是散文(空格 / 汉字,「正在播放」浮窗的歌词)→ 判定地址栏被遮挡,截断。
+    private static func joinContinuation(app: String, words: [(text: String, top: Double, left: Double, width: Double, conf: Double)], cand: String, candLeft: Double, candWidth: Double) -> (text: String, appended: Int, truncated: Bool) {
         let band = addressBand(app)
-        let candRight = candLeft + candWidth
-        for w in words where band.contains(w.top) && w.left >= candRight - 0.005 {
+        let isFile = cand.lowercased().hasPrefix("file:")
+        var text = cand, right = candLeft + candWidth, appended = 0
+        let sorted = words.filter { band.contains($0.top) && $0.left >= candLeft + candWidth - 0.005 }
+            .sorted { $0.left < $1.left }
+        for w in sorted {
+            let gap = w.left - right
+            if gap >= 0.02 { break }
+            if gap < -0.005 { continue }
             let t = w.text.trimmingCharacters(in: .whitespaces)
-            guard !matches(urlRegex, t), !matches(fileRegex, t) else { continue }
-            if w.left - candRight < 0.02 { return true }
+            if t.isEmpty { continue }
+            if matches(urlCharsRegex, t) {
+                text += t
+            } else if isFile, !t.contains(" ") {
+                text += "%20" + (t.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? t)
+            } else {
+                return (text, appended, true)
+            }
+            appended += 1
+            right = w.left + w.width
         }
-        return false
+        return (text, appended, false)
     }
 
     /// 地址栏候选域名在下方自动补全下拉里原样重复,说明地址栏还在打字、页面其实没跳
