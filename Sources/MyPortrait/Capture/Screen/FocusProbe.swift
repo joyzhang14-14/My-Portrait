@@ -86,6 +86,10 @@ actor FocusProbe {
     }
 
     private let observerTokens = WorkspaceObserverBox()
+
+    /// 前台 app 的 AXObserver 句柄盒(见 FocusTitleObserverBox)。
+    private let titleObserver = FocusTitleObserverBox()
+
     private var started = false
     private var axPermissionWarned = false
 
@@ -106,7 +110,9 @@ actor FocusProbe {
         started = true
 
         let box = observerTokens
+        let titleBox = titleObserver
         await MainActor.run {
+            titleBox.probe = self
             let center = NSWorkspace.shared.notificationCenter
 
             // 焦点 app 切换 → 立即刷新。
@@ -137,7 +143,9 @@ actor FocusProbe {
     func stop() async {
         started = false
         let box = observerTokens
+        let titleBox = titleObserver
         await MainActor.run {
+            Self.removeTitleObserver(titleBox)
             let center = NSWorkspace.shared.notificationCenter
             for t in box.tokens { center.removeObserver(t) }
             box.tokens.removeAll()
@@ -162,7 +170,7 @@ actor FocusProbe {
 
     // MARK: - 私有
 
-    private func refresh() async {
+    func refresh() async {
         // 节流:NSWorkspace 通知风暴(Mission Control / 快速 Cmd-Tab)会瞬间
         // 派发七八条 didActivateApplication,跳过 refreshMinIntervalMs 内的
         // 重复触发,避免主线程被 AX walk 串行队列堵死。
@@ -217,6 +225,8 @@ actor FocusProbe {
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
+            let titleBox = titleObserver
+            await MainActor.run { Self.installTitleObserver(titleBox, pid: pid) }
             // AX 树深度递归遍历**必须在主线程跑** —— 在后台队列上调
             // AXUIElementCopyAttributeValue 会 _dispatch_assert_queue_fail 崩。
             // refresh 由 app 切换触发(不频繁)，遍历有 depth/char/超时三重
@@ -241,6 +251,28 @@ actor FocusProbe {
             axIdentifier: axIdentifier,
             isFocused: true
         )
+    }
+
+    /// 给前台 app 挂标题变化观察者;app 没换就复用,换了先拆旧的。主线程调。
+    nonisolated private static func installTitleObserver(_ box: FocusTitleObserverBox, pid: pid_t) {
+        guard box.pid != pid else { return }
+        removeTitleObserver(box)
+        box.pid = pid
+        var obs: AXObserver?
+        guard AXObserverCreate(pid, titleChangedCallback, &obs) == .success, let obs else { return }
+        let appElem = AXUIElementCreateApplication(pid)
+        let refcon = Unmanaged.passUnretained(box).toOpaque()
+        AXObserverAddNotification(obs, appElem, kAXTitleChangedNotification as CFString, refcon)
+        AXObserverAddNotification(obs, appElem, kAXFocusedWindowChangedNotification as CFString, refcon)
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+        box.observer = obs
+    }
+
+    nonisolated private static func removeTitleObserver(_ box: FocusTitleObserverBox) {
+        guard let old = box.observer else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(old), .defaultMode)
+        box.observer = nil
+        box.pid = 0
     }
 
     /// 尾沿补刷入口:清掉调度标记再走正常 refresh()。若期间又有前沿刷新把
@@ -332,7 +364,9 @@ actor FocusProbe {
     /// 浏览器 URL 抽取。fallback 链:
     ///   1. window.AXDocument                 — Chrome/Edge/Brave/Chromium 系
     ///   2. 焦点窗口子树里的 AXWebArea.AXURL    — Safari (macOS 26.x 起)
-    ///   3. 子树里的 AXTextField.AXValue       — 地址栏兜底(subrole=AXAddressField)
+    ///   3. 子树里的 AXTextField.AXValue       — 地址栏兜底(subrole=AXAddressField,
+    ///      或 Safari 的 identifier WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD;PDF 页没有
+    ///      AXWebArea,全靠这级)
     /// BFS 搜索,深度上限 6,元素上限 200。返回首个非空 URL。
     nonisolated static func extractBrowserURL(focusedWindow: AXUIElement) -> String? {
         // 1. AXDocument(快路)
@@ -368,14 +402,17 @@ actor FocusProbe {
                     if let s = urlRef as? String, !s.isEmpty { return s }
                 }
             }
-            // 3. 地址栏 AXTextField(subrole AXAddressField)→ AXValue
+            // 3. 地址栏 AXTextField → AXValue。subrole AXAddressField,或 Safari
+            //    (macOS 26)的 identifier —— 它的地址栏没有 subrole。
             if role == "AXTextField" {
                 var subRef: CFTypeRef?
-                let isAddr: Bool = {
-                    guard AXUIElementCopyAttributeValue(elem, kAXSubroleAttribute as CFString, &subRef) == .success
-                    else { return false }
-                    return (subRef as? String) == "AXAddressField"
-                }()
+                var isAddr = AXUIElementCopyAttributeValue(elem, kAXSubroleAttribute as CFString, &subRef) == .success
+                    && (subRef as? String) == "AXAddressField"
+                if !isAddr {
+                    var idRef: CFTypeRef?
+                    isAddr = AXUIElementCopyAttributeValue(elem, kAXIdentifierAttribute as CFString, &idRef) == .success
+                        && (idRef as? String) == "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD"
+                }
                 if isAddr {
                     var valRef: CFTypeRef?
                     if AXUIElementCopyAttributeValue(elem, kAXValueAttribute as CFString, &valRef) == .success,
@@ -470,6 +507,24 @@ actor FocusProbe {
 }
 
 /// 焦点信息载体。每帧元数据都会带一份。
+/// 前台 app 的 AXObserver 句柄盒。换标签页 / 页面跳转都会改窗口标题,收到
+/// kAXTitleChangedNotification 就刷缓存 —— 否则缓存只在切 app 时更新,同一个
+/// 浏览器里换标签页,标题和 URL 一直是旧的。只在主线程读写。
+private final class FocusTitleObserverBox: @unchecked Sendable {
+    var observer: AXObserver?
+    var pid: pid_t = 0
+    weak var probe: FocusProbe?
+}
+
+/// AXObserver 回调:前台 app 窗口标题变了 → 刷 FocusProbe 缓存。走 refresh 自带的
+/// 300ms 节流,页面加载时标题连改几次也不会连跑 AX 遍历。
+private let titleChangedCallback: AXObserverCallback = { _, _, _, refcon in
+    guard let refcon else { return }
+    let box = Unmanaged<FocusTitleObserverBox>.fromOpaque(refcon).takeUnretainedValue()
+    guard let probe = box.probe else { return }
+    Task { await probe.refresh() }
+}
+
 public struct FocusInfo: Equatable, Sendable {
     public let appName: String
     public let bundleId: String?
