@@ -65,9 +65,17 @@ enum FixBrowserURLsCLI {
     // MARK: - 扫描
 
     private static func scan(_ pool: DatabasePool) async throws -> [Proposal] {
-        let (proposals, stats): ([Proposal], [String: Int]) = try await pool.read { db in
+        let (proposals, stats, snapped): ([Proposal], [String: Int], Int) = try await pool.read { db in
+            // 已知域名词表:所有非空 browser_url 归一化后出现 ≥3 次的域名,当作 OCR 吸附的参照。
+            var knownHosts: [String: Int] = [:]
+            let urlCursor = try String.fetchCursor(db, sql:
+                "SELECT browser_url FROM frames WHERE browser_url IS NOT NULL AND browser_url != ''")
+            while let u = try urlCursor.next() { knownHosts[host(u), default: 0] += 1 }
+            knownHosts = knownHosts.filter { $0.value >= 3 }
+
             var proposals: [Proposal] = []
             var stats: [String: Int] = [:]
+            var snapped = 0
             let cursor = try Row.fetchCursor(db, sql: """
                 SELECT id, app_name, window_name, browser_url,
                        COALESCE(ocr_words_json, ocr_backfill_words) AS words
@@ -81,12 +89,19 @@ enum FixBrowserURLsCLI {
                 guard let raw: String = r["words"], let words = parseWords(raw) else {
                     stats["\(app)|no_words", default: 0] += 1; continue
                 }
-                guard let cand = addressCandidate(app: app, words: words) else {
+                guard var cand = addressCandidate(app: app, words: words) else {
                     stats["\(app)|no_candidate", default: 0] += 1; continue
                 }
-                let oh = host(cand)
+                var oh = host(cand)
                 let rh = url.flatMap(host)
                 if let rh, sameHost(oh, rh) { stats["\(app)|same_host", default: 0] += 1; continue }
+                if let snap = snapHost(oh, known: knownHosts) {
+                    if let range = cand.range(of: oh, options: .caseInsensitive) {
+                        cand.replaceSubrange(range, with: snap)
+                    }
+                    oh = snap
+                    snapped += 1
+                }
                 let newUrl = cand.lowercased().hasPrefix("http") || cand.lowercased().hasPrefix("file:")
                     ? cand : "https://" + cand
                 let kind = (url ?? "").isEmpty ? "fill_empty" : "host_mismatch"
@@ -95,11 +110,31 @@ enum FixBrowserURLsCLI {
                 proposals.append(Proposal(id: id, app: app, oldTitle: title, oldUrl: url,
                                           newTitle: newTitle, newUrl: newUrl, kind: kind))
             }
-            return (proposals, stats)
+            return (proposals, stats, snapped)
         }
         print("\n结果                          帧数")
         for k in stats.keys.sorted() { print("\(pad(k, 30))\(stats[k]!)") }
+        print("吸附了 \(snapped) 帧(OCR 域名读错,靠已知域名词表纠正)")
         return proposals
+    }
+
+    /// OCR 域名不在已知词表里时,找一个词表里的域名吸附过去:去点相等(如
+    /// digitalfidelity.com≈digital.fidelity.com)或编辑距离 ≤2 且长度 ≥6(如 200m.us≈zoom.us)。
+    /// 多候选取编辑距离最小,平手取出现次数最多。
+    private static func snapHost(_ ocrHost: String, known: [String: Int]) -> String? {
+        if known[ocrHost] != nil { return nil }
+        let ocrStripped = ocrHost.replacingOccurrences(of: ".", with: "")
+        var best: (host: String, dist: Int, count: Int)?
+        for (kh, count) in known {
+            let dotless = kh.replacingOccurrences(of: ".", with: "") == ocrStripped
+            let dist = levenshtein(Array(ocrHost), Array(kh))
+            guard dotless || (dist <= 2 && kh.count >= 6) else { continue }
+            let d = dotless ? 0 : dist
+            if best == nil || d < best!.dist || (d == best!.dist && count > best!.count) {
+                best = (kh, d, count)
+            }
+        }
+        return best?.host
     }
 
     /// OCR 词 JSON → (text, top, left, confidence)。backfill 的数字有时是字符串,一并吃。
