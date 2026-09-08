@@ -663,7 +663,11 @@ struct ConnectionsView: View {
                 defer { connecting = nil }
                 do {
                     _ = try await ClaudeCodeAgent.probeConnection()
-                    appState.toggleConnect(integration)
+                    // 只置连,不切换:切走再切回后转圈状态已随旧页面销毁,再点一次
+                    // Detect 会起第二个探测,第二次 toggle 会把刚点亮的绿点切灭。
+                    if !appState.isConnected(integration.id) {
+                        appState.toggleConnect(integration)
+                    }
                     // 探测成功后顺手读一次登录有效期。**只在这里读** ——
                     // 它会弹钥匙串授权框,必须紧跟用户点的 Detect 这个动作。
                     // 用户点"不允许"就拿不到,tile 上不显示天数,不影响连接。
