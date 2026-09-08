@@ -15,6 +15,8 @@ import GRDB
 ///      (`200m.us`≈`zoom.us`)都算一致,不动。`file://` 单独比。
 ///   3. 记录为空 → 填 OCR URL(标题空的一并填域名);域名不一致 → URL 换成 OCR,
 ///      标题换成域名(旧标题肯定也是旧页的)。
+///   4. 地址栏候选域名在下方自动补全下拉里重复出现 → 地址栏还在打字,页面没跳,跳过
+///      (只对 Safari 生效)。
 ///
 /// 默认 **dry-run**:打印统计 + 样例,完整清单写到
 /// `~/.portrait/logs/fix-browser-urls-dryrun.tsv`。`--apply` 前把受影响行的旧值存进
@@ -94,6 +96,9 @@ enum FixBrowserURLsCLI {
                 }
                 cand = normalizePunctuation(cand)
                 var oh = host(cand)
+                if isTypingDropdown(app: app, words: words, host: oh) {
+                    stats["\(app)|typing_skipped", default: 0] += 1; continue
+                }
                 let rh = url.flatMap(host)
                 if let rh, sameHost(oh, rh) { stats["\(app)|same_host", default: 0] += 1; continue }
                 if let snap = snapHost(oh, known: knownHosts) {
@@ -167,6 +172,21 @@ enum FixBrowserURLsCLI {
         }
         guard let best = cands.min(by: { ($0.inBox, $0.negConf, $0.top) < ($1.inBox, $1.negConf, $1.top) }) else { return nil }
         return best.inBox == 0 || best.negConf <= -0.5 ? best.text : nil
+    }
+
+    /// 地址栏候选域名在下方自动补全下拉里原样重复,说明地址栏还在打字、页面其实没跳
+    /// (实测:候选 anthropic.com,下拉区同时有 "Start Page"——页面还停在起始页)。
+    /// 只对 Safari 生效,Chrome 没找到同类证据。
+    private static func isTypingDropdown(app: String, words: [(text: String, top: Double, left: Double, conf: Double)], host oh: String) -> Bool {
+        guard app == "Safari" else { return false }
+        let band: ClosedRange<Double> = 0.065...0.11
+        let leftRange: ClosedRange<Double> = 0.25...0.62
+        for w in words where band.contains(w.top) && leftRange.contains(w.left) {
+            var t = w.text.trimmingCharacters(in: .whitespaces).lowercased()
+            while let last = t.last, ".,;:".contains(last) { t.removeLast() }
+            if t == oh { return true }
+        }
+        return false
     }
 
     /// OCR 把 URL 里的 ASCII 标点认成全角(`？tab=rm`)、file:// 路径认出竖线
