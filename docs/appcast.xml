@@ -12,6 +12,19 @@
         -->
 
         <item>
+            <title>1.3.222</title>
+            <pubDate>Sun, 13 Sep 2026 10:29:00 +0000</pubDate>
+            <sparkle:version>182</sparkle:version>
+            <sparkle:shortVersionString>1.3.222</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>Picks up where you left off</strong> &mdash; reopening the window brings you back to the page you were on, Settings section included.</li><li><strong>Much lighter in the background</strong> &mdash; with the window closed, the app now uses a fraction of the memory it used to and barely any CPU.</li><li><strong>Background activity helper keeps its approval</strong> across updates. If macOS ever resets it, a notification takes you straight to the right settings page.</li><li><strong>Clearer transcription status</strong> &mdash; shows <strong>Waiting&hellip;</strong> while a clip sits in the queue and <strong>Transcribing&hellip;</strong> only when it is actually being transcribed.</li></ul><h3>Bug fixes</h3><ul><li>Switching tabs in Safari or Chrome now updates the recorded page title and URL right away; Safari PDF pages get their URL too. Past frames with a wrong or missing URL can be repaired from your screenshots.</li><li>Video compaction no longer gets stuck retrying the same clips every few minutes.</li><li><strong>Detect login status</strong> for Claude Code no longer switches the connection off when run twice.</li><li>Opening a second copy of the app no longer records everything twice &mdash; the newer copy takes over.</li><li>Timeline thumbnails are released when the window closes instead of staying in memory.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.222/MyPortrait_1.3.222_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="HN5xGNVW5GcRqor8E0AowIg++S573VbQObBL2uqLHYegKqOEmz2SzEp3Rjwkz8FBgQAV/WHxLdc1Fpa+iD0eDQ==" length="27902287" />
+        </item>
+
+        <item>
             <title>1.3.213</title>
             <pubDate>Mon, 31 Aug 2026 07:56:11 +0000</pubDate>
             <sparkle:version>181</sparkle:version>
