@@ -461,7 +461,7 @@ struct EventOverlay {
         if isNew { created.insert(url) }
     }
 
-    /// 撤销清单:路径相对 events/。
+    /// 撤销清单(绝对路径)。
     private struct Journal: Codable {
         var created: [String]
         var originals: [String: Data]
@@ -472,17 +472,13 @@ struct EventOverlay {
             .appendingPathComponent(intervalId.replacingOccurrences(of: ":", with: "_") + ".json")
     }
 
-    private static func rel(_ url: URL) -> String {
-        url.path.replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
-    }
-
     /// 写撤销清单 → 逐个落盘;中途出错按清单撤销后抛出。
     func commit(intervalId: String) throws {
         guard !order.isEmpty else { return }
         var j = Journal(created: [], originals: [:])
         for url in order {
-            if created.contains(url) { j.created.append(Self.rel(url)) }
-            else { j.originals[Self.rel(url)] = try Data(contentsOf: url) }
+            if created.contains(url) { j.created.append(url.path) }
+            else { j.originals[url.path] = try Data(contentsOf: url) }
         }
         let ju = Self.journalURL(intervalId: intervalId)
         try FileManager.default.createDirectory(at: ju.deletingLastPathComponent(),
@@ -506,11 +502,11 @@ struct EventOverlay {
         guard let data = try? Data(contentsOf: ju),
               let j = try? JSONDecoder().decode(Journal.self, from: data) else { return }
         let fm = FileManager.default
-        for r in j.created {
-            try? fm.removeItem(at: Storage.eventsDir.appendingPathComponent(r))
+        for p in j.created {
+            try? fm.removeItem(at: URL(fileURLWithPath: p))
         }
-        for (r, original) in j.originals {
-            try? original.write(to: Storage.eventsDir.appendingPathComponent(r), options: .atomic)
+        for (p, original) in j.originals {
+            try? original.write(to: URL(fileURLWithPath: p), options: .atomic)
         }
         try? fm.removeItem(at: ju)
         print("[Backfill] undo \(intervalId): removed \(j.created.count) new event(s), restored \(j.originals.count) joined event(s)")
