@@ -362,7 +362,7 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// 走调度器的 runEventJob（与定时触发同一函数：待处理区间 + 上限 7 +
+    /// 走调度器的 runEventJob（与定时触发同一函数：全部待处理区间 +
     /// 没活罢工）。先把还没封进区间的帧按 Run now 封成一个区间(截止点 now − 60 s),
     /// 跑前拍快照，跑完进审核。
     @MainActor

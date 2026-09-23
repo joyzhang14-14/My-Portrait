@@ -11,7 +11,8 @@ import GRDB
 /// (文件名去重)、join 记被 join 那几个 session 的本地日、失败区间不留文件且不动其他
 /// 区间的事件(LLM 失败 / 失败回滚 / 崩溃恢复 / 落盘中途出错)、impact 评分范围找回、
 /// personality 每个本地日只跑一次、OCR 闸按本地日窗口计数、区间取帧不设上限、
-/// 时间轴按日历日期显示。
+/// 时间轴按日历日期显示、本机运行时机(封区间不触发运行,time_of_day 到点处理全部待处理
+/// 区间,其余时刻只重试失败过且退避到期的区间 / 本地日,Retry now / Run now 立即处理)。
 ///
 ///   CFFIXED_USER_HOME=$(mktemp -d .build/ivhome.XXXX) .build/debug/MyPortrait --interval-selftest
 @MainActor
@@ -189,7 +190,7 @@ enum IntervalSelfTest {
                        from: local("2026-09-23 07:00"), to: local("2026-09-23 07:00") + 5999 * 1000, every: 1000)
         try insertLedger(pool, [ivA, ivB, ivC, ivE], origin: t0)
 
-        check(sched.pendingIntervals(cap: 7).map(\.id) == [ivA.id, ivB.id, ivC.id, ivE.id],
+        check(sched.pendingIntervals().map(\.id) == [ivA.id, ivB.id, ivC.id, ivE.id],
               "scheduler: pending intervals come from the ledger, oldest first")
 
         // —— A:跨两个本地日 ——
@@ -277,7 +278,9 @@ enum IntervalSelfTest {
         check(sched.attentionDays().contains { $0.date == ivC.id }, "C: failed interval shows in Needs attention")
         sched.resetDay(ivC.id)
         let c3 = try EventIntervalStore(dbPool: pool).interval(id: ivC.id)
-        check(c3?.event == .pending && c3?.retryCount == 0, "C: Retry now → pending, retry 0")
+        check(c3?.event == .pending && c3?.retryCount == 2
+              && sched.pendingIntervals(scope: .retryOnly).map(\.id) == [ivC.id],
+              "C: Retry now → pending, retry kept, picked up by the next tick's retry run")
 
         // 落盘中途出错 → 当场撤销。
         let blocker = events("2026-09-24")
@@ -328,6 +331,59 @@ enum IntervalSelfTest {
         check(sched.stagesComplete(date: ivA.id, stages: [.raw, .event, .impact])
               && !sched.stagesComplete(date: ivE.id, stages: [.raw, .event, .impact]),
               "staged-run check reads interval rows")
+
+        // —— 本机运行时机 ——
+        print("[interval-selftest] local run timing")
+        let cal0 = Calendar.current
+        func at(_ hh: Int, _ mm: Int) -> Date { cal0.date(bySettingHour: hh, minute: mm, second: 0, of: Date())! }
+        let daily = SchedulerConfig(frequency: .daily, timeOfDay: "03:00", dayOfWeek: 0, dayOfMonth: 1)
+        typealias MS = MemoryScheduler
+        // 12:00 之后又用了一小时电脑,14:00 起离开 2.5h → 这次检查封出一个空档区间 F。
+        try addSession(pool, window: "zeta-win", app: "Editor",
+                       from: local("2026-09-23 13:00"), to: local("2026-09-23 14:00"), every: m)
+        let sealedF = try store.sealCheck(now: Date(timeIntervalSince1970: Double(local("2026-09-23 16:30")) / 1000),
+                                          tzOffsetMin: tz)
+        let ivF = sealedF.first
+        check(sealedF.count == 1 && ivF?.trigger == "gap" && ivF?.startMs == ivE.endMs
+              && ivF?.endMs == local("2026-09-23 14:00") + 1 && ivF?.frameCount == 61,
+              "timing: seal check closes F at the 2h gap after 14:00")
+        let fId = ivF?.id ?? ""
+        check(sched.pendingIntervals().map(\.id) == [ivE.id, fId] && sched.pendingIntervals(scope: .retryOnly).isEmpty,
+              "timing: E and F wait in the ledger, neither is a retry")
+        check(MS.localRunScope(config: daily, now: at(14, 0), ranToday: true, hasRetry: false) == nil,
+              "timing: after today's scheduled run, a newly sealed interval starts no local run")
+        check(MS.localRunScope(config: daily, now: at(2, 59), ranToday: false, hasRetry: false) == nil
+              && MS.localRunScope(config: daily, now: at(3, 0), ranToday: false, hasRetry: false) == .all
+              && MS.localRunScope(config: daily, now: at(9, 0), ranToday: false, hasRetry: false) == .all,
+              "timing: time_of_day 03:00 (or the first tick after waking past it) runs all pending intervals")
+        check(sched.eventRunNowHasWork() && sched.pendingIntervals().map(\.id).contains(fId),
+              "timing: Run now takes E and F right away (scope .all)")
+
+        // F 失败一次 → 10 分钟退避;到期后只有 F 进重试运行,E(retry 0)仍等 time_of_day。
+        let nowT = EventIntervalStore.nowMs()
+        try store.setStatus(id: fId, stage: .event, status: .failed, nowMs: nowT)
+        try store.bumpRetry(id: fId, nowMs: nowT)
+        check(sched.pendingIntervals(scope: .retryOnly).isEmpty, "timing: failed F inside its 10 min backoff → no retry yet")
+        try store.setRetryCount(id: fId, count: 1, nowMs: nowT - 11 * m)
+        let retryIds = sched.pendingIntervals(scope: .retryOnly).map(\.id)
+        check(retryIds == [fId]
+              && MS.localRunScope(config: daily, now: at(14, 0), ranToday: true, hasRetry: !retryIds.isEmpty) == .retryOnly,
+              "timing: backoff over → retry run takes only F (retry_count > 0), not E")
+        let off = SchedulerConfig(frequency: .off, timeOfDay: "03:00", dayOfWeek: 0, dayOfMonth: 1)
+        check(MS.localRunScope(config: off, now: at(14, 0), ranToday: false, hasRetry: true) == nil,
+              "timing: frequency off → no scheduled or retry run")
+
+        // personality:就绪日等调度时刻(或 event 接力),失败日按退避重试。
+        check(sched.pendingPersonalityDays(cap: 7).map(\.day) == ["2026-09-22"]
+              && sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).isEmpty,
+              "timing: ready personality day is not a retry — runs at the scheduled time or after event")
+        try store.setPersonalityStatus(day: "2026-09-22", tzOffsetMin: tz, status: .failed, nowMs: nowT)
+        try store.bumpPersonalityRetry(day: "2026-09-22", nowMs: nowT)
+        check(sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).isEmpty,
+              "timing: failed personality day inside its backoff → no retry yet")
+        try store.setPersonalityRetryCount(day: "2026-09-22", count: 1, nowMs: nowT - 11 * m)
+        check(sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).map(\.day) == ["2026-09-22"],
+              "timing: failed personality day retried once its backoff is over")
 
         // —— UI:日历日期 ——
         let cal = Calendar(identifier: .gregorian)

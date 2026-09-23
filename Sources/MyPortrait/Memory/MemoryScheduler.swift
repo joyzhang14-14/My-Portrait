@@ -32,7 +32,10 @@ private func portraitPowerSourceCallback(_ refcon: UnsafeMutableRawPointer?) {
 ///   - personality:按本地日(`personality_days`)跑,每天一次。
 ///
 /// "event / portrait" 是调度器身份（跑什么），频率是它的配置（多久跑一次）。
-/// 每次触发最多处理 7 个区间 / 本地日（`dayCap`），从最旧的开始。
+/// 本机 event 在 `[scheduler.event]` 的 time_of_day 到点时一次处理全部待处理区间(封区间
+/// 本身不触发运行),personality 在同一轮 event 之后接力或在自己的 time_of_day 处理就绪的
+/// 本地日(每次最多 7 个,`dayCap`,从最旧的开始);其余时刻只重试失败过(retry_count > 0)
+/// 且退避到期的区间 / 本地日。Run now 立即处理。
 ///
 /// 失败语义（见 ProcessingStatus）：
 ///   - 真实失败 → status=failed，retry_count +1；retry_count ≥ 3 → dead_letter。
@@ -72,7 +75,7 @@ final class MemoryScheduler {
 
     private let store = ProcessingLogStore()
 
-    /// 每次 event / personality job 最多处理几个区间 / 本地日(最老的先跑)。
+    /// 每次 personality job 最多处理几个本地日(最老的先跑)。
     ///
     /// (2026-08-05 update) 硬编码 7。若需改回可配,见 ConfigSchema 里
     /// event_day_cap 那条注释。
@@ -668,32 +671,24 @@ final class MemoryScheduler {
         // 的 events/ 盘上写入 / DB 落定,Tier-2 读到稳定状态。
         // Tier-1 内部(event ↔ writing-capture)彼此无先后,可同 tick 一起跑。
         //
-        // **追赶分支(catchUp)**:daily 频率下,只要有 pending 活 + 今天没跑过,
-        // 任何 tick 都触发(不必等到点)。解决"电脑半夜睡着 → scheduled tick
-        // 错过 → 整天跳过"的滞后。weekly/monthly 维持"scheduled 日 + 到点"语义。
+        // **portrait 追赶分支(catchUp)**:daily 频率下,只要有 pending 活 + 今天没跑过,
+        // 任何 tick 都触发(不必等到点)。weekly/monthly 维持"scheduled 日 + 到点"语义。
         //
-        // **重试(needsRetry)**:failed / budget_deferred 的下游(weekly/monthly
-        // 频率没 catchUp 兜底)合进同一按天分支,跟着每天触发一次重试 —— 不单
-        // 开每-tick 重试,否则 budget_deferred 会每 15 分钟真打一次 LLM(429)。
+        // **event / personality**:time_of_day 到点(当天还没跑过;机器睡过了点就在醒来后的
+        // 第一个 tick)处理全部待处理区间 / 就绪日,其余 tick 只重试失败过的行,见
+        // `localRunScope`。
 
         // ===== Tier 1 =====
         var tier1Ran = false
 
-        // eventToday 只挡 daily-scheduled trigger,不挡 retry:backoff 到点
-        // 要能当天重试,否则 UI 显示 "~10 min" 实际要等到次日,Reset 按钮形同虚设。
-        let eventToday   = lastRunDay(kLastEvent) != localDayString(now)
-        let eventCatchUp = s.event.frequency == .daily
-            && (eventJobHasWork() || classifierJobHasWork())
-        // eventNeedsRetry() 只认 failed/budget_deferred,而 "Retry now"(resetDay)
-        // 把阶段翻成 pending,不落在判据里 —— 当天已跑过时点了也要等到次日。
-        // 把 pending 的活也算进 retry 分支:有没跑完的天(且过了 backoff)就跑。
-        let eventRetry   = s.event.frequency != .off
-            && (eventNeedsRetry() || eventJobHasWork() || classifierJobHasWork())
-        let eventScheduled = eventToday
-            && (Self.shouldTriggerNow(config: s.event, now: now) || eventCatchUp)
-        if !s.event.isOffloaded, eventScheduled || eventRetry {   // 搬走时 classify 一起跳过
-            if eventScheduled { setLastRun(kLastEvent, now) }   // retry 不更新 lastRun
-            await runEventJob()
+        if !s.event.isOffloaded,   // 搬走时 classify 一起跳过
+           let scope = Self.localRunScope(config: s.event, now: now,
+                                          ranToday: lastRunDay(kLastEvent) == localDayString(now),
+                                          hasRetry: eventNeedsRetry()) {
+            // 到点那一轮没被打断(睡眠 / 退出 pause、调度器在忙)才记今天已跑,否则下个
+            // tick 接着跑全部待处理区间。retry 不更新 lastRun。
+            let outcome = await runEventJob(scope: scope)
+            if scope == .all, !outcome.isBusy { setLastRun(kLastEvent, now) }
             tier1Ran = true
         }
 
@@ -717,7 +712,7 @@ final class MemoryScheduler {
         // 白等到第二天才再试。
         let portraitToday   = lastRunDay(kLastPortrait) != localDayString(now)
         let portraitCatchUp = s.portrait.frequency == .daily && portraitJobHasWork()
-        // 同 eventRetry:resetDay 翻出的 pending 也要能当天重跑。
+        // resetDay 翻出的 pending 也要能当天重跑。
         let portraitRetry   = s.portrait.frequency != .off
             && (portraitNeedsRetry() || portraitJobHasWork())
         let portraitScheduled = portraitToday
@@ -727,15 +722,18 @@ final class MemoryScheduler {
             await runPortraitJob()
         }
 
-        let personalityToday   = lastRunDay(kLastPersonality) != localDayString(now)
-        let personalityCatchUp = s.personality.frequency == .daily && personalityJobHasWork()
-        let personalityRetry   = s.personality.frequency != .off
-            && (personalityNeedsRetry() || personalityJobHasWork())
-        let personalityScheduled = personalityToday
-            && (Self.shouldTriggerNow(config: s.personality, now: now) || personalityCatchUp)
-        if !s.personality.isOffloaded, personalityScheduled || personalityRetry {
-            if personalityScheduled { setLastRun(kLastPersonality, now) }
-            await runPersonalityJob()
+        // personality:自己的 time_of_day 到点,或本 tick 跑过 event(接力)→ 全部就绪日;
+        // 否则只重试失败过且退避到期的本地日。
+        if !s.personality.isOffloaded {
+            var scope = Self.localRunScope(config: s.personality, now: now,
+                                           ranToday: lastRunDay(kLastPersonality) == localDayString(now),
+                                           hasRetry: personalityNeedsRetry())
+            let scheduled = scope == .all
+            if tier1Ran, s.personality.frequency != .off, personalityJobHasWork() { scope = .all }
+            if let scope {
+                let outcome = await runPersonalityJob(scope: scope)
+                if scheduled, !outcome.isBusy { setLastRun(kLastPersonality, now) }
+            }
         }
 
         // writing_style:auto 模式 → 直接落 portrait/writing_style/,不审核。
@@ -827,6 +825,23 @@ final class MemoryScheduler {
         }
     }
 
+    /// 本机 event / personality 一次运行处理哪些行。
+    enum LocalRunScope: Sendable {
+        /// 全部待处理区间 / 就绪日(time_of_day 到点、接力、Run now)。
+        case all
+        /// 只处理失败过(retry_count > 0)且退避到期的行。
+        case retryOnly
+    }
+
+    /// tick 里本机 event / personality 这一轮跑什么:time_of_day 到点且当天还没跑过 → `.all`;
+    /// 否则有失败过且退避到期的行(`hasRetry`)→ `.retryOnly`;都不是 → nil。封区间本身不触发。
+    static func localRunScope(config: SchedulerConfig, now: Date, ranToday: Bool,
+                              hasRetry: Bool) -> LocalRunScope? {
+        if !ranToday, shouldTriggerNow(config: config, now: now) { return .all }
+        if config.frequency != .off, hasRetry { return .retryOnly }
+        return nil
+    }
+
     /// 给定调度器配置与当前时刻，判断现在是否落在它的触发窗口内
     /// （频率匹配 + 到点）。是否"今天已跑过"由调用方另做去重。
     static func shouldTriggerNow(config: SchedulerConfig, now: Date) -> Bool {
@@ -870,6 +885,8 @@ final class MemoryScheduler {
         case ran(days: [String])
         case noWork        // 没有待处理的区间 / 本地日 / 画像已最新 —— 直接罢工
         case busy          // 调度器或另一次触发正在跑
+
+        var isBusy: Bool { if case .busy = self { return true } else { return false } }
     }
 
     /// 一次 pipeline 运行的触发来源 —— 记进 pipeline_runs(Changelog 页展示)。
@@ -881,7 +898,7 @@ final class MemoryScheduler {
     /// event job 现在有没有活干（有待处理的区间）。手动触发拍快照前先 check，
     /// 没活就直接罢工、不浪费快照。
     func eventJobHasWork() -> Bool {
-        !pendingIntervals(cap: dayCap).isEmpty
+        !pendingIntervals().isEmpty
     }
 
     /// 手动 Run now(本机 event 链)有没有活:已封的待处理区间,或还没封进区间的帧
@@ -933,10 +950,10 @@ final class MemoryScheduler {
 
     // MARK: - event job：event 聚类 + impact 评分（按区间）
 
-    /// 处理至多 `dayCap` 个待处理区间（旧 → 新）。每个区间 event → impact 顺序跑,
+    /// 处理 `scope` 范围内的全部待处理区间（旧 → 新）。每个区间 event → impact 顺序跑,
     /// 各自记账 + 心跳。手动触发与定时触发走同一个函数。
     @discardableResult
-    func runEventJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
+    func runEventJob(trigger: RunTrigger = .scheduler, scope: LocalRunScope = .all) async -> JobOutcome {
         guard canRunEvent else { return .busy }
         eventRunning = true
         refreshKeepAwake()
@@ -945,7 +962,7 @@ final class MemoryScheduler {
         eventProgress = StepProgress(fraction: 0, stage: "Reading timeline")
         defer { eventProgress = StepProgress() }
 
-        let intervals = pendingIntervals(cap: dayCap)
+        let intervals = pendingIntervals(scope: scope)
         let classifierWasPending = trigger == .scheduler && classifierJobHasWork()
         guard !intervals.isEmpty || classifierWasPending else {
             schedLog.info("event job: no pending intervals or folder classification")
@@ -1194,10 +1211,11 @@ final class MemoryScheduler {
 
     /// 跑 personality refresh,**按本地日**:就绪的本地日(`EventIntervalStore.
     /// readyPersonalityDays`:已封区间覆盖到该日本地 24:00、与它重叠的区间 event / impact
-    /// 都 complete、还没跑过或失败后已过退避),最多 `dayCap` 个(从最旧开始)。每个本地日
+    /// 都 complete、还没跑过或失败后已过退避;`scope` 为 `.retryOnly` 时只取失败过的),
+    /// 最多 `dayCap` 个(从最旧开始)。每个本地日
     /// 只跑一次,进度落在 personality_days;OCR 闸窗口 = 该本地日 [00:00, 24:00)(钉死偏移)。
     @discardableResult
-    func runPersonalityJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
+    func runPersonalityJob(trigger: RunTrigger = .scheduler, scope: LocalRunScope = .all) async -> JobOutcome {
         guard canRunPersonality else { return .busy }
         personalityRunning = true
         refreshKeepAwake()
@@ -1205,7 +1223,7 @@ final class MemoryScheduler {
         stopRequestedOwners.remove(PipelineOwner.personality)   // 清 stale 标记
         defer { personalityProgress = StepProgress() }
 
-        let days = pendingPersonalityDays(cap: dayCap)
+        let days = pendingPersonalityDays(cap: dayCap, scope: scope)
         guard !days.isEmpty else {
             schedLog.info("personality job: no pending days")
             store.appendPipelineRun(trigger: trigger.rawValue, pipeline: "Personality refresh", outcome: "no-work", reason: nil)
@@ -1779,8 +1797,8 @@ final class MemoryScheduler {
     // MARK: - UI 支持：重置 / 待处理列表
 
     /// 手动重置某行(区间 / 本地日 / 锚行)：把 failed / dead_letter /
-    /// budget_deferred 的阶段回退 pending，retry_count 归零，释放锁。
-    /// 下次 tick 会重新尝试。
+    /// budget_deferred 的阶段回退 pending，释放锁。锚行 retry_count 归零;区间 / 本地日
+    /// 保留 retry_count,pending 不等退避,下次 tick 走重试分支。
     func resetDay(_ date: String) {
         guard let row = ledgerRow(date) else { return }
         for stage in ProcessingStage.allCases {
@@ -1791,9 +1809,9 @@ final class MemoryScheduler {
                 break
             }
         }
-        ledgerSetRetryCount(date, 0)
+        if !Self.isInterval(date), Self.pday(date) == nil { ledgerSetRetryCount(date, 0) }
         ledgerRelease(date)
-        print("[Scheduler] reset \(date) → pending, retry_count=0")
+        print("[Scheduler] reset \(date) → pending")
     }
 
     /// Reject staged run 专用:把这次 run **拥有的阶段**(含已 complete 的)
@@ -1865,9 +1883,10 @@ final class MemoryScheduler {
     // MARK: - 候选区间 / 本地日
 
     /// 待处理的区间:event 还有活,或 event 已完成而 impact 还有活,且都已过退避
-    /// (`EventIntervalStore.needsWork`)。按 start_ms 升序、上限 `cap`。
-    func pendingIntervals(cap: Int) -> [EventInterval] {
-        Array(((try? Self.ledger?.needsWork()) ?? []).prefix(cap))
+    /// (`EventIntervalStore.needsWork`)。按 start_ms 升序;`.retryOnly` 只留 retry_count > 0 的。
+    func pendingIntervals(scope: LocalRunScope = .all) -> [EventInterval] {
+        let all = (try? Self.ledger?.needsWork()) ?? []
+        return scope == .all ? all : all.filter { $0.retryCount > 0 }
     }
 
     /// tick / event job 是否还会处理某个区间 —— 与 pendingIntervals 同一谓词。
@@ -1877,16 +1896,10 @@ final class MemoryScheduler {
         return EventIntervalStore.isCandidate(iv, nowMs: EventIntervalStore.nowMs())
     }
 
-    /// event job 是否处于待重试态(任一区间的 event/impact 失败/撞额度,且 backoff 到点)。
+    /// event job 是否处于待重试态(有失败过(retry_count > 0)且退避到期的区间,或 folder
+    /// 分类失败且退避到期)。
     private func eventNeedsRetry() -> Bool {
-        let now = EventIntervalStore.nowMs()
-        let retrying: [ProcessingStatus] = [.failed, .budgetDeferred, .deadLetter]
-        if ((try? Self.ledger?.all()) ?? []).contains(where: {
-            (retrying.contains($0.event) || retrying.contains($0.impact))
-                && EventIntervalStore.isCandidate($0, nowMs: now)
-        }) {
-            return true
-        }
+        if !pendingIntervals(scope: .retryOnly).isEmpty { return true }
         if let row = store.row(for: classifyAnchor) {
             switch row.classify {
             case .failed, .budgetDeferred, .deadLetter:
@@ -1913,17 +1926,16 @@ final class MemoryScheduler {
         }
     }
 
-    /// personality 是否处于待重试态(就绪列表里有失败/撞额度后已过 backoff 的本地日)。
+    /// personality 是否处于待重试态(就绪列表里有失败过(retry_count > 0)且已过退避的本地日)。
     private func personalityNeedsRetry() -> Bool {
-        pendingPersonalityDays(cap: dayCap).contains {
-            [.failed, .budgetDeferred, .deadLetter].contains($0.status)
-        }
+        !pendingPersonalityDays(cap: dayCap, scope: .retryOnly).isEmpty
     }
 
     /// personality job 的候选本地日(`EventIntervalStore.readyPersonalityDays`),
-    /// 按日期升序、上限 `cap`。
-    func pendingPersonalityDays(cap: Int) -> [PersonalityDay] {
-        Array(((try? Self.ledger?.readyPersonalityDays()) ?? []).prefix(cap))
+    /// 按日期升序、上限 `cap`;`.retryOnly` 只留 retry_count > 0 的。
+    func pendingPersonalityDays(cap: Int, scope: LocalRunScope = .all) -> [PersonalityDay] {
+        let ready = (try? Self.ledger?.readyPersonalityDays()) ?? []
+        return Array((scope == .all ? ready : ready.filter { $0.retryCount > 0 }).prefix(cap))
     }
 
     // MARK: - 心跳
