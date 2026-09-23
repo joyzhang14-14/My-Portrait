@@ -167,7 +167,7 @@ enum Backfill {
                 // 下一次就用上。
                 let evCfg = ConfigStore.shared.current.scheduler.event
                 clustering = try await EventBuilder(provider: evCfg.resolvedProvider, model: evCfg.resolvedModel)
-                    .clusterDay(date: day, sessions: enriched, activeEvents: active, onBatch: { i, n in
+                    .clusterDay(date: day, tzOffsetMin: off, sessions: enriched, activeEvents: active, onBatch: { i, n in
                         progress?(.init(phase: "LLM clustering batch \(i)/\(n)",
                                         unit: .llmBatch(index: i, count: n)))
                     })

@@ -100,8 +100,10 @@ final class EventBuilder {
     /// Cluster one day's sessions into semantic events.
     /// `onBatch(index, count)`(1-based)在每个 LLM batch 开始前回调 ——
     /// 给上游进度条按 batch 推进用。单批日也回调一次 (1, 1)。
+    /// `tzOffsetMin` = 区间钉死的 UTC 偏移;提示词里的 session 时刻按它显示成本地时刻。
     func clusterDay(
         date: Date,
+        tzOffsetMin: Int,
         sessions: [EnrichedSession],
         activeEvents: [ActiveEvent],
         onBatch: ((Int, Int) -> Void)? = nil
@@ -114,6 +116,7 @@ final class EventBuilder {
             onBatch?(1, 1)
             return try await clusterOneBatch(
                 date: date,
+                tzOffsetMin: tzOffsetMin,
                 sessions: sessions,
                 globalOffset: 0,
                 earlierToday: [],
@@ -121,7 +124,7 @@ final class EventBuilder {
             )
         }
         return try await clusterBatched(
-            date: date, sessions: sessions, activeEvents: activeEvents,
+            date: date, tzOffsetMin: tzOffsetMin, sessions: sessions, activeEvents: activeEvents,
             onBatch: onBatch
         )
     }
@@ -135,6 +138,7 @@ final class EventBuilder {
     /// prompt 里分两段呈现,LLM 优先 join earlierToday。
     private func clusterOneBatch(
         date: Date,
+        tzOffsetMin: Int,
         sessions: [EnrichedSession],
         globalOffset: Int,
         earlierToday: [ActiveEvent],
@@ -147,6 +151,7 @@ final class EventBuilder {
         let personal = ConfigStore.shared.current.personalInfo
         let prompt = Self.buildPrompt(
             date: date,
+            tzOffsetMin: tzOffsetMin,
             sessions: sessions,
             globalOffset: globalOffset,
             earlierToday: earlierToday,
@@ -228,6 +233,7 @@ final class EventBuilder {
     /// left for Backfill. Session ids stay globally unique via offsets.
     private func clusterBatched(
         date: Date,
+        tzOffsetMin: Int,
         sessions: [EnrichedSession],
         activeEvents: [ActiveEvent],
         onBatch: ((Int, Int) -> Void)? = nil
@@ -260,7 +266,7 @@ final class EventBuilder {
             let historicalRanked = Self.rankActive(activeEvents, for: chunk).prefix(20)
 
             let batch = try await clusterOneBatch(
-                date: date, sessions: chunk, globalOffset: offset,
+                date: date, tzOffsetMin: tzOffsetMin, sessions: chunk, globalOffset: offset,
                 earlierToday: carry,
                 activeEvents: Array(historicalRanked)
             )
@@ -350,6 +356,7 @@ final class EventBuilder {
 
     nonisolated private static func buildPrompt(
         date: Date,
+        tzOffsetMin: Int,
         sessions: [EnrichedSession],
         globalOffset: Int,
         earlierToday: [ActiveEvent],
@@ -386,7 +393,9 @@ final class EventBuilder {
         for (i, item) in sessions.enumerated() {
             let id = globalOffset + i + 1
             let s = item.session
-            let timeRange = "\(timeOfDay(s.firstSeen))–\(timeOfDay(s.lastSeen))"
+            // 区间可能跨多天,起点统一带 MM-dd。
+            let timeRange = "\(localTime(s.firstSeen, tzOffsetMin: tzOffsetMin, withDay: true))–"
+                + localTime(s.lastSeen, tzOffsetMin: tzOffsetMin, withDay: false)
             let durMin = max(1, Int((s.lastSeen.timeIntervalSince(s.firstSeen) / 60).rounded()))
             var line = "\(id). [\(timeRange), \(durMin)min] \(s.appName)"
             if !s.windowName.isEmpty { line += " — \(s.windowName)" }
@@ -479,8 +488,18 @@ final class EventBuilder {
         f.dateFormat = "HH:mm"
         return f
     }()
+    nonisolated(unsafe) private static let stampFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
     nonisolated private static func isoDay(_ d: Date) -> String { dayFmt.string(from: d) }
-    nonisolated private static func timeOfDay(_ d: Date) -> String { timeFmt.string(from: d) }
+    /// 本地时刻:按 tz_offset_min 平移后用 UTC formatter 读。
+    nonisolated private static func localTime(_ d: Date, tzOffsetMin: Int, withDay: Bool) -> String {
+        (withDay ? stampFmt : timeFmt).string(from: d.addingTimeInterval(TimeInterval(tzOffsetMin * 60)))
+    }
 
     nonisolated private static func relativeDay(from past: Date, on reference: Date) -> String {
         var cal = Calendar(identifier: .gregorian)
