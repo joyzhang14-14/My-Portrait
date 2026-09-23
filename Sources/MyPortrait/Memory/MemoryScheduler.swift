@@ -291,8 +291,8 @@ final class MemoryScheduler {
         key.hasPrefix(pdayPrefix) ? String(key.dropFirst(pdayPrefix.count)) : nil
     }
 
-    /// 区间台账的连接。app 启动时 `start()` 填上 Services 开好的那个 DatabasePool;
-    /// CLI / 自检里没填,第一次用时按 Storage.portraitDBPath 自己开(会跑迁移)。
+    /// 区间台账的连接。app 里 Services 一开库就填上同一个 DatabasePool;CLI / 自检里
+    /// 没填,第一次用时按 Storage.portraitDBPath 自己开(会跑迁移)。
     nonisolated(unsafe) private static var ledgerPool: DatabasePool?
     nonisolated private static let ledgerPoolLock = NSLock()
     nonisolated static var ledger: EventIntervalStore? {
@@ -407,7 +407,6 @@ final class MemoryScheduler {
         // 自愈 helper 注册:开关开着就刷新一次(rebuild 后 cdhash 变化也需要重新
         // 对齐 LWCR)。开关没开则 no-op,无副作用。
         SleepHelperClient.shared.syncRegistration()
-        if let pool = WritingStyleDistiller.shared?.store.dbPool { Self.useLedgerPool(pool) }
         loadLastFailures()   // 必须在 recoverStaleLocks 之前 — recover 写 kind 时
                              // 会读老值(避免覆盖更早的 user-required kind)
         recoverStaleLocks()

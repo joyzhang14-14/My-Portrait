@@ -74,6 +74,7 @@ final class Services {
         }
         self.db = dbImpl
         // 共用同一个 DatabasePool（WAL 多 reader 安全）。
+        MemoryScheduler.useLedgerPool(dbImpl.dbPool)
         let ftsEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
 
         // 纯 FTS5 关键词搜索。语义搜索（bge-m3 向量 + RRF 融合）已整体移除。
