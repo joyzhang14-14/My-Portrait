@@ -24,6 +24,9 @@ actor PortraitDBImpl: PortraitDB {
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
 
         var config = Configuration()
+        // 夜间 seal-check helper 是另一个进程,会和 app 抢同一把 WAL 写锁;
+        // 默认 .immediateError 会让采集写帧直接失败,改成最多等 5 秒。
+        config.busyMode = .timeout(5)
         config.prepareDatabase { db in
             // WAL：写不阻塞读，崩溃恢复用 .wal 文件
             try db.execute(sql: "PRAGMA journal_mode = WAL")
