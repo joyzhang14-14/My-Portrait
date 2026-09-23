@@ -359,6 +359,17 @@ enum IntervalSelfTest {
         check(sched.eventRunNowHasWork() && sched.pendingIntervals().map(\.id).contains(fId),
               "timing: Run now takes E and F right away (scope .all)")
 
+        // folder 分类失败 → Retry now 翻回 pending(锚行 retry 归零)→ 下个 tick 的重试运行。
+        let plog = ProcessingLogStore(), classifyKey = ProcessingLogStore.classifyAnchorDate
+        _ = plog.ensureRow(for: classifyKey)
+        plog.setStatus(date: classifyKey, stage: .classify, status: .failed)
+        plog.setRetryCount(date: classifyKey, count: 1)
+        check(!sched.eventNeedsRetry(), "timing: failed folder classify inside its backoff → no retry yet")
+        sched.resetDay(classifyKey)
+        check(plog.row(for: classifyKey)?.classify == .pending && sched.eventNeedsRetry(),
+              "timing: Retry now on folder classify → pending, retried on the next tick")
+        plog.setStatus(date: classifyKey, stage: .classify, status: .complete)
+
         // F 失败一次 → 10 分钟退避;到期后只有 F 进重试运行,E(retry 0)仍等 time_of_day。
         let nowT = EventIntervalStore.nowMs()
         try store.setStatus(id: fId, stage: .event, status: .failed, nowMs: nowT)
@@ -373,6 +384,26 @@ enum IntervalSelfTest {
         check(MS.localRunScope(config: off, now: at(14, 0), ranToday: false, hasRetry: true) == nil,
               "timing: frequency off → no scheduled or retry run")
 
+        // 退出中断(paused → failed)和撞额度(budget_deferred)都不计 retry,仍按退避重试;
+        // Retry now 翻回 pending 后下个 tick 就跑。
+        try store.setStatus(id: ivE.id, stage: .event, status: .inProgress)
+        sched.pauseInProgressJobs()
+        sched.recoverStaleLocks()
+        let e1 = try store.interval(id: ivE.id)
+        check(e1?.event == .failed && e1?.retryCount == 0
+              && sched.pendingIntervals(scope: .retryOnly).map(\.id) == [ivE.id, fId],
+              "timing: interval interrupted by quit (paused → failed, retry 0) is retried on the next tick")
+        await sched.runInjectedStep(date: ivE.id, stage: .event, result: .budget)
+        let e2 = try store.interval(id: ivE.id)
+        check(e2?.event == .budgetDeferred && e2?.retryCount == 0
+              && sched.pendingIntervals(scope: .retryOnly).map(\.id) == [ivE.id, fId],
+              "timing: budget_deferred interval (retry 0) is retried on the next tick")
+        sched.resetDay(ivE.id)
+        let e3 = try store.interval(id: ivE.id)
+        check(e3?.event == .pending && sched.pendingIntervals(scope: .retryOnly).map(\.id) == [ivE.id, fId]
+              && !sched.attentionDays().contains { $0.date == ivE.id },
+              "timing: Retry now on a retry-0 interval → pending, picked up by the next tick's retry run")
+
         // personality:就绪日等调度时刻(或 event 接力),失败日按退避重试。
         check(sched.pendingPersonalityDays(cap: 7).map(\.day) == ["2026-09-22"]
               && sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).isEmpty,
@@ -384,6 +415,17 @@ enum IntervalSelfTest {
         try store.setPersonalityRetryCount(day: "2026-09-22", count: 1, nowMs: nowT - 11 * m)
         check(sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).map(\.day) == ["2026-09-22"],
               "timing: failed personality day retried once its backoff is over")
+        let p22 = MemoryScheduler.pdayKey("2026-09-22")
+        try store.setPersonalityRetryCount(day: "2026-09-22", count: 0)
+        await sched.runInjectedStep(date: p22, stage: .personality, result: .budget)
+        let pd1 = try store.personalityDay("2026-09-22")
+        check(pd1?.status == .budgetDeferred && pd1?.retryCount == 0
+              && sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).map(\.day) == ["2026-09-22"],
+              "timing: budget_deferred personality day (retry 0) is retried on the next tick")
+        sched.resetDay(p22)
+        check(try store.personalityDay("2026-09-22")?.status == .pending
+              && sched.pendingPersonalityDays(cap: 7, scope: .retryOnly).map(\.day) == ["2026-09-22"],
+              "timing: Retry now on a retry-0 personality day → pending, picked up by the next tick's retry run")
 
         // —— UI:日历日期 ——
         let cal = Calendar(identifier: .gregorian)
