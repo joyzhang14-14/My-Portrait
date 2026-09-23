@@ -338,7 +338,7 @@ struct MemorySettingsView: View {
     private func refreshHasWork() {
         Task.detached(priority: .userInitiated) {
             let s = await MemoryScheduler.shared
-            let e = await s.eventJobHasWork()
+            let e = await s.eventRunNowHasWork()
             let d = await s.portraitJobHasWork()
             let p = await s.personalityJobHasWork()
             await MainActor.run {
@@ -362,10 +362,16 @@ struct MemorySettingsView: View {
         }
     }
 
-    /// 走调度器的 runEventJob（与定时触发同一函数：pending-days + 上限 7 +
-    /// 没活罢工）。跑前拍快照，跑完进审核。
+    /// 走调度器的 runEventJob（与定时触发同一函数：待处理区间 + 上限 7 +
+    /// 没活罢工）。先把还没封进区间的帧按 Run now 封成一个区间(截止点 now − 60 s),
+    /// 跑前拍快照，跑完进审核。
     @MainActor
     private func runEventProcessing() async {
+        guard MemoryScheduler.shared.eventRunNowHasWork() else {
+            actionStatus = "All days already processed — nothing to run."
+            return
+        }
+        _ = await MemoryScheduler.shared.sealRunNow()
         guard MemoryScheduler.shared.eventJobHasWork() else {
             actionStatus = "All days already processed — nothing to run."
             return
@@ -1538,7 +1544,16 @@ struct MemorySettingsView: View {
         case ProcessingLogStore.distillAnchorDate:     return "Portrait update"
         case ProcessingLogStore.personalityAnchorDate: return "Personality update"
         case ProcessingLogStore.classifyAnchorDate:    return "Organizing events"
-        default:                                        return date
+        default:
+            // 区间 id `iv:<start_ms>`(补漏区间带 `-b<frame id>` 后缀)→ 起点的本地时间。
+            if date.hasPrefix("iv:"), let ms = Int64(date.dropFirst(3).prefix(while: \.isNumber)) {
+                let start = Date(timeIntervalSince1970: Double(ms) / 1000)
+                return "Events from \(start.formatted(.dateTime.month(.abbreviated).day().hour().minute()))"
+            }
+            if date.hasPrefix(MemoryScheduler.pdayPrefix) {
+                return "Personality · \(date.dropFirst(MemoryScheduler.pdayPrefix.count))"
+            }
+            return date
         }
     }
 
