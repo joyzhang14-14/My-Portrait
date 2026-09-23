@@ -601,11 +601,13 @@ Sealing an interval does not start a run. At `[scheduler.event] time_of_day` (th
 or after it on a day that has not run yet, so after sleep the first tick on wake) it processes
 every needsWork interval, oldest first; a run cut short by sleep / quit, or skipped because the
 scheduler is busy, does not count as that day's run, so the next tick starts it again. Other
-ticks only retry intervals with `retry_count > 0` whose backoff is over, plus a failed folder
-classify (`MemoryScheduler.localRunScope`, `pendingIntervals(scope: .retryOnly)`). Needs
-attention → Retry now sets an interval back to pending and keeps its retry count, so the next
-tick retries it; Run now seals `[last cut, now − 60 s)` and processes every pending interval at
-once. Per interval, `Backfill.runInterval` reads every frame of the interval
+ticks only retry intervals that have failed (`retry_count > 0`, or a stage left at `failed` /
+`budget_deferred`, since hitting the quota or a quit does not count a retry) and whose backoff is
+over, plus a failed folder classify or one that Retry now set back to pending
+(`MemoryScheduler.localRunScope`, `pendingIntervals(scope: .retryOnly)`). Needs attention →
+Retry now sets an interval back to pending with a retry count of at least 1, so the next tick
+retries it; Run now seals `[last cut, now − 60 s)` and processes every pending interval at once.
+Per interval, `Backfill.runInterval` reads every frame of the interval
 (`TimelineDB.frames(fromMs:toMs:afterId:maxId:)`, no row cap), merges Tier-1 sessions, adds OCR
 and calls `EventBuilder.clusterDay`; the prompt date and the 14-day active window use the
 `attributeDay` of all the interval's frames. Each new event is dated by its member frames'
@@ -633,7 +635,7 @@ same bundle (`readyPersonalityDays(inBundle:)`); the server runs it after those 
 in the same run. Its OCR-gate window is that local day's `[00:00, 24:00)` at the pinned offset.
 The local personality job (`MemoryScheduler.runPersonalityJob`) runs in the same tick right after a
 local event run and at `[scheduler.personality] time_of_day`, taking up to 7 ready days; other
-ticks only retry failed days (`retry_count > 0`) past backoff, and Run now runs at once. It calls
+ticks only retry failed days (same rule as intervals) past backoff, and Run now runs at once. It calls
 `PersonalityRefresh.refresh(day:ocrWindow:)`: `day` is the local date stored as UTC midnight, so
 `events/<day>/`, `last_modified` and `personality_daily/<day>.md` all use that date, and the gate
 counts frames in the day window (`TimelineDB.frameCount(fromMs:toMs:keywords:)`).
