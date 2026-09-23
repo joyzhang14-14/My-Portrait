@@ -109,8 +109,8 @@ enum EventTimeline {
             guard let file = try? PortraitFileIO.read(from: url) else { continue }
             let rel = url.path.hasPrefix(prefix)
                 ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
-            let days = file.occurrences.map { cal.startOfDay(for: $0) }.sorted()
-            let born = cal.startOfDay(for: file.created)
+            let days = file.occurrences.map(calendarDay).sorted()
+            let born = calendarDay(file.created)
             let title = file.eventTitle.isEmpty
                 ? url.deletingPathExtension().lastPathComponent : file.eventTitle
             entries.append(Entry(relPath: rel, url: url, title: title,
@@ -191,6 +191,15 @@ enum EventTimeline {
     }
 
     // MARK: - 工具
+
+    /// frontmatter 的日期是日历日期(yyyy-MM-dd,按 UTC 零点存),换成本地日历同一天的
+    /// 零点,不做时区换算 —— 否则负偏移时区会显示成前一天。
+    static func calendarDay(_ d: Date) -> Date {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let c = utc.dateComponents([.year, .month, .day], from: d)
+        return Calendar(identifier: .gregorian).date(from: c) ?? d
+    }
 
     nonisolated(unsafe) private static let dayFmt: DateFormatter = {
         let f = DateFormatter()
