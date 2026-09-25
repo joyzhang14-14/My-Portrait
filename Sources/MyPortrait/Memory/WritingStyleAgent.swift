@@ -31,12 +31,12 @@ final class WritingStyleAgent {
         let drafts: [WritingStyleDraft]
     }
 
-    /// 现存 portrait/writing_style/<slug>.md 的轻量摘要 —— 喂 LLM 当 "已有
-    /// 条目" 让它判 update vs create。
+    /// 现存 portrait/writing_style/<slug>.md 的正文全文 —— 喂 LLM 当 "已有
+    /// 条目" 让它判 update vs create;update 的正文整段替换,所以给全文。
     struct ExistingEntry: Sendable {
         let slug: String
         let title: String
-        let bodyExcerpt: String       // 截到 ~400 字
+        let body: String              // 正文全文,不含末尾的溯源行
     }
 
     private let provider: Provider
@@ -115,9 +115,6 @@ final class WritingStyleAgent {
     /// 上千个 entry,LLM 看不出 signal,取头尾各 30 个即可。
     nonisolated static let editLogMaxEntries = 60
 
-    /// 现存条目 body 最多展示多少字给 LLM 当上下文。
-    nonisolated static let existingBodyExcerptChars = 400
-
     static func buildPrompt(
         records: [WritingStyleRecordInput],
         existing: [ExistingEntry]
@@ -128,10 +125,11 @@ final class WritingStyleAgent {
         if existing.isEmpty {
             lines.append("(none yet)")
         } else {
+            lines.append(PortraitDistiller.escapedBodyNote)
             for e in existing {
                 lines.append("---")
                 lines.append("[slug=\(e.slug)] \(e.title)")
-                lines.append(e.bodyExcerpt)
+                lines.append(PortraitDistiller.escapeBody(e.body))
             }
             lines.append("---")
         }

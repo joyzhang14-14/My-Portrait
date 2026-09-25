@@ -174,6 +174,24 @@ enum IntervalSelfTest {
         sharedVectors()
         let dbImpl = try PortraitDBImpl()
         let pool = dbImpl.dbPool
+
+        // 写作风格 update 的正文多了一层转义 → 这次不写。
+        let wsDir = PortraitPaths.categoryDir("writing_style")
+        try fm.createDirectory(at: wsDir, withIntermediateDirectories: true)
+        let wsURL = wsDir.appendingPathComponent("selftest_entry.md")
+        let wsDraft = WritingStyleDraft(action: .create, slug: "selftest_entry", title: "Entry",
+                                        body: "line one\nline two", sourceRecordIds: [1], existingSlug: nil)
+        let wsNew = WritingStyleDistiller.writeNew(at: wsURL, draft: wsDraft)
+        let wsBefore = try Data(contentsOf: wsURL)
+        let wsSkip = WritingStyleDistiller.writeUpdate(
+            at: wsURL, draft: WritingStyleDraft(action: .update, slug: "selftest_entry", title: "Entry 2",
+                                                body: #"line one\nline two plus"#, sourceRecordIds: [2],
+                                                existingSlug: "selftest_entry"),
+            slug: "selftest_entry")
+        let wsAfter = try Data(contentsOf: wsURL)
+        check(wsNew && wsSkip && wsAfter == wsBefore,
+              "writing style: update with a doubly escaped body returns true and leaves the file unchanged")
+        try fm.removeItem(at: wsURL)
         MemoryScheduler.useLedgerPool(pool)
         let sched = MemoryScheduler.shared
 
@@ -524,6 +542,18 @@ enum IntervalSelfTest {
               "V-G sequence: passed joins add up on the target")
         var none: [String: Int] = [:]
         check(!gate("_b1", add: 500, &none), "join gate: targets outside framesNow (same-day, _bN) pass")
+
+        // V-W:写作风格已有条目给全文(去掉溯源行),转义成一行。
+        for (i, v) in (json(vectorW) as! [[String: String]]).enumerated() {
+            let prose = WritingStyleDistiller.proseOf(v["body"]!)
+            let pl = WritingStyleAgent.buildPrompt(
+                records: [], existing: [.init(slug: "s\(i)", title: "T", body: prose)]).components(separatedBy: "\n")
+            let hi = pl.firstIndex { $0.hasPrefix("EXISTING ENTRIES") } ?? pl.count - 2
+            let si = pl.firstIndex(of: "[slug=s\(i)] T") ?? pl.count - 1
+            check(prose == v["prose"]! && pl[hi + 1] == PortraitDistiller.escapedBodyNote && pl[si + 1] == v["line"]!
+                  && !pl.contains { $0.contains("Derived from writing records") },
+                  "V-W writing style entry \(i + 1): full prose without the trailer, escaped on one line")
+        }
     }
 
     private static let vectorA = #"""
@@ -567,6 +597,15 @@ enum IntervalSelfTest {
  "rejected": [31, 39],
  "single": [[7, 34, true], [1, 6, false], [7, 17, false], [3, 9, false], [3, 10, true], [4, 12, false], [4, 13, true]],
  "sequence": {"start": 5, "adds": [12, 40], "rejected": [false, false], "end": 57}}
+"""#
+
+    private static let vectorW = #"""
+[{"body": "Line one.\nLine two with \\ backslash.\n\n**Derived from writing records:** [[wr:1]], [[wr:2]]",
+  "prose": "Line one.\nLine two with \\ backslash.",
+  "line": "Line one.\\nLine two with \\\\ backslash."},
+ {"body": "No trailer here.\nSecond line.",
+  "prose": "No trailer here.\nSecond line.",
+  "line": "No trailer here.\\nSecond line."}]
 """#
 
     private static let vectorB = #"""

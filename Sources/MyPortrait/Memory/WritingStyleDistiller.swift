@@ -366,6 +366,10 @@ final class WritingStyleDistiller {
     nonisolated static func writeUpdate(at url: URL, draft: WritingStyleDraft, slug: String) -> Bool {
         do {
             var file = try PortraitFileIO.read(from: url)
+            if PortraitDistiller.isDoubleEscaped(old: proseOf(file.body), new: draft.body) {
+                DiagLog.warn("writing_style.update.double_escaped", ctx: ["slug": slug])
+                return true      // 不算写盘失败;这次不写
+            }
             // 清掉旧文件可能残留的 event-only 字段
             file.rawImpact = nil
             file.rebalanceCount = nil
@@ -390,6 +394,13 @@ final class WritingStyleDistiller {
             ssLog.error("writeUpdate failed for \(url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
             return false
         }
+    }
+
+    nonisolated static let derivedMark = "\n\n**Derived from writing records:**"
+    /// 正文去掉 renderBody 追加的溯源行。
+    nonisolated static func proseOf(_ body: String) -> String {
+        guard let r = body.range(of: derivedMark) else { return body }
+        return String(body[..<r.lowerBound])
     }
 
     /// body 渲染:body 正文 + Derived from writing records 行。
@@ -438,11 +449,10 @@ final class WritingStyleDistiller {
             let url = dir.appendingPathComponent(name)
             guard let file = try? PortraitFileIO.read(from: url) else { continue }
             let slug = String(name.dropLast(3))   // .md
-            let excerpt = String(file.body.prefix(WritingStyleAgent.existingBodyExcerptChars))
             out.append(WritingStyleAgent.ExistingEntry(
                 slug: slug,
                 title: file.eventTitle.isEmpty ? slug : file.eventTitle,
-                bodyExcerpt: excerpt
+                body: proseOf(file.body)
             ))
         }
         out.sort { $0.slug < $1.slug }

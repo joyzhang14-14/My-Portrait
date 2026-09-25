@@ -264,6 +264,18 @@ final class PortraitDistiller {
 
     // MARK: - Prompt
 
+    /// 已有条目块首行的说明(写作风格蒸馏共用)。
+    nonisolated static let escapedBodyNote =
+        #"(Bodies are shown in full on one line, escaped as inside a JSON string: \n = line break, \\ = backslash.)"#
+    /// 正文转成一行:`\` → `\\`,换行 → `\n`,其余字符原样。模型原样抄回、JSON 解码后就是原文。
+    nonisolated static func escapeBody(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\n", with: "\\n")
+    }
+    /// 新正文里的字面 \n(反斜杠加 n)比原正文多:模型把换行多转义了一层。
+    nonisolated static func isDoubleEscaped(old: String, new: String) -> Bool {
+        new.components(separatedBy: #"\n"#).count > old.components(separatedBy: #"\n"#).count
+    }
+
     nonisolated private static func buildPrompt(
         category: String,
         events: [EventEntry],
@@ -285,21 +297,16 @@ final class PortraitDistiller {
         dayFmt.locale = Locale(identifier: "en_US_POSIX")
         dayFmt.dateFormat = "yyyy-MM-dd"
 
-        // Existing entries — FULL body (weighted merge needs the whole text,
-        // not an excerpt) + last-updated date so the LLM can tell which source
-        // events post-date the settled entry.
+        // 已有条目给纯正文全文(去掉 `# 标题` 行和 derived 尾块),按 escapeBody 转成一行,
+        // 附上次更新日。update 的正文是整段替换,模型看到全文才交得回完整的合并稿。
         if existing.isEmpty {
             lines.append("Existing portrait entries in this category: (none)")
         } else {
             lines.append("Existing portrait entries you may UPDATE — these are SETTLED knowledge (slug | title | last updated):")
+            lines.append(Self.escapedBodyNote)
             for p in existing {
-                // 喂 LLM 的是纯正文（去掉 `# 标题` 行和 derived 尾块）——
-                // 否则 LLM 合并时会把渲染产物原样抄回，renderBody 再前置标题
-                // 就出现重复标题。
-                let prose = Self.proseOf(p.body)
-                let full = prose.count > 1200 ? String(prose.prefix(1200)) + "…" : prose
                 lines.append("  - \(p.slug) | \(p.title) | last updated \(dayFmt.string(from: p.lastUpdated))")
-                lines.append("    body: \(full.replacingOccurrences(of: "\n", with: " ⏎ "))")
+                lines.append("    body: \(Self.escapeBody(Self.proseOf(p.body)))")
             }
         }
         lines.append("")
@@ -547,6 +554,10 @@ final class PortraitDistiller {
         let url = PortraitPaths.categoryDir(category).appendingPathComponent(decision.slug + ".md")
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         var file = try PortraitFileIO.read(from: url)
+        if Self.isDoubleEscaped(old: Self.proseOf(file.body), new: decision.body) {
+            DiagLog.warn("distill.update.double_escaped", ctx: ["category": category, "slug": decision.slug])
+            return true      // 目标存在;这次不写
+        }
         // 旧 portrait 文件可能残留 3 个 event-only 字段(早期未做镜像清理)。
         // 写回前清掉,序列化时整行 skip,文件就只剩真正的 portrait 字段。
         file.rawImpact = nil
@@ -723,13 +734,67 @@ final class PortraitDistiller {
         for w in ["2026-05-16", "2026-06-17"] where !occDays.contains(w) { pass = false; failLine("occurrences 缺 \(w)") }
         if occDays.contains("2026-01-01") { pass = false; failLine("不该给旧 derived(2026-01-01)记 occurrence") }
 
+        // 5. 已有条目全文:V-E、V-D(与 portrait_offload 的 pytest 共用)、prompt 行、双层转义的 update 不写。
+        for v in try! JSONSerialization.jsonObject(with: Data(vectorE.utf8)) as! [[String]]
+        where Self.escapeBody(v[0]) != v[1] {
+            pass = false; failLine("V-E escapeBody(\(v[0].debugDescription)) = \(Self.escapeBody(v[0]).debugDescription)")
+        }
+        for v in try! JSONSerialization.jsonObject(with: Data(vectorD.utf8)) as! [[Any]]
+        where Self.isDoubleEscaped(old: v[0] as! String, new: v[1] as! String) != v[2] as! Bool {
+            pass = false; failLine("V-D isDoubleEscaped(\((v[0] as! String).debugDescription), \((v[1] as! String).debugDescription))")
+        }
+        let prose = String(repeating: "a", count: 1200) + "\n\n" + #"back\slash "# + String(repeating: "b", count: 1287)
+        let longEntry = PortraitEntry(
+            slug: "zz_long", title: "Long",
+            body: prose + "\n\n**Derived from events:**\n- [[2026-01-01/old_event.md]]\n",
+            lastUpdated: Date(), category: cat)
+        let prompt = buildPrompt(category: cat, events: [], existing: [longEntry], evidenceThreshold: 2,
+                                 personal: PersonalInfoConfig())
+        let pl = prompt.components(separatedBy: "\n")
+        if let hi = pl.firstIndex(where: { $0.hasPrefix("Existing portrait entries you may UPDATE") }), hi + 1 < pl.count {
+            let block = pl[hi...].prefix { !$0.isEmpty }
+            if pl[hi + 1] != escapedBodyNote { pass = false; failLine("说明行没有紧跟已有条目标题行") }
+            if !block.contains("    body: " + escapeBody(prose)) { pass = false; failLine("body 行不等于转义后的全文(\(prose.count) 字)") }
+            if block.contains(where: { $0.contains("…") || $0.contains("⏎") }) { pass = false; failLine("已有条目块里有 … 或 ⏎") }
+        } else { pass = false; failLine("prompt 里没有已有条目块") }
+        let skipURL = dir.appendingPathComponent("zz_double_escape.md")
+        let skipFile = PortraitFile(
+            created: Date(),
+            body: "line one\nline two\n\n**Derived from events:**\n- [[2026-01-01/old_event.md]]\n",
+            source: "distilled", tags: [cat, "portrait"], firstOccurrence: Date(),
+            eventTitle: "Skip", eventSummary: "line one\nline two",
+            eventType: "experience", portraitFacets: [], category: cat, memberFrameIds: [])
+        try? PortraitFileIO.write(skipFile, to: skipURL)
+        let skipBefore = try? Data(contentsOf: skipURL)
+        let skipDecision = ParsedDecision(action: "update", slug: "zz_double_escape", title: "Skip changed",
+                                          body: #"line one\nline two plus"#, derivedFromEventIds: newIds)
+        let skipOK = (try? PortraitDistiller().updateExistingPortrait(category: cat, decision: skipDecision)) == true
+        if skipBefore == nil || !skipOK || (try? Data(contentsOf: skipURL)) != skipBefore {
+            pass = false; failLine("多一层转义的 update 应返回 true 且文件字节不变")
+        }
+
         print("--- distill occurrence self-test ---")
         print("derived 行数: \(derivedCount)  (期望 26,>20 不截断)")
         print("occurrence 天: \(occDays.sorted())  (期望 = [2026-05-16, 2026-06-17],用 event 发生日)")
+        print("已有条目全文:V-E、V-D、prompt 行、双层转义 update 跳过(失败见上方 ✗)")
         print(pass ? "✅ PASS" : "❌ FAIL")
         cleanup()
         return pass
     }
+
+    private static let vectorE = #"""
+[["a\\b\n\nc\r\nd 😀", "a\\\\b\\n\\nc\r\\nd 😀"],
+ ["Line one.\nLine two with \\ backslash.", "Line one.\\nLine two with \\\\ backslash."],
+ ["no newline", "no newline"]]
+"""#
+
+    private static let vectorD = #"""
+[["x\ny", "x\ny z", false],
+ ["x\ny", "x\\ny", true],
+ ["code \\n here", "code \\n here\nmore", false],
+ ["a", "a\\nb\\nc", true],
+ ["code \\n here", "code \\n here \\n", true]]
+"""#
 
     nonisolated private func collectEventsByCategory() async -> [String: [EventEntry]] {
         await Task.detached(priority: .userInitiated) {
