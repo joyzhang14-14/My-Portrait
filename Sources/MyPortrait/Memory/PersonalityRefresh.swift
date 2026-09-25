@@ -33,6 +33,16 @@ final class PersonalityRefresh {
     /// 有字帧太少,单个关键词不可能同时满足 ≥15 帧与 ≤30%:标签全丢算合法的空。
     nonisolated static func ocrDayTooSparse(_ total: Int) -> Bool { total * maxKeywordHitPct < minOCRFrames * 100 }
 
+    enum RefreshError: LocalizedError {
+        case timelineUnreadable
+
+        var errorDescription: String? {
+            switch self {
+            case .timelineUnreadable: return "Timeline DB unreadable — cannot count text frames for the OCR gate"
+            }
+        }
+    }
+
     struct Report: Sendable {
         let day: Date
         let eventsTotal: Int          // 当天 events/<day>/ 全量
@@ -97,7 +107,9 @@ final class PersonalityRefresh {
 
         // ── 2) OCR 验证: 每个 tag 自带 ocr_keywords,数命中帧数 ────────
         let timeline = TimelineDB()
-        let dayTotal = timeline.ocrFrameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end)
+        guard let dayTotal = timeline.ocrFrameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end) else {
+            throw RefreshError.timelineUnreadable
+        }
         var keptCandidates: [PersonalityTagCandidate] = []
         var kept = 0, dropped = 0
         for (ti, tag) in snapshot.tags.enumerated() {

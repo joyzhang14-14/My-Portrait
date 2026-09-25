@@ -323,12 +323,12 @@ struct TimelineDB: Sendable {
     }
 
     /// [startMs, endMs) 里 OCR 文本超过 4 个字的帧数:PersonalityRefresh 关键词命中率的分母,
-    /// 文本口径同 frameCount。
-    func ocrFrameCount(fromMs startMs: Int64, toMs endMs: Int64) -> Int {
-        guard exists else { return 0 }
+    /// 文本口径同 frameCount。读库失败返回 nil(调用方按失败重试,不当成有字帧太少的空日)。
+    func ocrFrameCount(fromMs startMs: Int64, toMs endMs: Int64) -> Int? {
+        guard exists else { return nil }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
 
         let sql = """
@@ -338,11 +338,11 @@ struct TimelineDB: Sendable {
               AND length(COALESCE(ocr_backfill_text, full_text)) > 4
             """
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, startMs)
         sqlite3_bind_int64(stmt, 2, endMs)
-        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return Int(sqlite3_column_int64(stmt, 0))
     }
 
