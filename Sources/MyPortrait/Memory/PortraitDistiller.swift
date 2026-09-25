@@ -268,12 +268,17 @@ final class PortraitDistiller {
     nonisolated static let escapedBodyNote =
         #"(Bodies are shown in full on one line, escaped as inside a JSON string: \n = line break, \\ = backslash.)"#
     /// 正文转成一行:`\` → `\\`,换行 → `\n`,其余字符原样。模型原样抄回、JSON 解码后就是原文。
+    /// 替换和计数都按字面(`.literal`),`\` 或换行后紧跟组合附加符号时也与 Python 逐字节相同。
     nonisolated static func escapeBody(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\n", with: "\\n")
+        s.replacingOccurrences(of: "\\", with: "\\\\", options: .literal)
+            .replacingOccurrences(of: "\n", with: "\\n", options: .literal)
     }
     /// 新正文里的字面 \n(反斜杠加 n)比原正文多:模型把换行多转义了一层。
     nonisolated static func isDoubleEscaped(old: String, new: String) -> Bool {
-        new.components(separatedBy: #"\n"#).count > old.components(separatedBy: #"\n"#).count
+        func count(_ s: String) -> Int {
+            (s.utf16.count - s.replacingOccurrences(of: #"\n"#, with: "", options: .literal).utf16.count) / 2
+        }
+        return count(new) > count(old)
     }
 
     nonisolated private static func buildPrompt(
@@ -742,6 +747,11 @@ final class PortraitDistiller {
         for v in try! JSONSerialization.jsonObject(with: Data(vectorD.utf8)) as! [[Any]]
         where Self.isDoubleEscaped(old: v[0] as! String, new: v[1] as! String) != v[2] as! Bool {
             pass = false; failLine("V-D isDoubleEscaped(\((v[0] as! String).debugDescription), \((v[1] as! String).debugDescription))")
+        }
+        // `\` 或换行后紧跟组合附加符号(U+0301):按字面替换和计数,结果同 Python str.replace / str.count。
+        if Self.escapeBody("\u{E9}\\\u{301}") != "\u{E9}\\\\\u{301}" || Self.escapeBody("x\n\u{301}y") != "x\\n\u{301}y"
+            || !Self.isDoubleEscaped(old: "a\\n\u{301}", new: "a\\n\u{301}\\n\u{301}") {
+            pass = false; failLine("组合附加符号紧跟 \\ 或换行时,escapeBody / isDoubleEscaped 没按字面处理")
         }
         let prose = String(repeating: "a", count: 1200) + "\n\n" + #"back\slash "# + String(repeating: "b", count: 1287)
         let longEntry = PortraitEntry(
