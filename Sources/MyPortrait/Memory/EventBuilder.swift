@@ -101,10 +101,13 @@ final class EventBuilder {
     /// `onBatch(index, count)`(1-based)在每个 LLM batch 开始前回调 ——
     /// 给上游进度条按 batch 推进用。单批日也回调一次 (1, 1)。
     /// `tzOffsetMin` = 区间钉死的 UTC 偏移;提示词里的 session 时刻按它显示成本地时刻。
+    /// `earlierToday` = 同日事件(进 EARLIER TODAY,全部不截断);`activeEvents` = 往日事件
+    /// (进 PAST DAYS)。两者由 `splitCatalog` 在区间开始时划分。
     func clusterDay(
         date: Date,
         tzOffsetMin: Int,
         sessions: [EnrichedSession],
+        earlierToday: [ActiveEvent],
         activeEvents: [ActiveEvent],
         onBatch: ((Int, Int) -> Void)? = nil
     ) async throws -> DayClustering {
@@ -112,19 +115,19 @@ final class EventBuilder {
             return DayClustering(events: [], skippedIndices: [])
         }
         if sessions.count <= batchSize {
-            // 单批模式没有 carry —— earlierToday 空数组即可。
             onBatch?(1, 1)
             return try await clusterOneBatch(
                 date: date,
                 tzOffsetMin: tzOffsetMin,
                 sessions: sessions,
                 globalOffset: 0,
-                earlierToday: [],
+                earlierToday: earlierToday,
                 activeEvents: activeEvents
             )
         }
         return try await clusterBatched(
-            date: date, tzOffsetMin: tzOffsetMin, sessions: sessions, activeEvents: activeEvents,
+            date: date, tzOffsetMin: tzOffsetMin, sessions: sessions,
+            earlierToday: earlierToday, activeEvents: activeEvents,
             onBatch: onBatch
         )
     }
@@ -133,9 +136,9 @@ final class EventBuilder {
 
     /// Cluster one batch. `globalOffset` shifts the 1-based session ids the
     /// LLM sees so they stay unique across batches.
-    /// `earlierToday` 是本次 day 内 prior batch 已建的 temp events(强 join
-    /// 候选),`activeEvents` 是 cross-day historical(弱 join 候选)。两者在
-    /// prompt 里分两段呈现,LLM 优先 join earlierToday。
+    /// `earlierToday` 是同日事件 + 本区间前面批次新建的 temp events(强 join
+    /// 候选),`activeEvents` 是往日事件(弱 join 候选)。两者在 prompt 里分两段
+    /// 呈现,LLM 优先 join earlierToday。
     private func clusterOneBatch(
         date: Date,
         tzOffsetMin: Int,
@@ -227,14 +230,16 @@ final class EventBuilder {
 
     // MARK: - Batched (fallback for > batchSize sessions)
 
-    /// Cluster a large day in chunks. Each chunk gets prior chunks' new
-    /// events as join candidates (temp ids prefixed `_b`). Cross-batch joins
-    /// to a temp id are merged in memory; joins to a real (historical) id are
-    /// left for Backfill. Session ids stay globally unique via offsets.
+    /// Cluster a large day in chunks. Each chunk gets the same-day events plus
+    /// prior chunks' new events (temp ids prefixed `_b`) as EARLIER TODAY join
+    /// candidates. Cross-batch joins to a temp id are merged in memory; joins to
+    /// a real id (same-day or past event) are left for Backfill. Session ids
+    /// stay globally unique via offsets.
     private func clusterBatched(
         date: Date,
         tzOffsetMin: Int,
         sessions: [EnrichedSession],
+        earlierToday: [ActiveEvent],
         activeEvents: [ActiveEvent],
         onBatch: ((Int, Int) -> Void)? = nil
     ) async throws -> DayClustering {
@@ -253,16 +258,13 @@ final class EventBuilder {
             onBatch?(ci + 1, chunks.count)
             let offset = ci * batchSize
 
-            // Carry: prior chunks' new events become join candidates.
-            // **不过 rankActive 截断** —— 同一天的 temp 永远比跨日 historical
-            // 更相关,5/30 housing case 就是 carry 被 top-20 截掉导致后续 batch
-            // 看不见 "我们 batch 3 已经建了 chatted_about_housing" 又另起新名。
-            let carry: [ActiveEvent] = tempOrder.map { tid in
+            // EARLIER TODAY = 同日事件 + 前批新事件,全部不截断。
+            let carry: [ActiveEvent] = earlierToday + tempOrder.map { tid in
                 let c = tempClusters[tid]!
                 return ActiveEvent(id: tid, title: c.title, summary: c.summary,
                                    type: c.type, tags: c.tags, lastOccurredOn: date)
             }
-            // historical 跨日的 active 保持 top-20 截断 + rankActive 排序。
+            // 往日事件按本批 app 打分排序,取前 20。
             let historicalRanked = Self.rankActive(activeEvents, for: chunk).prefix(20)
 
             let batch = try await clusterOneBatch(
@@ -301,15 +303,31 @@ final class EventBuilder {
         return DayClustering(events: merged, skippedIndices: allSkipped)
     }
 
+    /// 事件目录顺序:最近出现倒序,再按路径(UTF-8 字节序)升序。全序,不依赖排序是否稳定。
+    nonisolated static func catalogOrder(_ a: ActiveEvent, _ b: ActiveEvent) -> Bool {
+        if a.lastOccurredOn != b.lastOccurredOn { return a.lastOccurredOn > b.lastOccurredOn }
+        return a.id.utf8.lexicographicallyPrecedes(b.id.utf8)
+    }
+
+    /// 目录按 (最近出现倒序, 路径升序) 排;有出现日落在区间帧碰到的本地日里的是同日事件,其余是往日事件。
+    nonisolated static func splitCatalog(_ catalog: [ActiveEvent], occurrences: [String: [Date]],
+                                         firstMs: Int64, lastMs: Int64,
+                                         tzOffsetMin: Int) -> (sameDay: [ActiveEvent], past: [ActiveEvent]) {
+        let days = Set(IntervalSegmenter.touchedDays(startMs: firstMs, endMs: lastMs + 1, tzOffsetMin: tzOffsetMin))
+        let cat = catalog.sorted(by: catalogOrder)
+        let same = Set(cat.filter { a in (occurrences[a.id] ?? []).contains { days.contains(isoDay($0)) } }.map(\.id))
+        return (cat.filter { same.contains($0.id) }, cat.filter { !same.contains($0.id) })
+    }
+
     /// Rank active events by app overlap with the batch (most-overlapping
     /// first) so the top-20 cut keeps the most relevant join candidates.
-    private static func rankActive(_ active: [ActiveEvent],
-                                   for batch: [EnrichedSession]) -> [ActiveEvent] {
-        let batchTags = Set(batch.flatMap { [$0.session.appName.lowercased()] })
+    /// 同分按 `catalogOrder`。
+    nonisolated static func rankActive(_ active: [ActiveEvent], for batch: [EnrichedSession]) -> [ActiveEvent] {
+        let apps = Set(batch.map { $0.session.appName.lowercased() })
+        func score(_ e: ActiveEvent) -> Int { Set(e.tags.map { $0.lowercased() }).intersection(apps).count }
         return active.sorted { a, b in
-            let sa = Set(a.tags.map { $0.lowercased() }).intersection(batchTags).count
-            let sb = Set(b.tags.map { $0.lowercased() }).intersection(batchTags).count
-            return sa > sb
+            let sa = score(a), sb = score(b)
+            return sa != sb ? sa > sb : catalogOrder(a, b)
         }
     }
 

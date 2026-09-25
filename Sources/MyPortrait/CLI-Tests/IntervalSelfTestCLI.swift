@@ -106,10 +106,16 @@ enum IntervalSelfTest {
         }
     }
 
+    /// 假聚类最近一次收到的 EARLIER TODAY / PAST DAYS 事件 id。
+    private static var seenEarlierToday: [String] = []
+    private static var seenActive: [String] = []
+
     /// 假聚类:按 session 的 window 名查计划(title, join);没在计划里的 session 进 skipped。
     private static func clusterer(_ plan: [String: (title: String, join: String?)],
                                   fail: Bool = false) -> Backfill.Clusterer {
-        { _, sessions, _ in
+        { _, sessions, earlierToday, active in
+            seenEarlierToday = earlierToday.map(\.id)
+            seenActive = active.map(\.id)
             if fail { throw NSError(domain: "IntervalSelfTest", code: 1,
                                     userInfo: [NSLocalizedDescriptionKey: "simulated LLM failure"]) }
             var events: [EventBuilder.ClusteredEvent] = []
@@ -122,6 +128,18 @@ enum IntervalSelfTest {
             }
             return EventBuilder.DayClustering(events: events, skippedIndices: skipped)
         }
+    }
+
+    private static func json(_ s: String) -> Any { try! JSONSerialization.jsonObject(with: Data(s.utf8)) }
+    private static func i64(_ v: Any?) -> Int64 { (v as! NSNumber).int64Value }
+
+    /// 只带 app 名和帧 id 的 session(排名、错并闸只看这两样)。
+    private static func session(app: String, frames: Int) -> EventBuilder.EnrichedSession {
+        let t = Date(timeIntervalSince1970: 0)
+        return EventBuilder.EnrichedSession(
+            session: Tier1Merger.MergedEvent(appName: app, windowName: "w", browserURL: nil, firstSeen: t,
+                                             lastSeen: t, occurrences: [], sourceFrameIds: (0..<frames).map(Int64.init)),
+            ocrSnippet: "", transcriptSnippet: "")
     }
 
     private static func events(_ rel: String) -> URL { Storage.eventsDir.appendingPathComponent(rel) }
@@ -153,6 +171,7 @@ enum IntervalSelfTest {
             fputs("[interval-selftest] refusing to run: the data root is not empty, use a fresh temp directory\n", stderr)
             exit(2)
         }
+        sharedVectors()
         let dbImpl = try PortraitDBImpl()
         let pool = dbImpl.dbPool
         MemoryScheduler.useLedgerPool(pool)
@@ -231,6 +250,10 @@ enum IntervalSelfTest {
             "gamma-win": ("Gamma", nil), "alpha-win": ("Alpha again", alphaRel),
             "beta2-win": ("Beta", nil), "beta3-win": ("Beta", nil),
         ]))
+        check(seenEarlierToday == ["2026-09-22/2026-09-22_beta.md", "2026-09-22/2026-09-22_span.md"],
+              "B: EARLIER TODAY = interval A's 09-22 events (latest occurrence desc, then path)")
+        check(seenActive.contains(alphaRel) && Set(seenActive).isDisjoint(with: seenEarlierToday),
+              "B: PAST DAYS has the 09-21 event and none of the same-day events")
         try rB.overlay.commit(intervalId: ivB.id)
         EventOverlay.clearJournal(intervalId: ivB.id)
         check(exists("2026-09-22/2026-09-22_gamma.md") && exists("2026-09-22/2026-09-22_beta.md"),
@@ -433,4 +456,76 @@ enum IntervalSelfTest {
         check(cal.component(.day, from: shown) == 22 && cal.component(.hour, from: shown) == 0,
               "timeline shows 2026-09-22 as the 22nd in the local calendar")
     }
+
+    // MARK: - 两端共用测试向量(与 portrait_offload 的 pytest 内嵌同一段 JSON)
+
+    private static func sharedVectors() {
+        print("[interval-selftest] shared vectors")
+        // V-A:同日 / 往日划分。
+        let va = json(vectorA) as! [String: Any]
+        var catalog: [EventBuilder.ActiveEvent] = []
+        var occ: [String: [Date]] = [:]
+        for c in va["catalog"] as! [[String: Any]] {
+            let id = c["id"] as! String, days = (c["occ"] as! [String]).map(day)
+            catalog.append(.init(id: id, title: "t", summary: "", type: "experience", tags: [],
+                                 lastOccurredOn: days.max()!))
+            occ[id] = days
+        }
+        for c in va["cases"] as! [[String: Any]] {
+            let r = EventBuilder.splitCatalog(catalog, occurrences: occ, firstMs: i64(c["first_ms"]),
+                                              lastMs: i64(c["last_ms"]), tzOffsetMin: va["tz_offset_min"] as! Int)
+            check(r.sameDay.map(\.id) == c["same_day"] as! [String] && r.past.map(\.id) == c["past"] as! [String],
+                  "V-A splitCatalog: \(c["note"] as! String)")
+        }
+
+        // V-B:PAST DAYS 排名与目录顺序。
+        let vb = json(vectorB) as! [String: Any]
+        let evs = (vb["events"] as! [[String: Any]]).map { e in
+            (name: e["name"] as! String,
+             ev: EventBuilder.ActiveEvent(id: e["id"] as! String, title: "t", summary: "", type: "experience",
+                                          tags: e["tags"] as! [String], lastOccurredOn: day(e["last"] as! String)))
+        }
+        let nameOf = Dictionary(uniqueKeysWithValues: evs.map { ($0.ev.id, $0.name) })
+        let batch = (vb["batch_apps"] as! [String]).map { session(app: $0, frames: 1) }
+        check(EventBuilder.rankActive(evs.map(\.ev), for: batch).map { nameOf[$0.id]! } == vb["rank"] as! [String],
+              "V-B rankActive: score desc, then latest occurrence desc, then path")
+        check(evs.map(\.ev).sorted(by: EventBuilder.catalogOrder).map { nameOf[$0.id]! } == vb["catalog_order"] as! [String],
+              "V-B catalog order: latest occurrence desc, then path")
+    }
+
+    private static let vectorA = #"""
+{"tz_offset_min": -420,
+ "catalog": [
+  {"id": "2026-09-19/q.md", "occ": ["2026-09-19"]},
+  {"id": "2026-09-22/b.md", "occ": ["2026-09-22"]},
+  {"id": "2026-09-21/y.md", "occ": ["2026-09-21"]},
+  {"id": "2026-09-23/c.md", "occ": ["2026-09-23"]},
+  {"id": "2026-09-10/p.md", "occ": ["2026-09-10", "2026-09-21"]},
+  {"id": "2026-09-22/a.md", "occ": ["2026-09-22"]},
+  {"id": "2026-09-20/x.md", "occ": ["2026-09-20", "2026-09-22"]}],
+ "cases": [
+  {"note": "本地 09-22 23:30 至 09-23 00:40",
+   "first_ms": 1790145000000, "last_ms": 1790149200000,
+   "same_day": ["2026-09-23/c.md", "2026-09-20/x.md", "2026-09-22/a.md", "2026-09-22/b.md"],
+   "past": ["2026-09-10/p.md", "2026-09-21/y.md", "2026-09-19/q.md"]},
+  {"note": "本地 09-21 10:00 至 09-21 23:59:59.999",
+   "first_ms": 1790010000000, "last_ms": 1790060399999,
+   "same_day": ["2026-09-10/p.md", "2026-09-21/y.md"],
+   "past": ["2026-09-23/c.md", "2026-09-20/x.md", "2026-09-22/a.md", "2026-09-22/b.md", "2026-09-19/q.md"]},
+  {"note": "本地 09-21 22:00 至 09-22 00:00（最后一帧恰在零点）",
+   "first_ms": 1790053200000, "last_ms": 1790060400000,
+   "same_day": ["2026-09-20/x.md", "2026-09-22/a.md", "2026-09-22/b.md", "2026-09-10/p.md", "2026-09-21/y.md"],
+   "past": ["2026-09-23/c.md", "2026-09-19/q.md"]}]}
+"""#
+
+    private static let vectorB = #"""
+{"batch_apps": ["Editor"],
+ "events": [
+  {"name": "E1", "id": "2026-09-21/b.md", "last": "2026-09-21", "tags": ["notes"]},
+  {"name": "E2", "id": "2026-09-21/a.md", "last": "2026-09-21", "tags": []},
+  {"name": "E3", "id": "2026-09-20/z.md", "last": "2026-09-20", "tags": ["browser"]},
+  {"name": "E4", "id": "2026-09-10/x.md", "last": "2026-09-10", "tags": ["Editor"]}],
+ "rank": ["E4", "E2", "E1", "E3"],
+ "catalog_order": ["E2", "E1", "E3", "E4"]}
+"""#
 }

@@ -47,7 +47,9 @@ enum Backfill {
     }
 
     /// 聚类这一步(默认 = EventBuilder.clusterDay;自检换成确定性的假聚类)。
+    /// `earlierToday` = 同日事件,`active` = 往日事件(`EventBuilder.splitCatalog`)。
     typealias Clusterer = (_ date: Date, _ sessions: [EventBuilder.EnrichedSession],
+                           _ earlierToday: [EventBuilder.ActiveEvent],
                            _ active: [EventBuilder.ActiveEvent]) async throws -> EventBuilder.DayClustering
 
     static func runInterval(
@@ -137,37 +139,40 @@ enum Backfill {
         ])
         if enriched.isEmpty { return r }
 
-        // Active-events catalogue from the in-memory cache.
+        // 事件目录(最近出现 ≥ 参照日 − activeWindowDays),在区间开始时分成同日事件与往日事件。
         var fileCache = await loadAllFiles()
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC") ?? .current
         let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
-        let active: [EventBuilder.ActiveEvent] = fileCache.values.compactMap { entry in
-            guard !entry.file.eventTitle.isEmpty,
-                  let last = entry.file.occurrences.max(),
-                  last >= activeCutoff else { return nil }
-            return EventBuilder.ActiveEvent(
-                id: entry.relativePath,
-                title: entry.file.eventTitle,
-                summary: entry.file.eventSummary,
+        var catalog: [EventBuilder.ActiveEvent] = []
+        var occ: [String: [Date]] = [:]
+        for entry in fileCache.values {
+            guard !entry.file.eventTitle.isEmpty, let last = entry.file.occurrences.max(),
+                  last >= activeCutoff else { continue }
+            catalog.append(EventBuilder.ActiveEvent(
+                id: entry.relativePath, title: entry.file.eventTitle, summary: entry.file.eventSummary,
                 type: entry.file.eventType.isEmpty ? "experience" : entry.file.eventType,
-                tags: entry.file.tags,
-                lastOccurredOn: last
-            )
+                tags: entry.file.tags, lastOccurredOn: last))
+            occ[entry.relativePath] = entry.file.occurrences
         }
+        let ts = frames.map { ms($0.timestamp) }
+        guard let firstMs = ts.min(), let lastMs = ts.max() else { return r }
+        let (sameDay, past) = EventBuilder.splitCatalog(catalog, occurrences: occ, firstMs: firstMs,
+                                                        lastMs: lastMs, tzOffsetMin: off)
 
         // LLM per-event clustering.
         progress?(.init(phase: "LLM clustering \(enriched.count) sessions"))
         let clustering: EventBuilder.DayClustering
         do {
             if let clusterer {
-                clustering = try await clusterer(day, enriched, active)
+                clustering = try await clusterer(day, enriched, sameDay, past)
             } else {
                 // 从 Events Processor pipeline 的 config 读 provider/model,Settings 改完
                 // 下一次就用上。
                 let evCfg = ConfigStore.shared.current.scheduler.event
                 clustering = try await EventBuilder(provider: evCfg.resolvedProvider, model: evCfg.resolvedModel)
-                    .clusterDay(date: day, tzOffsetMin: off, sessions: enriched, activeEvents: active, onBatch: { i, n in
+                    .clusterDay(date: day, tzOffsetMin: off, sessions: enriched,
+                                earlierToday: sameDay, activeEvents: past, onBatch: { i, n in
                         progress?(.init(phase: "LLM clustering batch \(i)/\(n)",
                                         unit: .llmBatch(index: i, count: n)))
                     })
