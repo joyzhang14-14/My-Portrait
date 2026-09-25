@@ -542,7 +542,7 @@ enum IntervalSelfTest {
         let seq = vg["sequence"] as! [String: Any]
         var fn = ["T": seq["start"] as! Int]
         let seqRejected = (seq["adds"] as! [Int]).map { gate("T", add: $0, &fn) }
-        check(seqRejected == seq["rejected"] as! [Bool] && fn["T"] == seq["end"] as! Int,
+        check(seqRejected == seq["rejected"] as! [Bool] && fn["T"] == (seq["end"] as! Int),
               "V-G sequence: passed joins add up on the target")
         var none: [String: Int] = [:]
         check(!gate("_b1", add: 500, &none), "join gate: targets outside framesNow (same-day, _bN) pass")
