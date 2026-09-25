@@ -594,6 +594,11 @@ enum IntervalSelfTest {
             clusters: [cl])
         check(acts == [.createNew(cluster: cl, description: "Emails [email] often.")],
               "emails: parseActions trims then scrubs the description")
+        let heads = try? PersonalityClusterAgent.parseClusters(
+            from: #"[{"head": "writes to alice@example.com", "members": [0]}]"#,
+            candidates: [PersonalityTagCandidate(tag: "writes to [email]", source: .events, evidence: [])])
+        check(heads?.map(\.head) == ["writes to [email]"] && heads?.first?.members.map(\.tag) == ["writes to [email]"],
+              "emails: parseClusters scrubs the cluster head")
 
         // V-O:性格 OCR 闸的证据关键词与低帧日。
         let vo = json(vectorO) as! [String: Any]

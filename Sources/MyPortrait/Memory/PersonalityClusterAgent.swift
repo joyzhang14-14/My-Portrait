@@ -116,7 +116,7 @@ final class PersonalityClusterAgent {
 
     // MARK: - JSON 解析
 
-    private static func parseClusters(
+    static func parseClusters(
         from response: String,
         candidates: [PersonalityTagCandidate]
     ) throws -> [PersonalityCluster] {
@@ -143,7 +143,8 @@ final class PersonalityClusterAgent {
         var out: [PersonalityCluster] = []
         var used = Set<Int>()
         for obj in arr {
-            let head = (obj["head"] as? String) ?? ""
+            // head 会写进概念文件(primary_label / event_title / aliases / slug),邮箱先换成 [email]。
+            let head = EventBuilder.scrubEmails((obj["head"] as? String) ?? "")
             guard !head.isEmpty else { continue }
             let memberIdxs = (obj["members"] as? [Any])?
                 .compactMap { ($0 as? Int) ?? ((($0 as? String).flatMap { Int($0) })) } ?? []
