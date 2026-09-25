@@ -142,9 +142,9 @@ final class EventBuilder {
 
     /// Cluster one batch. `globalOffset` shifts the 1-based session ids the
     /// LLM sees so they stay unique across batches.
-    /// `earlierToday` 是同日事件 + 本区间前面批次新建的 temp events(强 join
-    /// 候选),`activeEvents` 是往日事件(弱 join 候选)。两者在 prompt 里分两段
-    /// 呈现,LLM 优先 join earlierToday。
+    /// `earlierToday` 是同日事件 + 本区间前面批次并入过的往日事件 + 前面批次新建的
+    /// temp events(强 join 候选),`activeEvents` 是往日事件(弱 join 候选)。两者在
+    /// prompt 里分两段呈现,LLM 优先 join earlierToday。
     private func clusterOneBatch(
         date: Date,
         tzOffsetMin: Int,
@@ -236,11 +236,11 @@ final class EventBuilder {
 
     // MARK: - Batched (fallback for > batchSize sessions)
 
-    /// Cluster a large day in chunks. Each chunk gets the same-day events plus
-    /// prior chunks' new events (temp ids prefixed `_b`) as EARLIER TODAY join
-    /// candidates. Cross-batch joins to a temp id are merged in memory; joins to
-    /// a real id (same-day or past event) are left for Backfill. Session ids
-    /// stay globally unique via offsets.
+    /// Cluster a large day in chunks. Each chunk gets the same-day events, the
+    /// past events prior chunks joined, and prior chunks' new events (temp ids
+    /// prefixed `_b`) as EARLIER TODAY join candidates. Cross-batch joins to a
+    /// temp id are merged in memory; joins to a real id (same-day or past event)
+    /// are left for Backfill. Session ids stay globally unique via offsets.
     private func clusterBatched(
         date: Date,
         tzOffsetMin: Int,
@@ -255,25 +255,29 @@ final class EventBuilder {
         }
 
         var framesNow = initialFrames
+        let pastById = Dictionary(activeEvents.map { ($0.id, $0) }, uniquingKeysWith: { _, b in b })
         // Temp-id → cluster, preserving insertion order.
         var tempOrder: [String] = []
         var tempClusters: [String: ClusteredEvent] = [:]
         var historicalJoinEvents: [ClusteredEvent] = []
+        var joinedPast: [ActiveEvent] = []          // 本区间前面批次并入过的往日事件,按首次并入顺序
         var allSkipped: [Int] = []
         var tempSeq = 0, gated = 0
 
         for (ci, chunk) in chunks.enumerated() {
             onBatch?(ci + 1, chunks.count)
             let offset = ci * batchSize
+            var joinedIds = Set(joinedPast.map(\.id))
 
-            // EARLIER TODAY = 同日事件 + 前批新事件,全部不截断。
-            let carry: [ActiveEvent] = earlierToday + tempOrder.map { tid in
+            // EARLIER TODAY = 同日事件 + 本区间并入过的往日事件 + 前批新事件,全部不截断。
+            let carry: [ActiveEvent] = earlierToday + joinedPast + tempOrder.map { tid in
                 let c = tempClusters[tid]!
                 return ActiveEvent(id: tid, title: c.title, summary: c.summary,
                                    type: c.type, tags: c.tags, lastOccurredOn: date)
             }
-            // 往日事件按本批 app 打分排序,取前 20。
-            let historicalRanked = Self.rankActive(activeEvents, for: chunk).prefix(20)
+            // 其余往日事件按本批 app 打分排序,取前 20。
+            let historicalRanked = Self.rankActive(activeEvents.filter { !joinedIds.contains($0.id) }, for: chunk)
+                .prefix(20)
 
             let batch = try await clusterOneBatch(
                 date: date, tzOffsetMin: tzOffsetMin, sessions: chunk, globalOffset: offset,
@@ -298,8 +302,12 @@ final class EventBuilder {
                     )
                     tempClusters[je] = target
                 } else if let je = ev.joinExisting, !je.hasPrefix("_b") {
-                    // Join to a real historical event — Backfill handles it.
+                    // Join to a real event — Backfill handles it.
                     historicalJoinEvents.append(ev)
+                    if let a = pastById[je], !joinedIds.contains(je) {
+                        joinedPast.append(a)
+                        joinedIds.insert(je)
+                    }
                 } else {
                     // New event — register a temp id for later chunks.
                     tempSeq += 1
