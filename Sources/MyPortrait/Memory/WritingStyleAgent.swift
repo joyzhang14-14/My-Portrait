@@ -206,8 +206,8 @@ final class WritingStyleAgent {
                 return WritingStyleDraft(
                     action: act,
                     slug: slugClean,
-                    title: raw.title,
-                    body: raw.body,
+                    title: EventBuilder.scrubEmails(raw.title),
+                    body: EventBuilder.scrubEmails(raw.body),
                     sourceRecordIds: raw.source_record_ids ?? [],
                     existingSlug: raw.existing_slug
                 )

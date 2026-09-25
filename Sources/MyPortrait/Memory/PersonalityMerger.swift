@@ -395,7 +395,7 @@ final class PersonalityMerger {
 
     // MARK: - JSON 解析
 
-    private static func parseActions(
+    static func parseActions(
         from response: String,
         clusters: [PersonalityCluster]
     ) throws -> [PersonalityMergeAction] {
@@ -431,8 +431,8 @@ final class PersonalityMerger {
             let head = (obj["head"] as? String) ?? ""
             guard let cluster = byHead[head] else { continue }
             decided.insert(head)
-            let descRaw = (obj["description"] as? String)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let descRaw = (obj["description"] as? String)
+                .map { EventBuilder.scrubEmails($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
             let description: String? = (descRaw?.isEmpty ?? true) ? nil : descRaw
             switch action {
             case "mergeInto":

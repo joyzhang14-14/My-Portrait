@@ -396,8 +396,8 @@ final class PortraitDistiller {
             if !rawSlug.isEmpty, slug != rawSlug {
                 print("[PortraitDistiller] sanitized LLM slug '\(rawSlug)' → '\(slug)'")
             }
-            let title = (entry["title"] as? String) ?? ""
-            let body = (entry["body"] as? String) ?? ""
+            let title = EventBuilder.scrubEmails((entry["title"] as? String) ?? "")
+            let body = EventBuilder.scrubEmails((entry["body"] as? String) ?? "")
             // [E#] 句柄 → 真实 event id(按 buildPrompt 同序)。模型若直接给了
             // 原始 path(老格式 / 困惑),resolveEventHandle 原样返回,走下面的
             // 存在性校验兜底。
@@ -773,10 +773,18 @@ final class PortraitDistiller {
             pass = false; failLine("多一层转义的 update 应返回 true 且文件字节不变")
         }
 
+        // 6. 解析时 title / body 里的邮箱换成 [email]。
+        let parsed = try? parseDecisions(
+            from: #"[{"action": "update", "slug": "zz_mail", "title": "Contact alice@example.com", "body": "Wrote to bob@example.org.", "derived_from": []}]"#,
+            category: cat, eventIds: [])
+        if parsed?.first?.title != "Contact [email]" || parsed?.first?.body != "Wrote to [email]." {
+            pass = false; failLine("parseDecisions 没把 title / body 里的邮箱换成 [email]")
+        }
+
         print("--- distill occurrence self-test ---")
         print("derived 行数: \(derivedCount)  (期望 26,>20 不截断)")
         print("occurrence 天: \(occDays.sorted())  (期望 = [2026-05-16, 2026-06-17],用 event 发生日)")
-        print("已有条目全文:V-E、V-D、prompt 行、双层转义 update 跳过(失败见上方 ✗)")
+        print("已有条目全文:V-E、V-D、prompt 行、双层转义 update 跳过;parseDecisions 邮箱替换(失败见上方 ✗)")
         print(pass ? "✅ PASS" : "❌ FAIL")
         cleanup()
         return pass

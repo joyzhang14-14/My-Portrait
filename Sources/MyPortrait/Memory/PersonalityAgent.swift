@@ -217,7 +217,7 @@ final class PersonalityAgent {
 
     // MARK: - JSON 解析
 
-    private static func parseSnapshot(
+    static func parseSnapshot(
         from response: String,
         fallbackDate: String
     ) throws -> PersonalityDailySnapshot {
@@ -231,9 +231,13 @@ final class PersonalityAgent {
         }
         do {
             let s = try JSONDecoder().decode(PersonalityDailySnapshot.self, from: data)
+            // 标签名和 evidence 里的邮箱换成 [email];ocr_keywords 是 OCR 闸的检索词,原样。
+            let tags = s.tags.map {
+                PersonalityTag(name: EventBuilder.scrubEmails($0.name), evidence: $0.evidence.map(EventBuilder.scrubEmails),
+                               ocrKeywords: $0.ocrKeywords)
+            }
             // LLM 偶尔漏 date —— 用 fallback 补。
-            guard s.date.isEmpty else { return s }
-            return PersonalityDailySnapshot(date: fallbackDate, tags: s.tags)
+            return PersonalityDailySnapshot(date: s.date.isEmpty ? fallbackDate : s.date, tags: tags)
         } catch {
             throw AgentError.malformedJSON(error.localizedDescription)
         }

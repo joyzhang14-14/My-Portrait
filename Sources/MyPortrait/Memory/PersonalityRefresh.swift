@@ -115,7 +115,7 @@ final class PersonalityRefresh {
             keptCandidates.append(
                 PersonalityTagCandidate(
                     tag: tag.name, source: .ocr,
-                    evidence: ["\(dayStr): \(frames) frames matched [\(kwPreview)]"]))
+                    evidence: [EventBuilder.scrubEmails("\(dayStr): \(frames) frames matched [\(kwPreview)]")]))
         }
 
         // ── 3) 语义聚类(去重 + 收敛同义) ───────────────────────────

@@ -482,7 +482,14 @@ final class EventBuilder {
 
     // MARK: - Response parsing
 
-    nonisolated private static func parseClustering(
+    nonisolated(unsafe) private static let emailRegex = try! NSRegularExpression(pattern:
+        #"(?<![A-Za-z0-9._%+/\\-])[A-Za-z0-9._%+-]+@(?![0-9]+x\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?![A-Za-z0-9-]|\.[A-Za-z0-9])(?!:[A-Za-z0-9_~/.-])"#)
+    /// 模型输出里的邮箱换成 `[email]`(事件、蒸馏、写作风格、性格四条链落盘前共用)。
+    nonisolated static func scrubEmails(_ s: String) -> String {
+        emailRegex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "[email]")
+    }
+
+    nonisolated static func parseClustering(
         from response: String
     ) throws -> DayClustering {
         guard let firstBrace = response.firstIndex(of: "{"),
@@ -504,14 +511,14 @@ final class EventBuilder {
         var events: [ClusteredEvent] = []
         events.reserveCapacity(rawEvents.count)
         for (idx, e) in rawEvents.enumerated() {
-            let title = (e["title"] as? String) ?? ""
-            let summary = (e["summary"] as? String) ?? ""
+            let title = scrubEmails((e["title"] as? String) ?? "")
+            let summary = scrubEmails((e["summary"] as? String) ?? "")
             let rawType = ((e["type"] as? String) ?? "experience").lowercased()
             let type = (rawType == "emotion") ? "emotion" : "experience"
             let tags = (e["tags"] as? [String]) ?? []
             let facets: [PortraitFacet] = ((e["portrait_facets"] as? [[String: Any]]) ?? []).compactMap { f in
                 guard let facet = f["facet"] as? String, !facet.isEmpty,
-                      let value = f["value"] as? String, !value.isEmpty else { return nil }
+                      let value = (f["value"] as? String).map(scrubEmails), !value.isEmpty else { return nil }
                 return PortraitFacet(facet: facet.lowercased(), value: value)
             }
             let sessionIDs = (e["session_ids"] as? [Int]) ?? []

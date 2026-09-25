@@ -554,6 +554,42 @@ enum IntervalSelfTest {
                   && !pl.contains { $0.contains("Derived from writing records") },
                   "V-W writing style entry \(i + 1): full prose without the trailer, escaped on one line")
         }
+
+        // V-M:邮箱换成 [email];四条链的解析都过这一步。
+        let vm = json(vectorM) as! [[String]]
+        let vmBad = vm.filter { EventBuilder.scrubEmails($0[0]) != $0[1] }.map { $0[0] }
+        check(vmBad.isEmpty, "V-M scrubEmails: all \(vm.count) vectors\(vmBad.isEmpty ? "" : " — wrong: \(vmBad)")")
+        let pc = try? EventBuilder.parseClustering(from: #"""
+            {"events": [{"title": "Mail alice@example.com", "summary": "Wrote to bob@example.org about x",
+              "type": "experience", "tags": ["mail"], "portrait_facets": [{"facet": "social", "value": "contact carol@example.net"}],
+              "session_ids": [1]},
+             {"title": "Joined", "summary": "s", "session_ids": [2], "join_existing": "2026-09-21/a.md"}], "skipped": []}
+            """#)
+        check(pc?.events.first?.title == "Mail [email]" && pc?.events.first?.summary == "Wrote to [email] about x"
+              && pc?.events.first?.portraitFacets == [.init(facet: "social", value: "contact [email]")]
+              && pc?.events.last?.joinExisting == "2026-09-21/a.md" && pc?.events.last?.sessionIndices == [2],
+              "emails: parseClustering scrubs title, summary and facet values; joins parse as before")
+        let ws = try? WritingStyleAgent.parse(from: #"""
+            [{"action": "create", "slug": "sign_off", "title": "Signs off as alice@example.com",
+              "body": "Short lines.\nReplies to bob@example.org fast.", "source_record_ids": [1]}]
+            """#)
+        check(ws?.first?.title == "Signs off as [email]" && ws?.first?.body == "Short lines.\nReplies to [email] fast.",
+              "emails: WritingStyleAgent.parse scrubs title and body")
+        let snap = try? PersonalityAgent.parseSnapshot(from: #"""
+            {"date": "", "tags": [{"name": "writes to alice@example.com", "evidence": ["2026-09-22/x.md", "mailed bob@example.org"],
+              "ocr_keywords": ["alice@example.com", "placeholder"]}]}
+            """#, fallbackDate: "2026-09-22")
+        check(snap?.date == "2026-09-22" && snap?.tags.first?.name == "writes to [email]"
+              && snap?.tags.first?.evidence == ["2026-09-22/x.md", "mailed [email]"]
+              && snap?.tags.first?.ocrKeywords == ["alice@example.com", "placeholder"],
+              "emails: parseSnapshot scrubs tag names and evidence, keeps ocr_keywords")
+        let cl = PersonalityCluster(head: "outreach",
+                                    members: [PersonalityTagCandidate(tag: "outreach", source: .events, evidence: [])])
+        let acts = try? PersonalityMerger.parseActions(
+            from: #"[{"action": "createNew", "head": "outreach", "description": "  Emails dave@example.com often.  "}]"#,
+            clusters: [cl])
+        check(acts == [.createNew(cluster: cl, description: "Emails [email] often.")],
+              "emails: parseActions trims then scrubs the description")
     }
 
     private static let vectorA = #"""
@@ -606,6 +642,31 @@ enum IntervalSelfTest {
  {"body": "No trailer here.\nSecond line.",
   "prose": "No trailer here.\nSecond line.",
   "line": "No trailer here.\\nSecond line."}]
+"""#
+
+    private static let vectorM = #"""
+[["contact alice.w+tag@example.edu.", "contact [email]."],
+ ["邮箱a_b@gmail.com，谢谢", "邮箱[email]，谢谢"],
+ ["mailto:x@y.co.uk", "mailto:[email]"],
+ ["A@B.COM", "[email]"],
+ ["a@b-c.io", "[email]"],
+ ["Email: a@b.com: done", "Email: [email]: done"],
+ ["https://u:p@h.example.com/x", "https://u:[email]/x"],
+ ["😀a@b.com", "😀[email]"],
+ ["@Alice hi", "@Alice hi"],
+ ["@MainActor", "@MainActor"],
+ ["icon@2x.png", "icon@2x.png"],
+ ["react@18.3.1", "react@18.3.1"],
+ ["node@22", "node@22"],
+ ["root@192.0.2.10", "root@192.0.2.10"],
+ ["user@host", "user@host"],
+ ["a@b.c", "a@b.c"],
+ ["x@y.com2", "x@y.com2"],
+ ["/tmp/a@b.log", "/tmp/a@b.log"],
+ ["C:\\Users\\a@b.txt", "C:\\Users\\a@b.txt"],
+ ["git@github.com:owner/repo.git", "git@github.com:owner/repo.git"],
+ ["ssh alice@host.example.com:22", "ssh alice@host.example.com:22"],
+ ["git@gitlab.example.com:group/repo.git", "git@gitlab.example.com:group/repo.git"]]
 """#
 
     private static let vectorB = #"""
