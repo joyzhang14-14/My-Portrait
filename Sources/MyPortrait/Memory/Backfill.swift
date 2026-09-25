@@ -152,7 +152,7 @@ enum Backfill {
             catalog.append(EventBuilder.ActiveEvent(
                 id: entry.relativePath, title: entry.file.eventTitle, summary: entry.file.eventSummary,
                 type: entry.file.eventType.isEmpty ? "experience" : entry.file.eventType,
-                tags: entry.file.tags, lastOccurredOn: last))
+                tags: entry.file.tags, lastOccurredOn: last, frameCount: entry.file.memberFrameIds.count))
             occ[entry.relativePath] = entry.file.occurrences
         }
         let ts = frames.map { ms($0.timestamp) }
@@ -191,6 +191,9 @@ enum Backfill {
             ])
             progress?(.init(phase: "LLM failed: \(error.localizedDescription)"))
             return r
+        }
+        if clustering.gatedJoins > 0 {
+            DiagLog.event("backfill.interval.join_gate", ctx: ["interval": iv.id, "rejected": clustering.gatedJoins])
         }
 
         // Materialise into the overlay. `sessionIndices` are 1-based into `enriched`.

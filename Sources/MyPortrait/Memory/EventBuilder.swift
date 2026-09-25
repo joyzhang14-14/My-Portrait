@@ -40,6 +40,7 @@ final class EventBuilder {
         let type: String
         let tags: [String]
         let lastOccurredOn: Date
+        var frameCount: Int = 0          // 目标现有成员帧数(错并闸用;_bN 为 0)
     }
 
     /// One semantic event clustered from 1+ sessions.
@@ -57,6 +58,7 @@ final class EventBuilder {
     struct DayClustering {
         let events: [ClusteredEvent]
         let skippedIndices: [Int]
+        var gatedJoins: Int = 0          // 错并闸拒绝次数
     }
 
     enum BuilderError: LocalizedError {
@@ -114,9 +116,11 @@ final class EventBuilder {
         guard !sessions.isEmpty else {
             return DayClustering(events: [], skippedIndices: [])
         }
+        // 只有往日事件受错并闸约束;范围在区间开始时定。
+        var framesNow = Dictionary(activeEvents.map { ($0.id, $0.frameCount) }, uniquingKeysWith: { _, b in b })
         if sessions.count <= batchSize {
             onBatch?(1, 1)
-            return try await clusterOneBatch(
+            let raw = try await clusterOneBatch(
                 date: date,
                 tzOffsetMin: tzOffsetMin,
                 sessions: sessions,
@@ -124,11 +128,13 @@ final class EventBuilder {
                 earlierToday: earlierToday,
                 activeEvents: activeEvents
             )
+            let g = Self.gateJoins(raw.events, sessions: sessions, framesNow: &framesNow)
+            return DayClustering(events: g.events, skippedIndices: raw.skippedIndices, gatedJoins: g.rejected)
         }
         return try await clusterBatched(
             date: date, tzOffsetMin: tzOffsetMin, sessions: sessions,
             earlierToday: earlierToday, activeEvents: activeEvents,
-            onBatch: onBatch
+            framesNow: framesNow, onBatch: onBatch
         )
     }
 
@@ -241,18 +247,20 @@ final class EventBuilder {
         sessions: [EnrichedSession],
         earlierToday: [ActiveEvent],
         activeEvents: [ActiveEvent],
+        framesNow initialFrames: [String: Int],
         onBatch: ((Int, Int) -> Void)? = nil
     ) async throws -> DayClustering {
         let chunks = stride(from: 0, to: sessions.count, by: batchSize).map {
             Array(sessions[$0..<min($0 + batchSize, sessions.count)])
         }
 
+        var framesNow = initialFrames
         // Temp-id → cluster, preserving insertion order.
         var tempOrder: [String] = []
         var tempClusters: [String: ClusteredEvent] = [:]
         var historicalJoinEvents: [ClusteredEvent] = []
         var allSkipped: [Int] = []
-        var tempSeq = 0
+        var tempSeq = 0, gated = 0
 
         for (ci, chunk) in chunks.enumerated() {
             onBatch?(ci + 1, chunks.count)
@@ -272,9 +280,12 @@ final class EventBuilder {
                 earlierToday: carry,
                 activeEvents: Array(historicalRanked)
             )
+            // session 编号全区间统一(从 1 起),数帧要用全量 sessions。
+            let g = Self.gateJoins(batch.events, sessions: sessions, framesNow: &framesNow)
+            gated += g.rejected
             allSkipped.append(contentsOf: batch.skippedIndices)
 
-            for ev in batch.events {
+            for ev in g.events {
                 if let je = ev.joinExisting, je.hasPrefix("_b"),
                    var target = tempClusters[je] {
                     // Cross-batch join to an in-flight temp event → merge.
@@ -300,7 +311,7 @@ final class EventBuilder {
         }
 
         let merged = tempOrder.compactMap { tempClusters[$0] } + historicalJoinEvents
-        return DayClustering(events: merged, skippedIndices: allSkipped)
+        return DayClustering(events: merged, skippedIndices: allSkipped, gatedJoins: gated)
     }
 
     /// 事件目录顺序:最近出现倒序,再按路径(UTF-8 字节序)升序。全序,不依赖排序是否稳定。
@@ -332,6 +343,29 @@ final class EventBuilder {
     }
 
     // MARK: - Join defence + coverage
+
+    nonisolated static let joinGateMinFrames = 10
+    nonisolated static let joinGateRatio = 3
+    /// 并入往日事件的簇:并入帧 ≥10 且 > 目标现有帧 3 倍 → 去掉 join,改为新事件;放行的累加进 framesNow。
+    nonisolated static func gateJoins(_ events: [ClusteredEvent], sessions: [EnrichedSession],
+                                      framesNow: inout [String: Int]) -> (events: [ClusteredEvent], rejected: Int) {
+        var out: [ClusteredEvent] = [], n = 0
+        for ev in events {
+            guard let je = ev.joinExisting, let before = framesNow[je] else { out.append(ev); continue }
+            let add = ev.sessionIndices.reduce(0) { acc, i in
+                i >= 1 && i <= sessions.count ? acc + sessions[i - 1].session.sourceFrameIds.count : acc }
+            if add >= joinGateMinFrames && add > joinGateRatio * before {
+                out.append(ClusteredEvent(title: ev.title, summary: ev.summary, type: ev.type,
+                                          portraitFacets: ev.portraitFacets, tags: ev.tags,
+                                          sessionIndices: ev.sessionIndices, joinExisting: nil))
+                n += 1
+            } else {
+                framesNow[je] = before + add
+                out.append(ev)
+            }
+        }
+        return (out, n)
+    }
 
     /// Drop joins that point at a non-existent active id. The offending
     /// event's sessions are moved to `skipped` rather than written as a shell.

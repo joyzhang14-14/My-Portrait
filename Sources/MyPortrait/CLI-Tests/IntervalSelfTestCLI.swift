@@ -491,6 +491,39 @@ enum IntervalSelfTest {
               "V-B rankActive: score desc, then latest occurrence desc, then path")
         check(evs.map(\.ev).sorted(by: EventBuilder.catalogOrder).map { nameOf[$0.id]! } == vb["catalog_order"] as! [String],
               "V-B catalog order: latest occurrence desc, then path")
+
+        // V-G:错并闸。一个簇 = 只含 session 1 的并入,帧数 = 并入帧。
+        let vg = json(vectorG) as! [String: Any]
+        func gate(_ target: String, add: Int, _ framesNow: inout [String: Int]) -> Bool {
+            let ev = EventBuilder.ClusteredEvent(title: "t", summary: "s", type: "experience", portraitFacets: [],
+                                                 tags: [], sessionIndices: [1], joinExisting: target)
+            let r = EventBuilder.gateJoins([ev], sessions: [session(app: "App", frames: add)], framesNow: &framesNow)
+            return r.rejected == 1 && r.events.first?.joinExisting == nil && r.events.first?.title == "t"
+        }
+        var cur: [String: Int] = [:], rejected: [Int] = []
+        for row in vg["rows"] as! [[Any]] {
+            let n = row[0] as! Int, t = row[1] as! String, add = row[3] as! Int
+            let now = cur[t] ?? row[2] as! Int
+            if row[4] as! String == "P" {
+                var fn = [t: now]
+                if gate(t, add: add, &fn) { rejected.append(n) } else { cur[t] = fn[t]! }
+            } else {
+                cur[t] = now + add
+            }
+        }
+        check(rejected == vg["rejected"] as! [Int], "V-G auditB replay: gate rejects only #31, #39")
+        let single = (vg["single"] as! [[Any]]).allSatisfy { v in
+            var fn = ["T": v[0] as! Int]
+            return gate("T", add: v[1] as! Int, &fn) == v[2] as! Bool
+        }
+        check(single, "V-G single joins: reject iff add ≥ 10 and add > 3 × current frames")
+        let seq = vg["sequence"] as! [String: Any]
+        var fn = ["T": seq["start"] as! Int]
+        let seqRejected = (seq["adds"] as! [Int]).map { gate("T", add: $0, &fn) }
+        check(seqRejected == seq["rejected"] as! [Bool] && fn["T"] == seq["end"] as! Int,
+              "V-G sequence: passed joins add up on the target")
+        var none: [String: Int] = [:]
+        check(!gate("_b1", add: 500, &none), "join gate: targets outside framesNow (same-day, _bN) pass")
     }
 
     private static let vectorA = #"""
@@ -516,6 +549,24 @@ enum IntervalSelfTest {
    "first_ms": 1790053200000, "last_ms": 1790060400000,
    "same_day": ["2026-09-20/x.md", "2026-09-22/a.md", "2026-09-22/b.md", "2026-09-10/p.md", "2026-09-21/y.md"],
    "past": ["2026-09-23/c.md", "2026-09-19/q.md"]}]}
+"""#
+
+    private static let vectorG = #"""
+{"rows": [
+  [1, "T1", 14, 1, "S", 0], [2, "T2", 7, 17, "P", 0], [3, "T3", 261, 27, "S", 0], [4, "T4", 20, 16, "S", 0],
+  [5, "T5", 1, 6, "S", 0], [6, "T6", 1833, 7, "S", 0], [7, "T7", 4, 3, "S", 0], [8, "T4", 20, 42, "S", 0],
+  [9, "T8", 11, 24, "S", 0], [10, "T1", 14, 4, "S", 0], [11, "T1", 14, 12, "S", 1], [12, "T2", 7, 3, "S", 0],
+  [13, "T6", 1833, 4, "S", 0], [14, "T9", 243, 15, "S", 0], [15, "T6", 1833, 2, "S", 0], [16, "T8", 11, 6, "S", 0],
+  [17, "T3", 261, 7, "S", 0], [18, "T10", 131, 10, "S", 0], [19, "T11", 62, 3, "P", 0], [20, "T4", 20, 4, "S", 0],
+  [21, "T6", 1833, 1, "S", 0], [22, "T12", 26, 4, "S", 0], [23, "T13", 9, 12, "S", 0], [24, "T6", 1833, 3, "S", 0],
+  [25, "T12", 26, 4, "S", 0], [26, "T14", 3, 2, "P", 0], [27, "T13", 9, 4, "S", 0], [28, "T15", 35149, 2, "P", 0],
+  [29, "T13", 9, 2, "S", 0], [30, "T12", 26, 2, "S", 0], [31, "T5", 1, 34, "P", 1], [32, "T16", 708, 19, "P", 0],
+  [33, "T6", 1833, 2, "P", 0], [34, "T17", 68, 3, "P", 0], [35, "T13", 9, 5, "P", 0], [36, "T15", 35149, 1, "P", 0],
+  [37, "T6", 1833, 4, "P", 0], [38, "T10", 131, 61, "P", 0], [39, "T5", 1, 78, "P", 1], [40, "T3", 261, 18, "P", 1],
+  [41, "T18", 601, 7, "P", 0], [42, "T15", 35149, 18, "S", 0]],
+ "rejected": [31, 39],
+ "single": [[7, 34, true], [1, 6, false], [7, 17, false], [3, 9, false], [3, 10, true], [4, 12, false], [4, 13, true]],
+ "sequence": {"start": 5, "adds": [12, 40], "rejected": [false, false], "end": 57}}
 """#
 
     private static let vectorB = #"""
