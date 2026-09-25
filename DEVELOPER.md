@@ -610,7 +610,22 @@ retries it; Run now seals `[last cut, now − 60 s)` and processes every pending
 Per interval, `Backfill.runInterval` reads every frame of the interval
 (`TimelineDB.frames(fromMs:toMs:afterId:maxId:)`, no row cap), merges Tier-1 sessions, adds OCR
 and calls `EventBuilder.clusterDay`; the prompt date and the 14-day active window use the
-`attributeDay` of all the interval's frames. Each new event is dated by its member frames'
+`attributeDay` of all the interval's frames. The catalog (events last seen within those 14 days)
+is split once at interval start (`EventBuilder.splitCatalog`), in catalog order (latest
+occurrence first, then path by UTF-8 bytes): events with an occurrence on a local day the
+interval's frames touch are same-day events and all go into the prompt's EARLIER TODAY; the rest
+are past events for PAST DAYS — all of them for a single batch (≤ 40 sessions), otherwise the top
+20 per batch by `rankActive` (event tags ∩ the batch's app names, ties in catalog order). In a
+batched interval EARLIER TODAY also carries the past events earlier batches joined (first-join
+order; they leave PAST DAYS) and earlier batches' new events (`_bN`). A join into a past event
+passes the join gate (`EventBuilder.gateJoins`): when the cluster has ≥ 10 frames and more than
+3 × the target's current member frames (count at interval start plus joins already let through),
+the join is dropped and the cluster becomes a new event with the title and summary the model
+wrote (in a batched interval a `_bN` that later batches can join); the target file is untouched.
+Joins into same-day events and `_bN` are not gated; rejections are logged as
+`backfill.interval.join_gate`. Email addresses in titles, summaries and facet values become
+`[email]` when the response is parsed (`EventBuilder.scrubEmails`, shared with distill, writing
+style and personality). Each new event is dated by its member frames'
 `attributeDay` (most frames → longer share of the session spans → earliest frame, at the pinned
 offset) and written to `events/<local day>/<local day>_<slug>.md`; one date directory can take
 events from several intervals, and file names dedupe (`_2` … `_100`) against disk and the current
@@ -638,7 +653,14 @@ local event run and at `[scheduler.personality] time_of_day`, taking up to 7 rea
 ticks only retry failed days (same rule as intervals) past backoff, and Run now runs at once. It calls
 `PersonalityRefresh.refresh(day:ocrWindow:)`: `day` is the local date stored as UTC midnight, so
 `events/<day>/`, `last_modified` and `personality_daily/<day>.md` all use that date, and the gate
-counts frames in the day window (`TimelineDB.frameCount(fromMs:toMs:keywords:)`).
+counts frames in the day window. Its denominator is the day's frames with more than 4 characters
+of OCR text (`TimelineDB.ocrFrameCount`); a keyword matching more than 30 % of them
+(`PersonalityRefresh.maxKeywordHitPct`: words always on screen, common substrings) is not
+evidence, and a tag stays only when the frames matching any evidence keyword
+(`TimelineDB.frameCount(fromMs:toMs:keywords:)`) number at least 15. The concept's OCR line
+lists only the evidence keywords. A day whose snapshot tags were all dropped is marked failed and
+retried, unless it has fewer than 50 text frames (`PersonalityRefresh.ocrDayTooSparse`), which is
+a valid empty day.
 
 **Dates in the UI.** Event dates are calendar dates. The Neural Graph timeline
 (`EventTimeline.calendarDay`) maps them to the same day in the local calendar without a time-zone
