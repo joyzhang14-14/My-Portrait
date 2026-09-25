@@ -12,7 +12,9 @@ import GRDB
 /// 区间的事件(LLM 失败 / 失败回滚 / 崩溃恢复 / 落盘中途出错)、impact 评分范围找回、
 /// personality 每个本地日只跑一次、OCR 闸按本地日窗口计数、区间取帧不设上限、
 /// 时间轴按日历日期显示、本机运行时机(封区间不触发运行,time_of_day 到点处理全部待处理
-/// 区间,其余时刻只重试失败过且退避到期的区间 / 本地日,Retry now / Run now 立即处理)。
+/// 区间,其余时刻只重试失败过且退避到期的区间 / 本地日,Retry now / Run now 立即处理)、
+/// 事件目录分同日 / 往日、与 portrait_offload 共用的测试向量(V-A、V-B、V-G、V-W、V-M、V-O)、
+/// 解析时替换邮箱、写作风格双层转义不写、OCR 闸分母(当天有字帧数)。
 ///
 ///   CFFIXED_USER_HOME=$(mktemp -d .build/ivhome.XXXX) .build/debug/MyPortrait --interval-selftest
 @MainActor
@@ -369,6 +371,8 @@ enum IntervalSelfTest {
               && tl.frameCount(fromMs: w21.start, toMs: w21.end, keywords: ["gamma-win"]) == 0
               && tl.frameCount(fromMs: w21.start, toMs: w21.end, keywords: ["span-win"]) == 20,
               "OCR gate counts frames inside the local day window")
+        check(tl.ocrFrameCount(fromMs: w22.start, toMs: w22.end) == 238,
+              "OCR gate denominator: 238 frames with text on 09-22 (21+61+61+31+11+11+31+11)")
         check(sched.stagesComplete(date: ivA.id, stages: [.raw, .event, .impact])
               && !sched.stagesComplete(date: ivE.id, stages: [.raw, .event, .impact]),
               "staged-run check reads interval rows")
@@ -590,6 +594,15 @@ enum IntervalSelfTest {
             clusters: [cl])
         check(acts == [.createNew(cluster: cl, description: "Emails [email] often.")],
               "emails: parseActions trims then scrubs the description")
+
+        // V-O:性格 OCR 闸的证据关键词与低帧日。
+        let vo = json(vectorO) as! [String: Any]
+        let hits = vo["hits"] as! [String: Int]
+        check(PersonalityRefresh.evidenceKeywords(vo["keywords"] as! [String], total: vo["total"] as! Int) { hits[$0]! }
+              == vo["evidence"] as! [String],
+              "V-O evidenceKeywords: keywords above 30% of the day's text frames are not evidence")
+        check((vo["sparse"] as! [[Any]]).allSatisfy { PersonalityRefresh.ocrDayTooSparse($0[0] as! Int) == $0[1] as! Bool },
+              "V-O ocrDayTooSparse: fewer than 50 text frames is a valid empty day")
     }
 
     private static let vectorA = #"""
@@ -667,6 +680,14 @@ enum IntervalSelfTest {
  ["git@github.com:owner/repo.git", "git@github.com:owner/repo.git"],
  ["ssh alice@host.example.com:22", "ssh alice@host.example.com:22"],
  ["git@gitlab.example.com:group/repo.git", "git@gitlab.example.com:group/repo.git"]]
+"""#
+
+    private static let vectorO = #"""
+{"total": 100,
+ "keywords": ["nftables", "port", "claude"],
+ "hits": {"nftables": 30, "port": 80, "claude": 31},
+ "evidence": ["nftables"],
+ "sparse": [[0, true], [49, true], [50, false]]}
 """#
 
     private static let vectorB = #"""

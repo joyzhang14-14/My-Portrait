@@ -6,8 +6,9 @@ private let prLog = Logger(subsystem: "com.myportrait.memory", category: "person
 /// Personality 流水线总装(一个本地日一次) —— events 主导 + OCR 验证:
 ///   1. events 源: 只看 events/<本地日>/ 里 weight > minEventWeight 的高权重事件
 ///   2. PersonalityAgent → 每个 tag 自带 ocr_keywords(LLM 给的搜索词)
-///   3. OCR 验证: 该本地日 [00:00, 24:00) 里命中 ocr_keywords 的帧数必须
-///      ≥ minOCRFrames,不够就丢弃这个 tag
+///   3. OCR 验证(该本地日 [00:00, 24:00) 的有字帧):命中率 > maxKeywordHitPct 的关键词
+///      (界面常驻词、常见子串)不算证据;命中任一证据关键词的帧数 ≥ minOCRFrames 才留下,
+///      否则丢弃这个 tag
 ///   4. 幸存 tag 同时以 .events / .ocr 两种来源进 cluster + merge → 落盘
 ///
 /// 其他 portrait 板块(skills / interests / 等)不再做 personality 来源——
@@ -20,9 +21,17 @@ final class PersonalityRefresh {
     /// EMA 配置下,事件 weight 分布是 0–7,3 大致圈到全体的 1/3,够拉开
     /// "随手刷一下"和"做了件正经事"的差距。
     nonisolated static let minEventWeight: Double = 3.0
-    /// OCR 验证门槛: tag.ocr_keywords 命中的当天帧数 ≥ 这个值才落盘。
+    /// OCR 验证门槛: 证据关键词命中的当天帧数 ≥ 这个值才落盘。
     /// 15 帧 ~= 45 秒屏幕时间(15s/帧抽样),仍够说明"不是偶然飘过一眼"。
     nonisolated static let minOCRFrames: Int = 15
+    /// 关键词命中帧占当天有字帧的百分比上限:超过就不算证据。
+    nonisolated static let maxKeywordHitPct = 30
+
+    nonisolated static func evidenceKeywords(_ keywords: [String], total: Int, hits: (String) -> Int) -> [String] {
+        keywords.filter { hits($0) * 100 <= maxKeywordHitPct * total }
+    }
+    /// 有字帧太少,单个关键词不可能同时满足 ≥15 帧与 ≤30%:标签全丢算合法的空。
+    nonisolated static func ocrDayTooSparse(_ total: Int) -> Bool { total * maxKeywordHitPct < minOCRFrames * 100 }
 
     struct Report: Sendable {
         let day: Date
@@ -30,7 +39,8 @@ final class PersonalityRefresh {
         let eventsAboveWeight: Int    // 过 minEventWeight 的
         let snapshotTags: Int         // PersonalityAgent 提的 tag 数
         let ocrKept: Int              // OCR 验证通过的 tag 数
-        let ocrDropped: Int           // OCR 验证不够 minOCRFrames 被丢的
+        let ocrDropped: Int           // OCR 验证没过被丢的
+        let ocrFrameTotal: Int        // 当天有字帧数(OCR 文本超过 4 个字)
         let clusterCount: Int
         let existingConceptCount: Int
         let actions: [PersonalityMergeAction]
@@ -87,19 +97,21 @@ final class PersonalityRefresh {
 
         // ── 2) OCR 验证: 每个 tag 自带 ocr_keywords,数命中帧数 ────────
         let timeline = TimelineDB()
+        let dayTotal = timeline.ocrFrameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end)
         var keptCandidates: [PersonalityTagCandidate] = []
         var kept = 0, dropped = 0
         for (ti, tag) in snapshot.tags.enumerated() {
             progress?(.ocrVerify(index: ti + 1, count: snapshot.tags.count))
-            guard !tag.ocrKeywords.isEmpty else {
-                prLog.notice("tag '\(tag.name, privacy: .public)': no ocr_keywords → drop")
+            let kws = Self.evidenceKeywords(tag.ocrKeywords, total: dayTotal) {
+                timeline.frameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end, keywords: [$0]) }
+            guard !kws.isEmpty else {
+                prLog.notice("tag '\(tag.name, privacy: .public)': no evidence keyword (kw=\(tag.ocrKeywords, privacy: .public), \(dayTotal) text frames) → drop")
                 dropped += 1
                 continue
             }
-            let frames = timeline.frameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end,
-                                             keywords: tag.ocrKeywords)
+            let frames = timeline.frameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end, keywords: kws)
             if frames < Self.minOCRFrames {
-                prLog.notice("tag '\(tag.name, privacy: .public)': \(frames) frame(s) < \(Self.minOCRFrames) → drop (kw=\(tag.ocrKeywords, privacy: .public))")
+                prLog.notice("tag '\(tag.name, privacy: .public)': \(frames) frame(s) < \(Self.minOCRFrames) → drop (kw=\(kws, privacy: .public))")
                 dropped += 1
                 continue
             }
@@ -109,13 +121,12 @@ final class PersonalityRefresh {
             keptCandidates.append(
                 PersonalityTagCandidate(tag: tag.name, source: .events,
                                         evidence: tag.evidence))
-            // ocr 侧 evidence: 一行验证记录,落进 concept body 的 ## ocr
-            let kwPreview = tag.ocrKeywords.joined(separator: ", ")
+            // ocr 侧 evidence: 一行验证记录(只列证据关键词),落进 concept body 的 ## ocr
             let dayStr = Self.formatDay(PortraitFile.truncateToDay(day))
             keptCandidates.append(
                 PersonalityTagCandidate(
                     tag: tag.name, source: .ocr,
-                    evidence: [EventBuilder.scrubEmails("\(dayStr): \(frames) frames matched [\(kwPreview)]")]))
+                    evidence: [EventBuilder.scrubEmails("\(dayStr): \(frames) frames matched [\(kws.joined(separator: ", "))]")]))
         }
 
         // ── 3) 语义聚类(去重 + 收敛同义) ───────────────────────────
@@ -138,6 +149,7 @@ final class PersonalityRefresh {
             snapshotTags: snapshot.tags.count,
             ocrKept: kept,
             ocrDropped: dropped,
+            ocrFrameTotal: dayTotal,
             clusterCount: clusters.count,
             existingConceptCount: existing.count,
             actions: actions,

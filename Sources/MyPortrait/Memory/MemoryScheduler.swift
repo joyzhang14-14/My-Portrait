@@ -1286,12 +1286,13 @@ final class MemoryScheduler {
                         setPersonalityProgress(0.95, "\(dayLabel) · writing concepts")
                     }
                 }
-                print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
+                print("[Scheduler] personality \(ds): events \(r.eventsTotal)→\(r.eventsAboveWeight)(>w\(PersonalityRefresh.minEventWeight)) → snapshot \(r.snapshotTags) → ocr kept \(r.ocrKept)/dropped \(r.ocrDropped) (text frames \(r.ocrFrameTotal)) | created=\(r.apply.created) merged=\(r.apply.merged) skipped=\(r.apply.skipped)")
                 // 可疑空值 → .failed 触发重试,别静默标 complete 永久锁死。只针对
                 // "有高权重事件 + LLM 提了 tag,却被 OCR 验证全丢光"这一种真 bug 场景。
-                // 真低活跃日(eventsAboveWeight==0)或 LLM 判断无特质(snapshotTags==0)
-                // 是合法的空,照常 .success,不重试、不噪音。
-                if r.eventsAboveWeight > 0, r.snapshotTags > 0, r.ocrKept == 0 {
+                // 真低活跃日(eventsAboveWeight==0)、LLM 判断无特质(snapshotTags==0)、
+                // 当天有字帧不足 50(ocrDayTooSparse)都是合法的空,照常 .success,不重试、不噪音。
+                if r.eventsAboveWeight > 0, r.snapshotTags > 0, r.ocrKept == 0,
+                   !PersonalityRefresh.ocrDayTooSparse(r.ocrFrameTotal) {
                     schedLog.notice("personality \(ds, privacy: .public): \(r.snapshotTags) tag(s) all dropped at OCR gate → .failed (will retry)")
                     return .failed
                 }
