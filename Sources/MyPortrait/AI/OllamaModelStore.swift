@@ -41,8 +41,13 @@ final class OllamaModelStore {
             let decoded = try JSONDecoder().decode(TagsResponse.self, from: data)
             // Ollama 返回顺序大致是安装时间;按名字稳定排序,picker 不抖。
             let names = decoded.models.map(\.name).sorted()
+            guard names != models else { return }
             models = names
             Self.lock.withLock { Self.mirror = names }
+            // 新 pull 的模型要进 Pi 的 models.json,不然选了它 Pi 不认。
+            if AISetup.ollamaConnected {
+                try? PiInstaller.writeModelsJSON(providers: AISetup.configuredProviders())
+            }
         } catch {
             // 静默:保留旧列表。
         }

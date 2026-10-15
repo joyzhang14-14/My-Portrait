@@ -52,12 +52,15 @@ final class AISetup {
             }
         }
 
+        // Ollama 的模型列表要现拉(不写死),先拉好再写 models.json,否则它的 entry 是空的。
+        if Self.ollamaConnected { await OllamaModelStore.shared.refresh() }
+
         // Pi (depends on Bun)
         if !PiInstaller.isInstalled {
             state = .installingPi
             do {
                 try await PiInstaller.install()
-                try PiInstaller.writeModelsJSON(providers: configuredProviders())
+                try PiInstaller.writeModelsJSON(providers: Self.configuredProviders())
             }
             catch {
                 state = .error(error.localizedDescription)
@@ -67,21 +70,27 @@ final class AISetup {
             // Re-write models.json each launch with all currently-configured
             // providers so credential rotation / new providers take effect
             // without forcing a reinstall.
-            try? PiInstaller.writeModelsJSON(providers: configuredProviders())
+            try? PiInstaller.writeModelsJSON(providers: Self.configuredProviders())
         }
 
         state = .ready
     }
 
+    /// Ollama 没有凭据可查,看 Connections 里连没连(AppState 存在 UserDefaults 的那份)。
+    static var ollamaConnected: Bool {
+        UserDefaults.standard.stringArray(forKey: AppState.connectedDefaultsKey)?.contains("ollama") ?? false
+    }
+
     /// All providers the user appears to have credentials for. Used to seed
     /// `models.json` so Pi knows about every configured backend.
-    private func configuredProviders() -> [Provider] {
+    static func configuredProviders() -> [Provider] {
         var out: [Provider] = []
         if ChatGPTOAuth.isLoggedIn() { out.append(.chatgpt) }
         for p in Provider.allCases {
             guard let key = p.secretKey, SecretStore.shared.get(key) != nil else { continue }
             if !out.contains(p) { out.append(p) }
         }
+        if ollamaConnected { out.append(.ollama) }
         let local = ConfigStore.shared.current.localModel
         if !local.baseURL.isEmpty, !local.model.isEmpty { out.append(.localModel) }
         return out

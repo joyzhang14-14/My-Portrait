@@ -370,7 +370,7 @@ final class AppState {
     var modelByIntegration: [String: String] = [:]
 
     private let modelDefaultsKey      = "MyPortrait.modelByIntegration.v1"
-    private let connectedDefaultsKey  = "MyPortrait.connectedIds.v1"
+    static let connectedDefaultsKey   = "MyPortrait.connectedIds.v1"
     private let activeAIDefaultsKey   = "MyPortrait.activeAIId.v1"
 
     /// Guards the didSet writers while we're populating fields from disk so
@@ -486,7 +486,7 @@ final class AppState {
     // MARK: - Connection persistence
 
     private func loadConnections() {
-        if let arr = UserDefaults.standard.stringArray(forKey: connectedDefaultsKey) {
+        if let arr = UserDefaults.standard.stringArray(forKey: Self.connectedDefaultsKey) {
             connectedIds = Set(arr)
         }
         if let active = UserDefaults.standard.string(forKey: activeAIDefaultsKey) {
@@ -494,7 +494,7 @@ final class AppState {
         }
     }
     private func saveConnections() {
-        UserDefaults.standard.set(Array(connectedIds), forKey: connectedDefaultsKey)
+        UserDefaults.standard.set(Array(connectedIds), forKey: Self.connectedDefaultsKey)
         UserDefaults.standard.set(activeAIId, forKey: activeAIDefaultsKey)
     }
 
