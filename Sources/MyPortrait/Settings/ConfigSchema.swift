@@ -31,6 +31,8 @@ struct MyPortraitConfig: Codable, Equatable {
     var storage:       StorageConfig       = .init()
     var chat:          ChatConfig          = .init()
     var personalInfo:  PersonalInfoConfig  = .init()
+    var premium:  PremiumConfig  = .init()
+    var localModel:    LocalModelConfig    = .init()
 
     init() {}
 
@@ -39,6 +41,8 @@ struct MyPortraitConfig: Codable, Equatable {
         case display, general, aiModels = "ai_models", capture, notifications
         case memory, scheduler, usage, privacy, storage, chat
         case personalInfo = "personal_info"
+        case premium = "premium"
+        case localModel = "local_model"
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +61,8 @@ struct MyPortraitConfig: Codable, Equatable {
         storage       = c.dflt(StorageConfig.self, .storage, storage)
         chat          = c.dflt(ChatConfig.self, .chat, chat)
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
+        premium  = c.dflt(PremiumConfig.self, .premium, premium)
+        localModel    = c.dflt(LocalModelConfig.self, .localModel, localModel)
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
@@ -381,6 +387,8 @@ struct SchedulerConfig: Codable, Equatable {
     var resolvedModelLight: String {
         modelLight.isEmpty ? resolvedModel : modelLight
     }
+    /// provider 选了 Premium = 这条链搬到 Premium 跑,本机不跑。
+    var isOffloaded: Bool { providerId == Provider.premium.rawValue }
 }
 
 /// 记忆流水线的两个调度器容器。频率各自独立配置。
@@ -424,6 +432,70 @@ struct SchedulerSettings: Codable, Equatable {
         let legacy = try? decoder.container(keyedBy: LegacyKeys.self)
         writingStyle   = c.dflt(SchedulerConfig.self, .writingStyle,
                                 legacy?.dflt(SchedulerConfig.self, .speechStyle, writingStyle) ?? writingStyle)
+    }
+
+    /// 可搬到 Premium 的四条链:config 键名 → 配置路径。
+    static var offloadableChains: [(key: String, path: WritableKeyPath<SchedulerSettings, SchedulerConfig>)] {
+        [("event", \.event), ("portrait", \.portrait),
+         ("personality", \.personality), ("writing_style", \.writingStyle)]
+    }
+
+    /// provider 是 Premium 的链(config 键名,固定顺序)。空 = 全在本机跑。
+    var offloadedChains: [String] {
+        Self.offloadableChains.filter { self[keyPath: $0.path].isOffloaded }.map(\.key)
+    }
+
+    /// 连上 Premium:四条链全切到 Premium,返回切之前各链的选择(断开时 `restoreFromPremium` 用)。
+    mutating func moveAllToPremium() -> [String: ChainProviderChoice] {
+        var saved: [String: ChainProviderChoice] = [:]
+        for (key, kp) in Self.offloadableChains {
+            let c = self[keyPath: kp]
+            saved[key] = ChainProviderChoice(providerId: c.providerId, model: c.model, modelLight: c.modelLight)
+            self[keyPath: kp].providerId = Provider.premium.rawValue
+            self[keyPath: kp].model = Provider.premium.defaultModel
+            self[keyPath: kp].modelLight = ""
+        }
+        return saved
+    }
+
+    /// 断开 Premium:还在 Premium 上的链改回连接前的选择;原来的 provider 也没连着(或本来就是
+    /// Premium)就留空。连上之后手动改过的链不动。
+    mutating func restoreFromPremium(_ saved: [String: ChainProviderChoice], isConnected: (Provider) -> Bool) {
+        for (key, kp) in Self.offloadableChains where self[keyPath: kp].isOffloaded {
+            if let s = saved[key], let p = Provider(rawValue: s.providerId), p != .premium, isConnected(p) {
+                self[keyPath: kp].providerId = s.providerId
+                self[keyPath: kp].model = s.model
+                self[keyPath: kp].modelLight = s.modelLight
+            } else {
+                self[keyPath: kp].providerId = ""
+                self[keyPath: kp].model = ""
+                self[keyPath: kp].modelLight = ""
+            }
+        }
+    }
+}
+
+/// 一条链的 provider / 主模型 / 轻模型,连上 Premium 前存一份。
+struct ChainProviderChoice: Codable, Equatable {
+    var providerId: String = ""
+    var model: String = ""
+    var modelLight: String = ""
+
+    init(providerId: String, model: String, modelLight: String) {
+        self.providerId = providerId
+        self.model = model
+        self.modelLight = modelLight
+    }
+    enum CodingKeys: String, CodingKey {
+        case providerId = "provider_id"
+        case model
+        case modelLight = "model_light"
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        providerId = c.dflt(String.self, .providerId, "")
+        model      = c.dflt(String.self, .model, "")
+        modelLight = c.dflt(String.self, .modelLight, "")
     }
 }
 
@@ -1088,6 +1160,51 @@ struct ChatConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         redactPii = c.dflt(Bool.self, .redactPii, redactPii)
+    }
+}
+
+// MARK: - Premium offload
+
+/// Premium 收件服务的地址(密钥在 SecretStore `premium.key`)。哪些链搬到 Premium 由各链的
+/// provider 决定(`SchedulerSettings.offloadedChains`),见 `Memory/PremiumRemote.swift`。
+struct PremiumConfig: Codable, Equatable {
+    /// 空串 = `PremiumRemote.defaultServer`(打包时带进 Info.plist 的地址;没有就得填)。
+    var serverURL: String = ""
+    /// 连上 Premium 前四条链的选择(键 = 链的 config 键名),断开时恢复。
+    var previousProviders: [String: ChainProviderChoice] = [:]
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case serverURL = "server_url"
+        case previousProviders = "previous_providers"
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        serverURL = c.dflt(String.self, .serverURL, serverURL)
+        previousProviders = c.dflt([String: ChainProviderChoice].self, .previousProviders, previousProviders)
+    }
+}
+
+// MARK: - Local model
+
+/// 用户自己跑的 OpenAI 兼容模型服务(LM Studio / llama.cpp / vLLM …),在 Connections 的
+/// Local Model 卡片里填。两项都填了才算配置好。
+struct LocalModelConfig: Codable, Equatable {
+    /// OpenAI 兼容接口的根地址,如 `http://localhost:1234/v1`。
+    var baseURL: String = ""
+    var model: String = ""
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case model
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = c.dflt(String.self, .baseURL, baseURL)
+        model = c.dflt(String.self, .model, model)
     }
 }
 

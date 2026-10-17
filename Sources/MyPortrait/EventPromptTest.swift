@@ -416,34 +416,53 @@ enum EventPromptTestCLI {
     }
 }
 
-/// `--backfill-day <yyyy-MM-dd>` — DEV-ONLY entry point that runs
-/// `Backfill.run` restricted to a single day. Disposable.
+/// `--backfill-day <yyyy-MM-dd>` — DEV-ONLY entry point that runs the event step
+/// for one local day (本机此刻的偏移) as an ad-hoc interval and writes the events.
+/// No ledger rows. Disposable.
 enum BackfillDayCLI {
     final class State: @unchecked Sendable {
         var done = false
         var code: Int32 = 0
     }
 
-    static func run(day dayStr: String) {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd"
-        guard let day = fmt.date(from: dayStr) else {
-            FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
-            exit(1)
+    /// 把一个本地日当作临时区间跑 event 步并落盘(不写台账)。
+    @MainActor
+    static func runLocalDay(_ dayStr: String) async throws -> Backfill.IntervalRun {
+        let off = IntervalSegmenter.currentOffsetMin()
+        guard let w = IntervalSegmenter.dayWindow(dayStr, tzOffsetMin: off) else {
+            throw NSError(domain: "BackfillDayCLI", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "bad date: \(dayStr)"])
         }
+        let iv = EventInterval(id: "adhoc:\(w.start)", startMs: w.start, endMs: w.end, tzOffsetMin: off,
+                               sealedAtMs: 0, trigger: "adhoc", frameCount: 0, afterFrameId: 0,
+                               maxFrameId: Int64.max, event: .pending, impact: .idle, retryCount: 0,
+                               updatedAtMs: 0)
+        let r = try await Backfill.runInterval(iv)
+        if !r.llmFailed {
+            try r.overlay.commit(intervalId: iv.id)
+            EventOverlay.clearJournal(intervalId: iv.id)
+        }
+        return r
+    }
+
+    static func printResult(_ r: Backfill.IntervalRun) {
+        print("new events:           \(r.newEventCount)")
+        print("joined:               \(r.joinedSessionCount)")
+        print("tier1 sessions:       \(r.tier1SessionCount)")
+        print("dropped (no OCR):     \(r.emptySessionCount)")
+        print("LLM-skipped sessions: \(r.skippedSessionCount)")
+        print("LLM failed:           \(r.llmFailed)")
+        print("event days:           \(r.days.sorted())")
+    }
+
+    static func run(day dayStr: String) {
         print("=== backfill-day \(dayStr) ===")
         let state = State()
         Task.detached {
             do {
-                let r = try await Backfill.run(onlyDay: day)
+                let r = try await runLocalDay(dayStr)
                 print("=== backfill done ===")
-                print("new events:           \(r.newEventCount)")
-                print("joined (cross-day):   \(r.joinedSessionCount)")
-                print("tier1 sessions:       \(r.tier1SessionCount)")
-                print("dropped (no OCR):     \(r.emptySessionCount)")
-                print("LLM-skipped sessions: \(r.skippedSessionCount)")
-                print("LLM-failed days:      \(r.llmFailedDays)")
+                printResult(r)
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1
@@ -491,8 +510,8 @@ enum RescoreCLI {
     }
 }
 
-/// `--backfill-days <N>` — DEV-ONLY entry point that runs the real Backfill
-/// over the last N days in one process. Disposable.
+/// `--backfill-days <N>` — DEV-ONLY entry point that runs `--backfill-day` for
+/// the last N local days (oldest first) in one process. Disposable.
 enum BackfillDaysCLI {
     final class State: @unchecked Sendable {
         var done = false
@@ -501,18 +520,20 @@ enum BackfillDaysCLI {
 
     static func run(daysBack: Int) {
         print("=== backfill-days \(daysBack) ===")
+        let off = IntervalSegmenter.currentOffsetMin()
+        let now = EventIntervalStore.nowMs()
+        let days = (0..<max(0, daysBack)).reversed().map {
+            IntervalSegmenter.localDay(now - Int64($0) * 86_400_000, tzOffsetMin: off)
+        }
         let state = State()
         Task.detached {
             do {
-                let r = try await Backfill.run(daysBack: daysBack)
+                for d in days {
+                    print("=== \(d) ===")
+                    let r = try await BackfillDayCLI.runLocalDay(d)
+                    BackfillDayCLI.printResult(r)
+                }
                 print("=== backfill done ===")
-                print("days scanned:         \(r.daysScanned)")
-                print("new events:           \(r.newEventCount)")
-                print("joined (cross-day):   \(r.joinedSessionCount)")
-                print("tier1 sessions:       \(r.tier1SessionCount)")
-                print("dropped (no OCR):     \(r.emptySessionCount)")
-                print("LLM-skipped sessions: \(r.skippedSessionCount)")
-                print("LLM-failed days:      \(r.llmFailedDays)")
             } catch {
                 FileHandle.standardError.write(Data("ERROR: \(error)\n".utf8))
                 state.code = 1
@@ -1430,7 +1451,10 @@ enum PersonalityRefreshApplyCLI {
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd"
         fmt.timeZone = TimeZone(identifier: "UTC")
-        guard let day = fmt.date(from: dayStr) else {
+        // OCR 闸窗口 = 该本地日 [00:00, 24:00)(本机此刻的偏移)。
+        guard let day = fmt.date(from: dayStr),
+              let window = IntervalSegmenter.dayWindow(dayStr, tzOffsetMin: IntervalSegmenter.currentOffsetMin())
+        else {
             FileHandle.standardError.write(Data("bad date: \(dayStr)\n".utf8))
             exit(1)
         }
@@ -1438,7 +1462,7 @@ enum PersonalityRefreshApplyCLI {
         let state = State()
         Task {
             do {
-                let r = try await PersonalityRefresh().refresh(day: day)
+                let r = try await PersonalityRefresh().refresh(day: day, ocrWindow: window)
                 print("events on \(dayStr): \(r.eventsTotal) total → \(r.eventsAboveWeight) above weight \(PersonalityRefresh.minEventWeight)")
                 print("snapshot tags: \(r.snapshotTags)")
                 print("ocr validation (≥\(PersonalityRefresh.minOCRFrames) frames): kept \(r.ocrKept), dropped \(r.ocrDropped)")

@@ -78,21 +78,46 @@ fi
 
 # 3.5) helper 二进制跨版本复用:源码没变就用上一版发过的已签名二进制。
 #      自签名没有 Team ID,BTM 不跨 cdhash 迁移信任 —— helper 二进制一变,
-#      更新后「后台活动」批准就被打回。字节级复用让 cdhash 不变,批准保住。
-#      缓存丢失/源码有变时退回新编二进制,代价只是那一版需要重批一次。
+#      PortraitSleepHelper 更新后「后台活动」批准就被打回;PortraitPremiumHelper
+#      (封区间 LaunchAgent 的可执行体)登记时的启动约束锁在它的 cdhash 上,
+#      变了就被 AMFI 拒启动,要等 app 重新登记。字节级复用让 cdhash 不变。
+#      缓存丢失/源码有变时退回新编二进制,代价只是那一版需要重批 / 重登记一次。
+#      缓存键 = 影响该 helper 二进制的源文件哈希;PortraitPremiumHelper 另含 project.yml 里
+#      它的 target 段落(去掉注释和空行)、本脚本的签名身份(证书 SHA-1),以及 helper 实际的
+#      签名身份 —— helper 不在第 4 步重签,签名来自 archive,即 Signing.local.xcconfig 的
+#      CODE_SIGN_IDENTITY(名字 + 证书 SHA-1)。任一项变了都不复用旧二进制。
 HELPER_CACHE="build/helper-cache"
-HELPER_BIN="$APP_PATH/Contents/MacOS/PortraitSleepHelper"
-HELPER_HASH=$(cat Sources/PortraitSleepHelper/*.swift \
-                  Sources/MyPortrait/Capture/Power/SleepHelperProtocol.swift \
-                  Support/PortraitSleepHelper-Info.plist \
-                  Support/com.joyzhang.myportrait.SleepHelper.plist 2>/dev/null \
-              | shasum -a 256 | cut -d' ' -f1)
-if [[ -f "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper" ]]; then
-    echo "→ helper 源码未变,复用上一版已签名二进制(cdhash 不变,保 BTM 批准)"
-    cp "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper" "$HELPER_BIN"
-else
-    echo "→ helper 无缓存或源码有变,用新编二进制(本次更新后需重批一次)"
+SLEEP_HASH=$(cat Sources/PortraitSleepHelper/*.swift \
+                 Sources/MyPortrait/Capture/Power/SleepHelperProtocol.swift \
+                 Support/PortraitSleepHelper-Info.plist \
+                 Support/com.joyzhang.myportrait.SleepHelper.plist 2>/dev/null \
+             | shasum -a 256 | cut -d' ' -f1)
+SIGN_SHA1=$(security find-identity -v -p codesigning | grep "\"$SIGN_IDENTITY\"" | head -1 | awk '{print $2}')
+PREMIUM_TARGET_YML=$(awk '/^  PortraitPremiumHelper:/ { f = 1; print; next } f && /^  [^ ]|^[^ ]/ { exit } f' project.yml \
+                   | grep -vE '^[[:space:]]*(#|$)' || true)
+XCODE_IDENTITY=$(sed -n 's/^[[:space:]]*CODE_SIGN_IDENTITY[[:space:]]*=[[:space:]]*//p' \
+                     Support/Signing.local.xcconfig 2>/dev/null | tail -1 | sed 's/[[:space:]]*$//' || true)
+XCODE_SHA1=""
+if [[ -n "$XCODE_IDENTITY" ]]; then
+    XCODE_SHA1=$(security find-identity -v -p codesigning | grep "\"$XCODE_IDENTITY\"" | head -1 | awk '{print $2}' || true)
 fi
+PREMIUM_HASH=$({ cat Sources/PortraitPremiumHelper/*.swift \
+                   Support/PortraitPremiumHelper-Info.plist \
+                   Support/PortraitPremiumHelper.entitlements
+               echo "$PREMIUM_TARGET_YML"
+               echo "$SIGN_SHA1"
+               echo "$XCODE_IDENTITY $XCODE_SHA1"; } \
+             | shasum -a 256 | cut -d' ' -f1)
+HELPERS=("PortraitSleepHelper:$SLEEP_HASH" "PortraitPremiumHelper:$PREMIUM_HASH")
+for h in "${HELPERS[@]}"; do
+    name="${h%%:*}"; hash="${h#*:}"
+    if [[ -f "$HELPER_CACHE/$hash/$name" ]]; then
+        echo "→ $name 源码未变,复用上一版已签名二进制(cdhash 不变)"
+        cp "$HELPER_CACHE/$hash/$name" "$APP_PATH/Contents/MacOS/$name"
+    else
+        echo "→ $name 无缓存或源码有变,用新编二进制(本次更新后需重批 / 重登记一次)"
+    fi
+done
 
 # 4) 重签:从内向外。Sparkle.framework 内嵌的 XPC services + Updater.app
 #    有自己的 entitlements,要 --preserve-metadata 保留;最后外层 app
@@ -148,8 +173,11 @@ if [[ "$AUTH" != "$SIGN_IDENTITY" ]]; then
 fi
 
 # 7) 回存 helper 缓存(签名验证都过了才存,坏产物不入缓存)
-mkdir -p "$HELPER_CACHE/$HELPER_HASH"
-cp "$HELPER_BIN" "$HELPER_CACHE/$HELPER_HASH/PortraitSleepHelper"
+for h in "${HELPERS[@]}"; do
+    name="${h%%:*}"; hash="${h#*:}"
+    mkdir -p "$HELPER_CACHE/$hash"
+    cp "$APP_PATH/Contents/MacOS/$name" "$HELPER_CACHE/$hash/$name"
+done
 
 echo ""
 echo "=================================================="

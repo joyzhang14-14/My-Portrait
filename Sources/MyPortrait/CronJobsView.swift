@@ -287,17 +287,12 @@ private struct RunRow: View {
 /// Sheet for create/edit. Used by both CronJobsView (main pane) and
 /// TimelineSidebar's cronJobs section.
 struct CronJobQuickEditor: View {
-    @Environment(AppState.self) private var appState
     @State var initial: CronJob
     let onSave: (CronJob) -> Void
     let onCancel: () -> Void
 
     /// Integrations the user has actually connected — the only ones a cronJob
     /// can attach, since unconnected ones have no credentials to inject.
-    private var connectedIntegrations: [Integration] {
-        IntegrationRegistry.all.filter { appState.isConnected($0.id) }
-    }
-
     private let windowOptions: [ContextWindow] = [
         .none, .lastMinutes(5), .lastMinutes(30),
         .lastHours(1), .lastHours(4), .lastHours(8), .today
@@ -357,65 +352,13 @@ struct CronJobQuickEditor: View {
                     .toggleStyle(.switch)
             }
 
-            // Connections 和 Mute notifications 放同一行:左边 selector
-            // 撑开,右边 toggle 贴齐。避免 Mute 单独一行显得空。
-            HStack(alignment: .bottom, spacing: 16) {
-                connectionsSelector
-                Spacer(minLength: 8)
-                Toggle("Mute notifications", isOn: $initial.muted)
-                    .toggleStyle(.switch)
-                    .fixedSize()
-            }
+            Toggle("Mute notifications", isOn: $initial.muted)
+                .toggleStyle(.switch)
         }
         .padding(20)
         .frame(width: 480)
         // 编辑面板整块不参与拖窗 —— 里面的 Picker / Menu 不认领拖拽手势,
         // 不挡的话按住下拉框拖会把整个窗口拽走。
         .blocksWindowDrag()
-    }
-
-    /// Multi-select menu over connected integrations. Toggling a row adds /
-    /// removes its id from `initial.connections`; at run time those ids
-    /// resolve into injected env-var credentials.
-    private var connectionsSelector: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Connections").font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            if connectedIntegrations.isEmpty {
-                Text("No connected integrations. Add one in Connections.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            } else {
-                Menu {
-                    ForEach(connectedIntegrations) { integ in
-                        Button {
-                            toggleConnection(integ.id)
-                        } label: {
-                            Label(integ.name,
-                                  systemImage: initial.connections.contains(integ.id)
-                                      ? "checkmark" : "")
-                        }
-                    }
-                } label: {
-                    Text(connectionsSummary)
-                        .font(.system(size: 12))
-                }
-            }
-        }
-    }
-
-    private var connectionsSummary: String {
-        let names = initial.connections.compactMap { id in
-            IntegrationRegistry.all.first { $0.id == id }?.name
-        }
-        return names.isEmpty ? "None" : names.joined(separator: ", ")
-    }
-
-    private func toggleConnection(_ id: String) {
-        if let idx = initial.connections.firstIndex(of: id) {
-            initial.connections.remove(at: idx)
-        } else {
-            initial.connections.append(id)
-        }
     }
 }

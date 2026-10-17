@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    封区间 helper(用户级 LaunchAgent,SMAppService.agent 注册)。
+    XcodeGen 把这个文件原样拷进 MyPortrait.app/Contents/Library/LaunchAgents/。
+    文件名 == Label == 传给 SMAppService.agent(plistName:) 的字符串。
+
+    每个 :00 / :30 跑一次 PortraitPremiumHelper,由它拉起同目录的
+    `MyPortrait --premium-export --seal-check`(CLI 路径,不起 UI、不走单实例守卫):
+    拿交换锁 → 封区间检查 → 有链搬到 Premium 时导出。机器睡过的检查点 launchd
+    在唤醒后补跑一次。有事发生(封了区间 / 导出 / 出错)时 CLI 把一行记录追加到
+    <数据根>/logs/premium-export.log。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.joyzhang.myportrait.premium-export</string>
+
+    <!-- 相对 app bundle 根的可执行文件路径:独立的小 helper,cdhash 跨版本不变
+         (BTM 把启动约束锁在它上面)。参数由 helper 自己传给主程序。 -->
+    <key>BundleProgram</key>
+    <string>Contents/MacOS/PortraitPremiumHelper</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>PortraitPremiumHelper</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+    </array>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.joyzhang.myportrait</string>
+    </array>
+</dict>
+</plist>

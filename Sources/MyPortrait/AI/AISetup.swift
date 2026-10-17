@@ -82,6 +82,8 @@ final class AISetup {
             guard let key = p.secretKey, SecretStore.shared.get(key) != nil else { continue }
             if !out.contains(p) { out.append(p) }
         }
+        let local = ConfigStore.shared.current.localModel
+        if !local.baseURL.isEmpty, !local.model.isEmpty { out.append(.localModel) }
         return out
     }
 }

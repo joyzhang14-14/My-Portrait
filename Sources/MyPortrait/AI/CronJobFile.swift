@@ -13,8 +13,6 @@ import Foundation
 /// enabled: true
 /// schedule: every 60m
 /// window: last 2h
-/// connections:
-/// - obsidian
 /// ---
 ///
 /// <prompt body markdown>
@@ -94,12 +92,6 @@ enum CronJobFile {
         fm += "muted: \(p.muted)\n"
         fm += "schedule: \(encode(p.schedule))\n"
         fm += "window: \(encode(p.window))\n"
-        if p.connections.isEmpty {
-            fm += "connections: []\n"
-        } else {
-            fm += "connections:\n"
-            for c in p.connections { fm += "- \(c)\n" }
-        }
         fm += "---\n\n"
         return fm + p.prompt
     }
@@ -124,26 +116,15 @@ enum CronJobFile {
         if bodyLines.first == "" { bodyLines.removeFirst() }
         let prompt = bodyLines.joined(separator: "\n")
 
-        // Parse frontmatter: `key: value` lines, plus `- item` lines that
-        // belong to the most recent list-valued key.
+        // Parse frontmatter: `key: value` lines. 老文件里的 `connections:` 列表
+        // (`- item` 行)不再使用,跳过。
         var scalars: [String: String] = [:]
-        var connections: [String] = []
-        var currentListKey: String? = nil
         for raw in fmLines {
-            if raw.hasPrefix("- ") {
-                let item = String(raw.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                if currentListKey == "connections", !item.isEmpty { connections.append(item) }
-                continue
-            }
+            if raw.hasPrefix("- ") { continue }
             guard let colon = raw.firstIndex(of: ":") else { continue }
             let key = String(raw[raw.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
             let value = String(raw[raw.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-            if value.isEmpty {
-                currentListKey = key
-            } else {
-                currentListKey = nil
-                scalars[key] = value
-            }
+            if !value.isEmpty { scalars[key] = value }
         }
 
         let id = scalars["id"].flatMap { UUID(uuidString: $0) } ?? UUID()
@@ -156,7 +137,7 @@ enum CronJobFile {
 
         return CronJob(id: id, name: name, prompt: prompt, window: window,
                        schedule: schedule, isEnabled: enabled,
-                       connections: connections, muted: muted)
+                       muted: muted)
     }
 
     // MARK: - slug

@@ -366,7 +366,7 @@ extension PipelineFlow {
     ///
     /// 排版:竖排主干,最后一行分叉到被触发的另外两条 pipeline。
     ///
-    /// "等这一天过完" 是**闸门条件**不是步骤,所以做成第一条连线上的一行小字,
+    /// "等区间封口" 是**闸门条件**不是步骤,所以做成第一条连线上的一行小字,
     /// 不占节点 —— 节点只留真正会产出东西的步骤。
     static let eventsProcessor = PipelineFlow(
         nodes: [
@@ -375,7 +375,7 @@ extension PipelineFlow {
                 title: "Captured data",
                 kind: .source,
                 chip: "~/.portrait/DB",
-                detail: "One UTC day: screenshots + their OCR text, audio transcripts with speakers, your typing. All of it lives in `~/.portrait/DB`.\n\n**The only input.** Nothing is added later.",
+                detail: "One interval — the stretch between two long breaks: screenshots + their OCR text, audio transcripts with speakers, your typing. All of it lives in `~/.portrait/DB`.\n\n**The only input.** Nothing is added later.",
                 pos: CGPoint(x: 0.5, y: 0.05)
             ),
             Node(
@@ -383,7 +383,7 @@ extension PipelineFlow {
                 title: "Build events",
                 kind: .llm,
                 chip: "main model",
-                detail: "Clusters the day into events. **One Markdown file per event**, at `~/.portrait/events/<day>/`.\n\nStarts at **UTC midnight + 10 min** — the grace period lets late transcripts and OCR land. Not ready → retried every 15 min.",
+                detail: "Clusters the interval into events. **One Markdown file per event**, at `~/.portrait/events/<day>/` — the local day that holds most of the event's frames.\n\nAn interval closes at every break of **2 hours or more with no activity** (checked every 30 min; one check can close several). Closed intervals wait for the pipeline's scheduled time, which processes all of them. Run now closes one on the spot and processes right away. A failed interval leaves nothing behind and is retried after a backoff.",
                 pos: CGPoint(x: 0.5, y: 0.196)
             ),
             Node(
@@ -428,13 +428,13 @@ extension PipelineFlow {
                 id: "personality",
                 title: "Personality Refresher",
                 kind: .downstream,
-                detail: "Each processed day is also **marked pending** for the refresher. It re-derives personality tags from that day's events, the rest of the portrait, and OCR.",
+                detail: "Once every interval touching a local day is processed, that day is **ready**; the refresher takes it right after that event run. It re-derives personality tags from that day's events, the rest of the portrait, and OCR.",
                 pos: CGPoint(x: 0.73, y: 0.93)
             ),
         ],
         edges: [
             Edge(from: "capture", to: "event",
-                 label: "Wrap data up once the day is over · 12 AM UTC"),
+                 label: "Close an interval at each 2 h break"),
             Edge(from: "event", to: "merge"),
             Edge(from: "merge", to: "impact"),
             Edge(from: "impact", to: "weight"),
@@ -460,7 +460,7 @@ extension PipelineFlow {
                 title: "Processed events",
                 kind: .source,
                 chip: "~/.portrait/events/",
-                detail: "**The whole tree, not one day.** Every event that isn't archived — which is why one portrait entry can be backed by things months apart.\n\nSource is the Events Processor. Days that failed there have their events removed, so only clean days arrive.",
+                detail: "**The whole tree, not one day.** Every event that isn't archived — which is why one portrait entry can be backed by things months apart.\n\nSource is the Events Processor. An interval that fails there has its writes undone, so only clean runs arrive.",
                 pos: CGPoint(x: 0.30, y: 0.09)
             ),
             Node(
@@ -536,7 +536,7 @@ extension PipelineFlow {
 
     /// Personality Refresher。**顺序对应 `PersonalityRefresh.refreshImpl`**
     /// (snapshot → OCR 验证 → cluster → merge → apply)。跟 distiller 不同,
-    /// 这条是**按天**跑的,一次最多 7 天。
+    /// 这条是**按本地日**跑的,每天一次,一次最多 7 天。
     static let personalityRefresher = PipelineFlow(
         nodes: [
             Node(
@@ -546,7 +546,7 @@ extension PipelineFlow {
                 // 两个来源都要标:事件文件给"发生了什么",DB 给同一天的屏幕
                 // 内容(下游 "Check it against your screen" 那一步查的就是它)。
                 chip: "~/.portrait/events/\n~/.portrait/DB",
-                detail: "Rebuilt **day by day**, oldest pending first, up to 7 days per run.\n\nEach day is independent — one that fails is retried later without holding up the rest.",
+                detail: "Rebuilt **one local day at a time, once per day**, oldest first, up to 7 days per run.\n\nEach day is independent — one that fails is retried later without holding up the rest.",
                 pos: CGPoint(x: 0.5, y: 0.055)
             ),
             Node(

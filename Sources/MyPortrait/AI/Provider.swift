@@ -8,18 +8,26 @@ import Foundation
 ///   - .openaiBYOK  : API key stored in SecretStore under "apikey:openai"
 ///   - .anthropic   : API key stored in SecretStore under "apikey:anthropic"
 ///   - .ollama      : nothing — assumes a running localhost:11434
+///   - .localModel  : nothing — address + model name from `[local_model]` config
 ///   - .gemini      : API key stored in SecretStore under "apikey:gemini"
 enum Provider: String, CaseIterable, Identifiable, Hashable {
     case chatgpt
     case openaiBYOK = "openai"
     case anthropic
     case ollama
+    /// 用户自己跑的 OpenAI 兼容服务(LM Studio / llama.cpp / vLLM …),地址和模型名
+    /// 在 Connections 的 Local Model 卡片里填,存 config `[local_model]`。
+    case localModel = "local-model"
     case gemini
     case perplexity
     case deepseek
     /// Claude Code CLI(`claude` 二进制)—— 不走 Pi,用 ClaudeCodeAgent
     /// spawn 子进程,凭用户的 Pro/Max 订阅(`claude login`)用额度。
     case claudeCode = "claude-code"
+    /// Premium(远程算力):不是可调用的模型。某条夜间链的 provider 选它 = 这条链搬到 Premium
+    /// 跑(上传输入包、下载结果,见 `PremiumRemote`),本机永远不为它起 agent。
+    /// `from(integrationId:)` 不认它,chat / cron 选不到。
+    case premium = "premium"
 
     var id: String { rawValue }
 
@@ -31,6 +39,7 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case "anthropic-api": return .anthropic
         case "gemini":        return .gemini
         case "ollama":        return .ollama
+        case "local-model":   return .localModel
         case "perplexity":    return .perplexity
         case "deepseek":      return .deepseek
         case "claude-code":   return .claudeCode
@@ -48,10 +57,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK:     return "openai"        // 纯 OpenAI API key
         case .anthropic:      return "anthropic"
         case .ollama:         return "ollama"        // Pi 不内置,需 models.json 自定义
+        case .localModel:     return "local-model"   // 同上
         case .gemini:         return "google"        // Pi 把 GEMINI_API_KEY 映射到 google
         case .perplexity:     return "perplexity"    // Pi 不内置,需 models.json 自定义
         case .deepseek:       return "deepseek"
         case .claudeCode:     return ""              // 不走 Pi
+        case .premium:       return "premium"     // 不走 Pi,不会被用到
         }
     }
 
@@ -69,11 +80,15 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         // 不写死 —— 读用户本地 Ollama 实际安装的模型(OllamaModelStore.refresh()
         // 拉 /api/tags 填充)。还没拉过 / Ollama 没跑 → 空数组。
         case .ollama:     return OllamaModelStore.cachedModels
+        case .localModel:
+            let m = ConfigStore.snapshot.localModelName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return m.isEmpty ? [] : [m]
         case .gemini:     return ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
         case .perplexity: return ["sonar-pro", "sonar", "sonar-reasoning-pro", "sonar-deep-research"]
         case .deepseek:   return ["deepseek-v4-pro", "deepseek-v4-flash"]
         // claude CLI 接受 alias(sonnet/opus/haiku 自动取最新)或完整 model id。
         case .claudeCode: return ["sonnet", "opus", "haiku"]
+        case .premium:   return ["Premium"]
         }
     }
 
@@ -92,10 +107,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK:     return "https://api.openai.com/v1"
         case .anthropic:      return "https://api.anthropic.com"
         case .ollama:         return "http://localhost:11434/v1"
+        case .localModel:     return ConfigStore.snapshot.localModelBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         case .gemini:         return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .perplexity:     return "https://api.perplexity.ai"
         case .deepseek:       return "https://api.deepseek.com/v1"
         case .claudeCode:     return ""              // CLI 自己管理
+        case .premium:       return ""
         }
     }
 
@@ -106,10 +123,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK:     return "OPENAI_API_KEY"
         case .anthropic:      return "ANTHROPIC_API_KEY"
         case .ollama:         return ""         // none
+        case .localModel:     return ""         // none
         case .gemini:         return "GEMINI_API_KEY"
         case .perplexity:     return "PERPLEXITY_API_KEY"
         case .deepseek:       return "DEEPSEEK_API_KEY"
         case .claudeCode:     return ""         // none (CLI 走 `claude login`)
+        case .premium:       return ""
         }
     }
 
@@ -121,12 +140,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .gemini:         return "apikey:gemini"
         case .perplexity:     return "apikey:perplexity"
         case .deepseek:       return "apikey:deepseek"
-        case .chatgpt, .ollama, .claudeCode: return nil
+        case .chatgpt, .ollama, .localModel, .claudeCode, .premium: return nil
         }
     }
 
     /// 走 Pi 的 provider 才出现在 PiInstaller 的 models.json,claudeCode 跳过。
-    var usesPi: Bool { self != .claudeCode }
+    var usesPi: Bool { self != .claudeCode && self != .premium }
 
     /// Whether this provider needs no setup beyond detection.
     var isLocal: Bool { self == .ollama || self == .claudeCode }
@@ -140,9 +159,11 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .anthropic:  return "anthropic-api"
         case .gemini:     return "gemini"
         case .ollama:     return "ollama"
+        case .localModel: return "local-model"
         case .perplexity: return "perplexity"
         case .deepseek:   return "deepseek"
         case .claudeCode: return "claude-code"
+        case .premium:   return "premium"
         }
     }
 
@@ -154,10 +175,12 @@ enum Provider: String, CaseIterable, Identifiable, Hashable {
         case .openaiBYOK: return "OpenAI API"
         case .anthropic:  return "Anthropic API"
         case .ollama:     return "Ollama"
+        case .localModel: return "Local Model"
         case .gemini:     return "Gemini"
         case .perplexity: return "Perplexity"
         case .deepseek:   return "DeepSeek"
         case .claudeCode: return "Claude Code CLI"
+        case .premium:   return "My Portrait Premium"
         }
     }
 }
@@ -169,7 +192,7 @@ enum ProviderAuth {
         switch provider {
         case .chatgpt:
             return try await ChatGPTOAuth.validToken()
-        case .ollama:
+        case .ollama, .localModel:
             return ""   // ignored
         default:
             guard let key = provider.secretKey,

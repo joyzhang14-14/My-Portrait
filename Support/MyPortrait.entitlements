@@ -9,7 +9,6 @@
 
         我们用到:
           - 麦克风(AudioCaptureService)
-          - EventKit 读 Calendar 事件
           - 动态加载:MLX / WhisperKit / onnxruntime 通过 dlopen 加载 .dylib
             和 Metal kernel,hardened runtime 默认禁;disable-library-validation
             让 binary 能加载自带 frameworks 里的非 Apple 签名 .dylib。
@@ -18,9 +17,6 @@
         屏幕录制 + Accessibility + Input Monitoring 走 TCC 不在这里 declare。
     -->
     <key>com.apple.security.device.audio-input</key>
-    <true/>
-
-    <key>com.apple.security.personal-information.calendars</key>
     <true/>
 
     <key>com.apple.security.cs.disable-library-validation</key>

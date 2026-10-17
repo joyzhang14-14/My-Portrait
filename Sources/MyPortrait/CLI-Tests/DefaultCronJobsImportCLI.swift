@@ -1,35 +1,12 @@
 import Foundation
 
-/// `--import-default-cron-jobs` — 一次性入口,把两个内置 cron job 写到
-/// CronJobStore(对应 ~/.portrait/cron_jobs/ 里的两个目录)。
+/// `--import-default-cron-jobs` — 一次性入口,把内置 cron job 写到
+/// CronJobStore(对应 ~/.portrait/cron_jobs/ 里的目录)。
 ///
-/// 幂等:按 `name` 去重,已存在则跳过。Prompts 是从 screenpipe 的两个真实
-/// activated pipe(Obsidian-updater + todo-list-assistant)迁过来的,
-/// todo 那个改成了用 My-Portrait 自带的 TimelineContext 注入
+/// 幂等:按 `name` 去重,已存在则跳过。Prompt 从 screenpipe 的 todo-list-assistant
+/// pipe 迁过来,改成用 My-Portrait 自带的 TimelineContext 注入
 /// (`window: lastHours(1)`)而不是 screenpipe 的 localhost:3030 HTTP API。
 enum DefaultCronJobsImportCLI {
-
-    private static let obsidianPrompt = """
-    每天晚上检查我的 Obsidian 仓库并执行 git commit + git push。
-
-    要求:
-    1. 用环境变量 OBSIDIAN_VAULT_PATH 定位 Obsidian vault / git 仓库位置(这是从 Settings → Connections → Obsidian 配的路径,会自动注入到环境变量里)。
-    2. 先 cd 到该路径并执行 git status,检查是否有未提交变更;如果没有,简短说明今天没有变化并结束。
-    3. 如果有变化,跑 git diff 看具体内容,生成准确、简洁的 commit message,明确描述本次修改了什么。
-    4. 执行 git add -A、git commit -m "<message>"、git push。
-    5. 如果 push 失败,说明失败原因(网络/凭证/冲突)。
-    6. 不要编造修改内容,commit message 必须基于真实 diff。
-
-    ## 通知规则(关键)
-
-    **只在以下情况**,在你的回复**末尾**追加 `### Notify` 区块(1-3 行,直接说重点,中文):
-    - ✅ 提交并 push 成功 → `### Notify\\n✅ pushed: <commit message>`
-    - ❌ push 失败 → `### Notify\\n❌ push failed: <原因>`
-
-    **今天没有变化** → **不要**写 `### Notify` 区块。系统会自动跳过通知,不打扰用户。
-
-    不要把过程独白("我来检查一下...""现在让我...")放进 Notify 区块。
-    """
 
     private static let followupPrompt = """
     你是"待办跟进"助手。每小时跑一次,目标是发现**用户自己可能忘了的承诺 / 跟进项 / 卡住的事**——
@@ -128,18 +105,11 @@ enum DefaultCronJobsImportCLI {
             let existing = Set(store.cronJobs.map(\.name))
 
             let defaults: [CronJob] = [
-                CronJob(name: "Obsidian Updater",
-                        prompt: obsidianPrompt,
-                        window: .none,
-                        schedule: .dailyAt(hour: 21),
-                        isEnabled: true,
-                        connections: ["obsidian"]),
                 CronJob(name: "Follow-up Reminders",
                         prompt: followupPrompt,
                         window: .lastHours(3),
                         schedule: .everyMinutes(60),
-                        isEnabled: true,
-                        connections: [])
+                        isEnabled: true)
             ]
 
             for cronJob in defaults {

@@ -320,8 +320,8 @@ struct Integration: Identifiable, Hashable {
         self.accent = accent; self.signInMethod = signInMethod; self.category = category
     }
 
-    enum SignInMethod: String { case oauth, apiKey, localApp, systemAccess, smtp }
-    enum Category: String { case ai = "AI Providers", productivity = "Productivity", media = "Media & Calendar", local = "Local Models" }
+    enum SignInMethod: String { case oauth, apiKey, localApp }
+    enum Category: String { case ai = "AI Providers", local = "Local Models", earlyAccess = "Early Access" }
 }
 
 enum IntegrationRegistry {
@@ -348,19 +348,11 @@ enum IntegrationRegistry {
         // → light 主题白羊驼贴白卡隐身。false 走"固定白底圆角块 + logo"分支,
         // 深色描边羊驼在两种主题下都一样(固定图标,不随 scheme 变)。
         .init(id: "ollama",             name: "Ollama",          bundleId: "com.electron.ollama",                   letter: "🦙", assetName: "Ollama", assetFullBleed: false, accent: Color(white: 0.92),                         signInMethod: .localApp,     category: .local),
+        // 自己跑的 OpenAI 兼容服务:填地址 + 模型名(见 `Provider.localModel`)。
+        .init(id: "local-model",        name: "Local Model",     bundleId: nil,                                     letter: "L",  iconSymbol: "cpu", accent: Color(red: 0.36, green: 0.42, blue: 0.86),  signInMethod: .localApp,     category: .local),
+        // 夜间分析搬到 Premium(上传到收件服务排队处理),不是 chat provider。
+        .init(id: "premium",          name: "My Portrait Premium", bundleId: nil,                                     letter: "P",  assetName: "PremiumAvatar", assetFullBleed: true, accent: Color(red: 0.46, green: 0.73, blue: 0.0),  signInMethod: .localApp,     category: .earlyAccess),
 
-        // Productivity
-        .init(id: "obsidian",           name: "Obsidian",        bundleId: "md.obsidian",                           letter: "○",  assetName: "Obsidian", assetFullBleed: true, accent: Color(red: 0.49, green: 0.34, blue: 0.78),  signInMethod: .localApp,     category: .productivity),
-        // Notion 走 Internal Integration Token(纯 API key)—— 不走 OAuth,因为
-        // 原项目用的是「后端 proxy 转 client_secret」方案,My-Portrait 没那个
-        // 后端。NotionConfig 在 ConnectionCredentials.swift。
-        .init(id: "notion",             name: "Notion",          bundleId: "notion.id",                             letter: "N",  assetName: "Notion", accent: Color(white: 0.95),                         signInMethod: .apiKey,       category: .productivity),
-        .init(id: "email-smtp",         name: "Email (SMTP)",    bundleId: nil,                                     letter: "@",  assetName: "EmailSMTP", assetFullBleed: true, accent: Color(red: 0.20, green: 0.55, blue: 0.86),  signInMethod: .smtp,         category: .productivity),
-
-        // Media / Calendar
-        // Spotify / Google Calendar / Voice Memos / Apple Intelligence 暂时下线
-        //(原版要么不诚实地假绿点,要么 OAuth 没接)。等真要接的时候再放回。
-        .init(id: "apple-calendar",     name: "Apple Calendar",  bundleId: "com.apple.iCal",                        letter: "📅", assetName: "AppleCalendar", assetFullBleed: true, accent: Color(red: 0.93, green: 0.27, blue: 0.27),  signInMethod: .systemAccess, category: .media),
     ]
 }
 
@@ -432,15 +424,10 @@ final class AppState {
             }
         }
 
-        // Notion(不在 Provider.allCases 里):双向同步 NotionConfig.token
-        // 跟 connectedIds 的 "notion" 项。
-        let notionHasToken = NotionConfig.token != nil
-        if connectedIds.contains("notion"), !notionHasToken {
-            connectedIds.remove("notion")
-            changed = true
-        }
-        if notionHasToken, !connectedIds.contains("notion") {
-            connectedIds.insert("notion")
+        // 已下线的卡片(不在 IntegrationRegistry 里了)留下的连接记录一并清掉。
+        let known = Set(IntegrationRegistry.all.map(\.id))
+        if !connectedIds.isSubset(of: known) {
+            connectedIds.formIntersection(known)
             changed = true
         }
 
@@ -466,9 +453,11 @@ final class AppState {
         case .anthropic:     return "anthropic-api"
         case .gemini:        return "gemini"
         case .ollama:        return "ollama"
+        case .localModel:    return "local-model"
         case .perplexity:    return "perplexity"
         case .deepseek:      return "deepseek"
         case .claudeCode:    return "claude-code"
+        case .premium:      return "premium"
         case .openaiBYOK:    return nil    // no dedicated tile yet
         }
     }

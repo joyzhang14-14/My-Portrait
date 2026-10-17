@@ -38,7 +38,7 @@ enum PiInstaller {
     }
 
     /// Pi 0.82 内置 catalog 覆盖大部分 provider。这个方法只为非内置的
-    /// Ollama / Perplexity 写完整 entry,并给 Anthropic 补上尚未内置的 Opus 5。
+    /// Ollama / Local Model / Perplexity 写完整 entry,并给 Anthropic 补上尚未内置的 Opus 5。
     /// schema 走 Pi 0.82 的 ModelsConfigSchema:
     ///   { providers: { <name>: { baseUrl, api, apiKey, models: [...] } } }
     /// apiKey 用 `$ENV_VAR` 格式(resolveConfigValue 会拿 process.env 去解析),
@@ -69,8 +69,8 @@ enum PiInstaller {
     /// Anthropic 是内置 provider,但当前 catalog 尚缺 Opus 5,所以需要 merge entry。
     private static func needsCustomEntry(_ p: Provider) -> Bool {
         switch p {
-        case .anthropic, .ollama, .perplexity: return true
-        default:                               return false
+        case .anthropic, .ollama, .localModel, .perplexity: return true
+        default:                                            return false
         }
     }
 
@@ -118,6 +118,7 @@ enum PiInstaller {
         let apiKeyField: String = {
             switch p {
             case .ollama:     return "ollama"   // Ollama 不验,占位即可
+            case .localModel: return "local"    // 本地服务一般不验,占位即可
             default:          return p.apiKeyEnv.isEmpty ? "" : "$\(p.apiKeyEnv)"
             }
         }()

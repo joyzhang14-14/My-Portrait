@@ -155,7 +155,11 @@ final class ConfigStore {
              autoDeleteMode: current.storage.autoDeleteMode,
              waitForTranscription: current.storage.waitForTranscription,
              audioEngine: current.capture.audio.engine,
-             preferredInputDeviceUID: current.capture.audio.preferredInputDeviceUID
+             preferredInputDeviceUID: current.capture.audio.preferredInputDeviceUID,
+             localModelBaseURL: current.localModel.baseURL,
+             localModelName: current.localModel.model,
+             personalNames: [current.personalInfo.firstName, current.personalInfo.lastName, current.personalInfo.alias]
+                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
          )
          Self.snapshotLock.withLock { Self.snapshotValue = next }
      }

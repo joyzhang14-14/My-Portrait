@@ -21,6 +21,8 @@ struct MyPortraitApp: App {
         // 重复转录,还会并发跑第二套 compactor/transcriber/scheduler worker。
         // 图谱时间线重建自检(07-11):纯文件读,不开 DB / 不构造 Services。
         if args.contains("--graph-timeline-dump") { EventTimeline.dumpCLI() }
+        // 区间封口规则只读回放(不开写连接、不跑迁移)。详见 SegmentReplayCLI。内部 exit。
+        if args.contains("--segment-replay") { SegmentReplayCLI.run(args: args) }
         if args.contains("--rebuild-frames-fts") {
             print("=== rebuild-frames-fts ===")
             fflush(stdout)
@@ -270,7 +272,7 @@ struct MyPortraitApp: App {
         }
         // EventClassifier 由 MemoryScheduler 固定接在 event job 后执行；
         // 不再暴露独立的 --classify-dry-run / --classify-run dispatch。
-        // `--import-default-cron-jobs` seeds the two built-in cronJobs into
+        // `--import-default-cron-jobs` seeds the built-in cronJobs into
         // CronJobStore. Idempotent (matches by name). Exits when done.
         if args.contains("--import-default-cron-jobs") {
             DefaultCronJobsImportCLI.run()
@@ -305,7 +307,7 @@ struct MyPortraitApp: App {
             SchedulerTestCLI.triggerTest()
         }
         if let idx = args.firstIndex(of: "--sched-would-process"), idx + 1 < args.count {
-            SchedulerTestCLI.wouldProcess(date: args[idx + 1])
+            SchedulerTestCLI.wouldProcess(intervalId: args[idx + 1])
         }
         // `--typing-observe` 只跑 TypingObserver（AX 订阅 + print 日志），
         // 不启动 capture / Memory pipeline / 不开窗口。AX 回调靠主 run loop，
@@ -400,6 +402,17 @@ struct MyPortraitApp: App {
         }
         if args.contains("--writing-capture-backlog-reject") {
             WritingCaptureCLI.rejectBacklog()
+        }
+        // Premium offload:--premium-export / --premium-import / --premium-rollback <id> /
+        // --premium-selftest。详见 PremiumCLI。内部 exit。
+        if args.contains(where: { ["--premium-export", "--premium-import", "--premium-rollback",
+                                   "--premium-selftest"].contains($0) }) {
+            PremiumCLI.run(args: args)
+        }
+        // 本机 event 链按区间 + personality 按本地日的自检(只在 CFFIXED_USER_HOME 指定的
+        // 临时数据根上跑)。详见 IntervalSelfTestCLI。内部 exit。
+        if args.contains("--interval-selftest") {
+            IntervalSelfTest.run()
         }
         // `--writing-style-*` 独立提炼链路 CLI 入口。详见 WritingStyleCLI。
         if args.contains("--writing-style-run") {

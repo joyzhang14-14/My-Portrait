@@ -1086,6 +1086,39 @@ enum DBSchema {
             try db.execute(sql: "ALTER TABLE frames ADD COLUMN ocr_backfill_words TEXT")
         }
 
+        // event 链按「区间」处理(09-22 update),personality 按本地日。读写见
+        // `Memory/EventIntervalStore.swift`,封口规则见 `Memory/IntervalSegmenter.swift`。
+        //   event_intervals:一行一个区间 [start_ms, end_ms)(UTC ms 半开),状态列语义
+        //     同 processing_log。区间帧 = 时间在范围内且 after_frame_id < id <= max_frame_id
+        //     (补漏区间靠这个与原区间区分)。tz_offset_min = 封口时本机偏移,钉死。
+        //     id 'iv:origin' 是过渡起点 T0(start = end = T0),第一次封口检查时写入。
+        //   personality_days:一行一个本地日,每天只跑一次。
+        m.registerMigration("v44_event_intervals") { db in
+            try db.create(table: "event_intervals") { t in
+                t.column("id", .text).primaryKey()                   // 'iv:<start_ms>'
+                t.column("start_ms", .integer).notNull()
+                t.column("end_ms", .integer).notNull()
+                t.column("tz_offset_min", .integer).notNull()
+                t.column("sealed_at_ms", .integer).notNull()
+                t.column("trigger", .text).notNull()                 // nightly | run_now | backfill | origin
+                t.column("frame_count", .integer).notNull().defaults(to: 0)
+                t.column("after_frame_id", .integer).notNull().defaults(to: 0)
+                t.column("max_frame_id", .integer).notNull().defaults(to: 0)
+                t.column("event_status", .text).notNull().defaults(to: "pending")
+                t.column("impact_status", .text).notNull().defaults(to: "idle")
+                t.column("retry_count", .integer).notNull().defaults(to: 0)
+                t.column("updated_at_ms", .integer).notNull().defaults(to: 0)
+            }
+            try db.create(index: "idx_event_intervals_end", on: "event_intervals", columns: ["end_ms"])
+            try db.create(table: "personality_days") { t in
+                t.column("day", .text).primaryKey()                  // 本地 yyyy-MM-dd
+                t.column("tz_offset_min", .integer).notNull()
+                t.column("status", .text).notNull().defaults(to: "pending")
+                t.column("retry_count", .integer).notNull().defaults(to: 0)
+                t.column("updated_at_ms", .integer).notNull().defaults(to: 0)
+            }
+        }
+
         return m
     }
 }

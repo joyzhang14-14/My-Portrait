@@ -22,8 +22,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>My Portrait reads your calendar so AI cronJobs and timeline context can reason about your meetings and schedule.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSInputMonitoringUsageDescription</key>
@@ -40,5 +38,7 @@
 	<string>https://joyzhang14-14.github.io/My-Portrait/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>r40y799hLosIZZpq47T953f24ElEj5ou0BEdPN0lMCM=</string>
+	<key>PremiumServerURL</key>
+	<string>$(PREMIUM_SERVER_URL)</string>
 </dict>
 </plist>

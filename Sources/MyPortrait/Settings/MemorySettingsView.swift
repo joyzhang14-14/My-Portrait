@@ -621,7 +621,8 @@ struct MemorySettingsView: View {
                         .toggleStyle(.switch)
                 }
             }
-            if hasManual, !autoRun.wrappedValue {
+            // provider 为 Premium 的链没有手动运行:Premium 每天凌晨统一处理。
+            if hasManual, !autoRun.wrappedValue, !ConfigStore.shared.current[keyPath: kp].isOffloaded {
                 Divider().opacity(0.35)
                 manual()
             }
@@ -762,7 +763,23 @@ struct MemorySettingsView: View {
     }
 
     /// 单独的 Run 按钮 —— 既能摆在卡片标题行上,也能在 triggerRow 里用。
+    /// provider 为 Premium 的链没有 Run 按钮(Premium 每天凌晨统一处理)。
+    @ViewBuilder
     private func triggerButton(_ t: ManualTrigger) -> some View {
+        let sched = ConfigStore.shared.current.scheduler
+        let offloaded: Bool = {
+            switch t {
+            case .eventProcessing: return sched.event.isOffloaded
+            case .distill:         return sched.portrait.isOffloaded
+            case .personality:     return sched.personality.isOffloaded
+            }
+        }()
+        if !offloaded {
+            localTriggerButton(t)
+        }
+    }
+
+    private func localTriggerButton(_ t: ManualTrigger) -> some View {
         let actuallyRunning = triggerActuallyRunning(t)
         // 读缓存,不在 body 里做 fileExists 同步 IO。
         let pending: Bool = {

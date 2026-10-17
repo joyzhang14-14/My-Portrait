@@ -27,32 +27,6 @@ enum CronJobExecutor {
         Task { await execute(cronJob) }
     }
 
-    /// Resolve a cronJob's attached connections into environment variables that
-    /// get injected into the spawned agent process — mirrors screenpipe's
-    /// per-cron-job `cmd.env(...)` credential injection.
-    private static func connectionEnv(for cronJob: CronJob) -> [String: String] {
-        var env: [String: String] = [:]
-        for id in cronJob.connections {
-            switch id {
-            case "email-smtp":
-                if let creds: SMTPCredentials = SecretStore.shared.getJSON(
-                        SMTPCredentials.ref(for: id), as: SMTPCredentials.self) {
-                    env["SMTP_HOST"] = creds.host
-                    env["SMTP_PORT"] = creds.port
-                    env["SMTP_USER"] = creds.username
-                    env["SMTP_PASS"] = creds.password
-                }
-            case "obsidian":
-                if let path = ObsidianConfig.vaultPath {
-                    env["OBSIDIAN_VAULT_PATH"] = path
-                }
-            default:
-                break
-            }
-        }
-        return env
-    }
-
     private static func execute(_ cronJob: CronJob) async {
         let (provider, _, _) = providerResolver()
         // Claude Code 不走 Pi,只要 CLI 装着就行;其它 provider 需要 Bun/Pi 装好。
@@ -146,18 +120,16 @@ enum CronJobExecutor {
         }
 
         let (_, model, refOverride) = providerResolver()
-        let envInjection = connectionEnv(for: cronJob)
         do {
             let agent: any ChatAgent
             switch provider {
             case .claudeCode:
                 // claude --print 一次跑就退,本身就是 oneshot,不需要复用
                 // session(也 oneshot=true 关续接,避免上轮污染下轮)。
-                agent = ClaudeCodeAgent(model: model, oneshot: true, extraEnv: envInjection)
+                agent = ClaudeCodeAgent(model: model, oneshot: true)
             default:
                 agent = try PiAgent(provider: provider, model: model,
-                                    apiKeyRefOverride: refOverride,
-                                    extraEnv: envInjection)
+                                    apiKeyRefOverride: refOverride)
             }
             try await agent.start()
             // 跟 ChatController.send 一致,首条 user message 前注入两个

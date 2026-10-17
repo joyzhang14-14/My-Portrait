@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import EventKit
 
 /// Matches Orphies' Settings → Connections layout:
 ///   ┌───────────────────────────────────┐
@@ -32,17 +31,17 @@ struct ConnectionsView: View {
     @State private var connecting: String? = nil
     @State private var loginError: String? = nil
     @State private var apiKeyDraft: String = ""
-    // SMTP form drafts — only used by the `.smtp` integration panel.
-    @State private var smtpHost: String = ""
-    @State private var smtpPort: String = "587"
-    @State private var smtpUser: String = ""
-    @State private var smtpPass: String = ""
-    @State private var smtpTestTo: String = ""
-    // Currently-selected Obsidian vault path, mirrored from SecretStore.
-    @State private var obsidianVaultPath: String? = ObsidianConfig.vaultPath
     /// Codex 当前 access token 的到期时刻。**只在页面出现 / 连接动作收尾时
     /// 算一次** —— 读 SecretStore 要解密,不能每帧 body 里现查。
     @State private var codexExpiry: Date? = nil
+    /// Premium 卡片的状态行(展开面板 / Connect 时刷新)。
+    @State private var premiumStatus: PremiumRemote.Status? = nil
+    /// Premium 卡片的服务地址 / 密钥输入(点 Connect 才保存)。
+    @State private var premiumServerDraft: String = ""
+    @State private var premiumKeyDraft: String = ""
+    /// Local Model 卡片的地址 / 模型名输入框,点 Connect 探测通过才写进 config。
+    @State private var localModelURLDraft: String = ""
+    @State private var localModelNameDraft: String = ""
 
     /// 走 categoryFilter 限定后的全集。filteredTiles / selectedIntegration 都
     /// 基于这个,确保 onboarding 里点不出非 AI 的 tile。
@@ -75,7 +74,7 @@ struct ConnectionsView: View {
                     // onboarding 嵌入时 showsHeader=false,不影响。
                     SettingsPageTitle(
                         title: "Connections",
-                        subtitle: "Give AI access to your memory, and connect to the apps you use every day"
+                        subtitle: "Connect to an AI that can process your data into events and portrait"
                     )
                     .padding(.bottom, 4)
                 }
@@ -287,37 +286,12 @@ struct ConnectionsView: View {
                     )
             }
 
-            // SMTP form — appears for the unconnected `.smtp` integration.
-            if !appState.isConnected(integration.id),
-               integration.signInMethod == .smtp {
-                VStack(spacing: 8) {
-                    smtpField("SMTP host (e.g. smtp.gmail.com)", text: $smtpHost)
-                    smtpField("Port (e.g. 587)", text: $smtpPort)
-                    smtpField("Username / email", text: $smtpUser)
-                    smtpSecureField("Password / app password", text: $smtpPass)
-                    smtpField("Test recipient (blank = send to yourself)", text: $smtpTestTo)
-                }
+            if integration.id == PremiumExchange.integrationId {
+                premiumPanel
             }
 
-            // Obsidian vault path — cronJobs need the git repo location, which
-            // the `.localApp` probe alone doesn't tell us.
-            if integration.id == "obsidian" {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("OBSIDIAN VAULT PATH")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .tracking(0.6)
-                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
-                    HStack(spacing: 8) {
-                        Text(obsidianVaultPath ?? "No vault selected")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textPrimary.opacity(obsidianVaultPath == nil ? 0.4 : 0.85))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Button("Choose…") { pickObsidianVault() }
-                            .buttonStyle(SubtleButton())
-                    }
-                }
+            if integration.id == "local-model" {
+                localModelPanel
             }
 
             HStack(spacing: 8) {
@@ -353,9 +327,82 @@ struct ConnectionsView: View {
         .glassCard()
     }
 
+    /// Premium 各链在 Connections 里的显示名(键 = `SchedulerSettings.offloadedChains`)。
+    private static let premiumChainTitles = ["event": "Events", "portrait": "Portrait",
+                                           "personality": "Personality", "writing_style": "Writing style"]
+
+    /// Premium:未连接时填密钥(没打包地址时还要填地址),点 Connect 保存并验证;
+    /// 连上后只显示上次上传 / 导入。打包进来的地址不在界面上显示。
+    @ViewBuilder
+    private var premiumPanel: some View {
+        let offloaded = ConfigStore.shared.current.scheduler.offloadedChains
+        let connected = appState.isConnected(PremiumExchange.integrationId)
+        VStack(alignment: .leading, spacing: 6) {
+            // 哪条链搬到 Premium 在 Memory 各条链的 provider picker 里选,这里只显示。
+            Text(offloaded.isEmpty
+                 ? "No pipeline offloaded — pick My Portrait Premium as a pipeline's provider in Memory settings."
+                 : "Offloaded: " + offloaded.map { Self.premiumChainTitles[$0] ?? $0 }.joined(separator: ", "))
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textPrimary.opacity(0.7))
+            if !connected {
+                if PremiumRemote.defaultServer.isEmpty {
+                    inputField("server address (https://…)", text: $premiumServerDraft)
+                }
+                secureInputField("paste your key…", text: $premiumKeyDraft)
+            } else if let st = premiumStatus {
+                premiumRow("Last upload", st.state.lastExport.map { "\($0.bundleId) · \($0.at)" } ?? "none yet", ok: nil)
+                premiumRow("Last import", st.state.lastImport.map { "\($0.outcome) · \($0.at)" } ?? "none yet",
+                         ok: st.state.lastImport.map { !$0.outcome.hasPrefix("failed") })
+            }
+        }
+        .task {
+            premiumServerDraft = ConfigStore.shared.current.premium.serverURL
+            premiumStatus = await PremiumRemote.probe(ConfigStore.shared.current.premium)
+        }
+    }
+
+    /// Local Model:未连接时填地址 + 模型名,连上后显示这两项。
+    @ViewBuilder
+    private var localModelPanel: some View {
+        let cfg = ConfigStore.shared.current.localModel
+        VStack(alignment: .leading, spacing: 6) {
+            if !appState.isConnected("local-model") {
+                inputField("server address (e.g. http://localhost:1234/v1)", text: $localModelURLDraft)
+                inputField("model name", text: $localModelNameDraft)
+            } else {
+                premiumRow("Address", cfg.baseURL, ok: nil)
+                premiumRow("Model", cfg.model, ok: nil)
+            }
+        }
+        .task {
+            localModelURLDraft = cfg.baseURL
+            localModelNameDraft = cfg.model
+        }
+    }
+
+    private func premiumRow(_ label: String, _ value: String, ok: Bool?) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(ok == nil ? Color.secondary.opacity(0.4) : (ok! ? Color.green : Color.orange))
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
+            Text(value)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private static func relative(_ d: Date) -> String {
+        RelativeDateTimeFormatter().localizedString(for: d, relativeTo: Date())
+    }
+
     /// connect 按钮文字 / spinner 的对比色。按钮底色是 `integration.accent`
-    /// (固定,不随系统主题变),所以不能钉死白字 —— ollama(accent 0.92)/
-    /// notion(0.95)是近白底,白字看不见。改成按 accent 亮度选:亮底深字、
+    /// (固定,不随系统主题变),所以不能钉死白字 —— ollama(accent 0.92)
+    /// 是近白底,白字看不见。改成按 accent 亮度选:亮底深字、
     /// 暗底白字,亮/暗主题下都可读,彩色 accent 按钮保持白字不变。
     private static func readableForeground(on accent: Color) -> Color {
         let ns = NSColor(accent).usingColorSpace(.sRGB) ?? .white
@@ -368,7 +415,6 @@ struct ConnectionsView: View {
     ///   Ollama        → probe localhost:11434
     ///   API-key       → save key to SecretStore
     ///   localApp      → NSWorkspace probe of the bundleId
-    ///   systemAccess  → open System Settings → Privacy
     ///   other OAuth   → not wired yet; surfaces an inline error
     private func startConnect(_ integration: Integration) {
         loginError = nil
@@ -376,19 +422,13 @@ struct ConnectionsView: View {
             connectChatGPT(integration)
         } else if integration.id == "ollama" {
             connectOllama(integration)
-        } else if integration.id == "notion" {
-            connectNotion(integration)
         } else if integration.signInMethod == .apiKey {
             connectAPIKey(integration)
-        } else if integration.signInMethod == .smtp {
-            connectSMTP(integration)
         } else if integration.signInMethod == .localApp {
             connectLocalApp(integration)
-        } else if integration.signInMethod == .systemAccess {
-            connectSystemAccess(integration)
         } else {
             // OAuth providers we haven't wired per-provider flows for yet
-            // (Notion, Linear, Spotify, Google Calendar…). Be honest about
+            // (Linear, Spotify…). Be honest about
             // the gap instead of fake-toggling.
             loginError = "\(integration.name) sign-in isn't available yet."
         }
@@ -405,14 +445,15 @@ struct ConnectionsView: View {
            let key = p.secretKey {
             SecretStore.shared.delete(key)
         }
-        if integration.signInMethod == .smtp {
-            SecretStore.shared.delete(SMTPCredentials.ref(for: integration.id))
-        }
-        if integration.id == "obsidian" {
-            SecretStore.shared.delete(ObsidianConfig.vaultPathRef)
-        }
-        if integration.id == "notion" {
-            NotionConfig.deleteToken()
+        if integration.id == PremiumExchange.integrationId {
+            SecretStore.shared.delete(PremiumRemote.keyRef)
+            // 还在 Premium 上的链改回连接前的 provider,不然本机不跑、包也传不上去。
+            ConfigStore.shared.mutate {
+                $0.scheduler.restoreFromPremium($0.premium.previousProviders) { p in
+                    appState.isConnected(p.integrationId)
+                }
+                $0.premium.previousProviders = [:]
+            }
         }
         appState.toggleConnect(integration)
         // Re-write models.json without this provider so Pi stops listing it.
@@ -440,112 +481,7 @@ struct ConnectionsView: View {
         }
     }
 
-    /// Notion Internal Integration Token 流:用户从 notion.so/profile/integrations
-    /// 拷的 `ntn_...` / `secret_...` token,粘进 apiKeyDraft 后调本函数。先用
-    /// `GET /v1/users/me` 校验 token + 列权限,通过才存 SecretStore + 亮绿点。
-    /// 校验失败不存,token 错的话用户当场看见 "Unauthorized" 而不是连完了后续静默失败。
-    private func connectNotion(_ integration: Integration) {
-        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            loginError = "Paste your Notion integration token first (starts with `ntn_` or `secret_`)."
-            return
-        }
-        connecting = integration.id
-        Task { @MainActor in
-            defer { connecting = nil }
-            do {
-                try await verifyNotionToken(trimmed)
-                try NotionConfig.setToken(trimmed)
-                apiKeyDraft = ""
-                if !appState.isConnected(integration.id) {
-                    appState.toggleConnect(integration)
-                }
-            } catch {
-                loginError = error.localizedDescription
-            }
-        }
-    }
-
-    /// `GET /v1/users/me` —— Notion 文档里 token 自检的标准 endpoint。
-    /// 200 = ok,401 = token 错,其它 = 网络/服务异常。
-    private func verifyNotionToken(_ token: String) async throws {
-        var req = URLRequest(url: URL(string: "https://api.notion.com/v1/users/me")!)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("2022-06-28", forHTTPHeaderField: "Notion-Version")
-        let (_, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse else {
-            throw NSError(domain: "Notion", code: -1,
-                          userInfo: [NSLocalizedDescriptionKey: "No HTTP response from Notion."])
-        }
-        switch http.statusCode {
-        case 200..<300:
-            return
-        case 401:
-            throw NSError(domain: "Notion", code: 401, userInfo: [
-                NSLocalizedDescriptionKey:
-                    "Notion rejected the token (401 Unauthorized). Double-check the token from notion.so/profile/integrations."
-            ])
-        default:
-            throw NSError(domain: "Notion", code: http.statusCode, userInfo: [
-                NSLocalizedDescriptionKey:
-                    "Notion returned HTTP \(http.statusCode). Try again in a moment."
-            ])
-        }
-    }
-
-    /// SMTP integration: collect host / port / user / password, then — like
-    /// screenpipe's `test()` — actually send one verification email. Only if
-    /// that succeeds do we save the credentials as a single JSON blob in
-    /// SecretStore under `smtp:<id>`. The password never touches UserDefaults.
-    private func connectSMTP(_ integration: Integration) {
-        let host = smtpHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        let port = smtpPort.trimmingCharacters(in: .whitespacesAndNewlines)
-        let user = smtpUser.trimmingCharacters(in: .whitespacesAndNewlines)
-        let pass = smtpPass
-        guard !host.isEmpty, !port.isEmpty, !user.isEmpty, !pass.isEmpty else {
-            loginError = "Fill in host, port, username and password."
-            return
-        }
-        guard let portNum = Int(port) else {
-            loginError = "Port must be a number (e.g. 465 or 587)."
-            return
-        }
-        // From = username; To = test recipient, defaulting to self.
-        let toTrimmed = smtpTestTo.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 防呆:填了但不像邮箱(没有 @)→ 直接提示,别白跑一次完整 SMTP 握手
-        // 再吃服务器的 "Invalid User" 报错。
-        if !toTrimmed.isEmpty && !toTrimmed.contains("@") {
-            loginError = "Test recipient isn't a valid email address — leave blank to send to yourself."
-            return
-        }
-        let recipient = toTrimmed.isEmpty ? user : toTrimmed
-
-        connecting = integration.id
-        Task {
-            do {
-                try await SMTPClient.sendTestEmail(host: host, port: portNum,
-                                                   username: user, password: pass,
-                                                   from: user, to: recipient)
-                let creds = SMTPCredentials(host: host, port: port,
-                                            username: user, password: pass,
-                                            testRecipient: toTrimmed)
-                try SecretStore.shared.setJSON(SMTPCredentials.ref(for: integration.id), creds)
-                await MainActor.run {
-                    smtpHost = ""; smtpPort = "587"; smtpUser = ""; smtpPass = ""; smtpTestTo = ""
-                    connecting = nil
-                    if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
-                }
-            } catch {
-                await MainActor.run {
-                    connecting = nil
-                    loginError = "Test email failed — credentials not saved. \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func smtpField(_ placeholder: String, text: Binding<String>) -> some View {
+    private func inputField(_ placeholder: String, text: Binding<String>) -> some View {
         TextField(placeholder, text: text)
             .textFieldStyle(.plain)
             .font(.system(size: 12))
@@ -557,7 +493,7 @@ struct ConnectionsView: View {
             )
     }
 
-    private func smtpSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+    private func secureInputField(_ placeholder: String, text: Binding<String>) -> some View {
         SecureField(placeholder, text: text)
             .textFieldStyle(.plain)
             .font(.system(size: 12))
@@ -567,24 +503,6 @@ struct ConnectionsView: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.white.opacity(0.10), lineWidth: 1))
             )
-    }
-
-    /// Open an NSOpenPanel to pick the Obsidian vault directory and save its
-    /// path to SecretStore. Independent of the `.localApp` install probe.
-    private func pickObsidianVault() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use as vault"
-        panel.message = "Select your Obsidian vault folder"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try ObsidianConfig.setVaultPath(url.path)
-            obsidianVaultPath = url.path
-        } catch {
-            loginError = error.localizedDescription
-        }
     }
 
     private func connectOllama(_ integration: Integration) {
@@ -616,6 +534,39 @@ struct ConnectionsView: View {
             let (_, resp) = try await URLSession.shared.data(for: req)
             return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
         } catch { return false }
+    }
+
+    /// 先打一次 OpenAI 兼容的 `GET <地址>/models` 确认服务在跑,通过了才存地址和模型名。
+    private func connectLocalModel(_ integration: Integration) {
+        let base = localModelURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = localModelNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: base), ["http", "https"].contains(url.scheme) else {
+            loginError = "Enter the server address, e.g. http://localhost:1234/v1"
+            return
+        }
+        guard !model.isEmpty else {
+            loginError = "Enter the model name."
+            return
+        }
+        connecting = integration.id
+        Task { @MainActor in
+            defer { connecting = nil }
+            var req = URLRequest(url: url.appendingPathComponent("models"))
+            req.timeoutInterval = 3
+            let ok = await ((try? URLSession.shared.data(for: req))?.1 as? HTTPURLResponse)
+                .map { (200..<300).contains($0.statusCode) } ?? false
+            guard ok else {
+                loginError = "Couldn't reach a model server at \(base)/models. Is it running?"
+                return
+            }
+            ConfigStore.shared.mutate {
+                $0.localModel.baseURL = base
+                $0.localModel.model = model
+            }
+            appState.setModel(model, forIntegrationId: integration.id)
+            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
+            try? PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
+        }
     }
 
     /// Snapshot of providers the user is currently connected to. Used to
@@ -651,12 +602,50 @@ struct ConnectionsView: View {
         }
     }
 
-    /// LocalApp integrations (Claude Desktop, Cursor, Obsidian, …): check
-    /// that the app is actually installed by asking NSWorkspace for the
-    /// bundleId. No network, no fake delay.
+    /// LocalApp integrations: Premium、Local Model、Claude Code CLI 各走各的探测。
     private func connectLocalApp(_ integration: Integration) {
         // claude-code:真发一句 "hi" 看 CLI 能不能拿到回复。仅"binary 存在"
         // 不够 —— 用户可能没 `claude login`、登录态过期、模型 API 挂等。
+        if integration.id == PremiumExchange.integrationId {
+            // 先存地址和密钥,再打 /v1/health + /v1/me 验证。打包了地址时不显示地址框,
+            // 只在没打包时才写 server_url。
+            if PremiumRemote.defaultServer.isEmpty {
+                let server = premiumServerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                ConfigStore.shared.mutate { $0.premium.serverURL = server }
+            }
+            let key = premiumKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else {
+                loginError = "Paste your key first."
+                return
+            }
+            do { try SecretStore.shared.set(PremiumRemote.keyRef, value: Data(key.utf8)) } catch {
+                loginError = error.localizedDescription
+                return
+            }
+            premiumKeyDraft = ""
+            connecting = integration.id
+            Task { @MainActor in
+                defer { connecting = nil }
+                let st = await PremiumRemote.probe(ConfigStore.shared.current.premium)
+                premiumStatus = st
+                if st.healthy {
+                    if !appState.isConnected(integration.id) {
+                        appState.toggleConnect(integration)
+                        // 连上 = 四条链默认全走 Premium;之后在 Memory 设置里手动改哪条都算数。
+                        ConfigStore.shared.mutate {
+                            $0.premium.previousProviders = $0.scheduler.moveAllToPremium()
+                        }
+                    }
+                } else {
+                    loginError = "Premium: \(st.problem ?? "not reachable")"
+                }
+            }
+            return
+        }
+        if integration.id == "local-model" {
+            connectLocalModel(integration)
+            return
+        }
         if integration.id == "claude-code" {
             connecting = integration.id
             Task { @MainActor in
@@ -678,66 +667,7 @@ struct ConnectionsView: View {
             }
             return
         }
-        guard let bundleId = integration.bundleId else {
-            loginError = "\(integration.name) doesn't expose a bundle ID we can probe."
-            return
-        }
-        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil {
-            appState.toggleConnect(integration)
-            return
-        }
-        loginError = "\(integration.name) isn't installed (bundle \(bundleId) not found)."
-    }
-
-    /// SystemAccess integrations (Apple Calendar, Voice Memos, Apple
-    /// Intelligence): TCC permission lives in System Settings → Privacy.
-    /// Apple Calendar 走 EventKit:第一次调用 requestFullAccessToEvents 系统
-    /// 会弹原生权限弹窗;之后如果用户拒了再点 Connect,我们就跳系统设置让
-    /// 他改。当前 .systemAccess 只有 apple-calendar 一个 tile。
-    private func connectSystemAccess(_ integration: Integration) {
-        guard integration.id == "apple-calendar" else {
-            // 未来如果再加 systemAccess tile 走这里;现在不应触发。
-            loginError = "\(integration.name) is not wired yet."
-            return
-        }
-        connectCalendar(integration)
-    }
-
-    /// Apple Calendar 真接 EventKit。三种 TCC 状态:
-    ///   - notDetermined → requestFullAccessToEvents 弹原生权限对话框
-    ///   - authorized / fullAccess → 直接 toggleConnect 亮绿点
-    ///   - denied / restricted → 跳系统设置(API 不能再弹了)
-    private func connectCalendar(_ integration: Integration) {
-        let status = EKEventStore.authorizationStatus(for: .event)
-        switch status {
-        case .fullAccess, .authorized:
-            if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
-        case .notDetermined:
-            connecting = integration.id
-            let store = EKEventStore()
-            store.requestFullAccessToEvents { granted, err in
-                DispatchQueue.main.async {
-                    self.connecting = nil
-                    if granted {
-                        if !self.appState.isConnected(integration.id) {
-                            self.appState.toggleConnect(integration)
-                        }
-                    } else {
-                        self.loginError = err?.localizedDescription
-                            ?? "Calendar access was not granted."
-                    }
-                }
-            }
-        case .denied, .restricted, .writeOnly:
-            // 走过一次拒了或只给了 write-only —— EventKit 不再弹,
-            // 只能跳系统设置让用户手动改。
-            loginError = "Calendar access is \(status == .writeOnly ? "write-only" : "denied"). Opening System Settings — turn on full access for My Portrait."
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
-                NSWorkspace.shared.open(url)
-            }
-        @unknown default:
-            break
-        }
+        loginError = "\(integration.name) sign-in isn't available yet."
     }
 
     private func signInIcon(for i: Integration) -> String {
@@ -745,8 +675,6 @@ struct ConnectionsView: View {
         case .oauth: return "person.fill.badge.plus"
         case .apiKey: return "key.fill"
         case .localApp: return "arrow.down.app.fill"
-        case .systemAccess: return "lock.open.fill"
-        case .smtp: return "envelope.fill"
         }
     }
     private func signInLabel(for i: Integration) -> String {
@@ -755,10 +683,10 @@ struct ConnectionsView: View {
         case .apiKey: return "Add API key"
         // claude-code 那条真发一句话探连通(见 connectLocalApp),装了没登录
         // 也会失败 —— 所以说"检测登录状态"比"检测 Claude Code CLI"准确。
-        // Ollama / Obsidian 只探装没装,维持原文案。
-        case .localApp: return i.id == "claude-code" ? "Detect login status" : "Detect \(i.name)"
-        case .systemAccess: return "Grant access"
-        case .smtp: return "Save SMTP settings"
+        // Ollama 只探装没装,维持原文案。
+        case .localApp:
+            if i.id == PremiumExchange.integrationId || i.id == "local-model" { return "Connect" }
+            return i.id == "claude-code" ? "Detect login status" : "Detect \(i.name)"
         }
     }
     /// 描述文案按 markdown 渲染 —— 只用加粗标关键词。实现在 `Markdown.inline`,全 app 一份。
@@ -781,10 +709,8 @@ struct ConnectionsView: View {
         case "perplexity":  return "Answers that **search the web** first. Needs a Perplexity key."
         case "deepseek":    return "The **cheapest** pay-per-use option. Paste a key from your DeepSeek account."
         case "ollama":      return "Run models **on this Mac** — free, and nothing goes online. Needs the Ollama app installed."
-        case "obsidian":    return "Let your memory **read and write** notes in your Obsidian vault."
-        case "notion":      return "Let your memory read your Notion pages. Create a token at notion.so/profile/integrations and paste it below — **only the pages you share with it** are visible."
-        case "email-smtp":  return "Let Cron Jobs **email you**. Your password stays **encrypted on this Mac**."
-        case "apple-calendar":      return "Let your memory see **what's on your calendar**."
+        case "local-model": return "Use a model server **you run yourself** — LM Studio, llama.cpp, vLLM or anything OpenAI-compatible. Enter its address and model name."
+        case "premium":   return "**Free compute provided by Joy**, with early access to many of My Portrait's advanced features; your data is used only to train better models, nothing else."
         default: return "Connect this integration to your AI."
         }
     }

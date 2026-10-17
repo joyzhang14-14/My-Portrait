@@ -38,7 +38,7 @@ enum MPQueryCronJobCLI {
     private static func runAdd(args: [String]) -> Never {
         let opts = parseOpts(args)
         guard let name = opts["name"]?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
-            errJSON("--name is required (e.g. --name \"Obsidian Updater\")")
+            errJSON("--name is required (e.g. --name \"Follow-up Reminders\")")
         }
         guard let scheduleStr = opts["schedule"]?.trimmingCharacters(in: .whitespaces), !scheduleStr.isEmpty else {
             errJSON("--schedule is required (e.g. --schedule \"every 60m\" / \"daily at 9\" / \"weekly 2 at 9\")")
@@ -76,9 +76,6 @@ enum MPQueryCronJobCLI {
 
         let enabled = (opts["enabled"] ?? "true").lowercased() != "false"
         let muted = (opts["muted"] ?? "false").lowercased() == "true"
-        let connections = (opts["connections"] ?? "")
-            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
 
         // Slug 唯一性:已存在就拒绝,逼 AI 改名或先 remove。不像 CronJobStore.save
         // 那样静默加 `-2` 后缀 —— CLI 场景必须 fail-fast 让 AI 看见冲突。
@@ -93,7 +90,7 @@ enum MPQueryCronJobCLI {
         let job = CronJob(
             name: name, prompt: prompt, window: window,
             schedule: schedule, isEnabled: enabled,
-            connections: connections, muted: muted
+            muted: muted
         )
 
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -139,7 +136,6 @@ enum MPQueryCronJobCLI {
                 "muted": job.muted,
                 "schedule": CronJobFile.encode(job.schedule),
                 "window": CronJobFile.encode(job.window),
-                "connections": job.connections,
                 "prompt": job.prompt
             ])
         }
@@ -149,8 +145,8 @@ enum MPQueryCronJobCLI {
     // MARK: - remove
 
     private static func runRemove(args: [String]) -> Never {
-        // 支持 `mp-query cronjob remove obsidian-updater`(位置参) 或
-        // `--slug obsidian-updater` / `--name "Obsidian Updater"`。
+        // 支持 `mp-query cronjob remove follow-up-reminders`(位置参) 或
+        // `--slug follow-up-reminders` / `--name "Follow-up Reminders"`。
         let opts = parseOpts(args)
         let positional = args.first(where: { !$0.hasPrefix("--") })
         let slug: String = {
@@ -251,7 +247,6 @@ enum MPQueryCronJobCLI {
           --prompt "<text>"          prompt body. inline. use --prompt-file for multi-line.
           --prompt-file <path>       read prompt body from file (utf-8).
                                        if neither --prompt nor --prompt-file, reads stdin.
-          --connections a,b,c        integration ids (e.g. obsidian,gmail).
           --enabled true|false       default true.
           --muted true|false         default false. true = task runs but no banner.
 
@@ -261,14 +256,13 @@ enum MPQueryCronJobCLI {
           mp-query cronjob remove --name "<title>" (slugifies automatically)
 
         EXAMPLES
-          mp-query cronjob add --name "Obsidian Updater" \\
+          mp-query cronjob add --name "Follow-up Reminders" \\
             --schedule "every 60m" --window "none" \\
-            --connections obsidian \\
             --prompt-file /tmp/prompt.md
 
           mp-query cronjob list
 
-          mp-query cronjob remove obsidian-updater
+          mp-query cronjob remove follow-up-reminders
         """
         FileHandle.standardError.write(Data((usage + "\n").utf8))
     }

@@ -141,17 +141,25 @@ struct TimelineDB: Sendable {
     /// `limit` caps the result to keep the UI snappy; default 800 is roughly one
     /// frame per ~2 minutes for 24h.
     func frames(on day: Date, limit: Int = 800) -> [TimelineFrame] {
-        guard exists else { return [] }
-
-        // UTC —— 跟 pendingDays / availableDays / events/<date>/ 目录命名一致。
-        // 用本地日历会把 UTC 午夜的 day 错位到前一天（负偏移时区）。
+        // UTC 日 —— 跟 availableDays 一致。
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC") ?? .current
         let dayStart = cal.startOfDay(for: day)
         let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        return queryFrames(startMs: Self.dbMs(dayStart), endMs: Self.dbMs(dayEnd),
+                           afterId: 0, maxId: Int64.max, limit: limit)
+    }
 
-        let startMs = Self.dbMs(dayStart)
-        let endMs = Self.dbMs(dayEnd)
+    /// event 链一个区间的帧:[startMs, endMs) 且 afterId < id <= maxId(见
+    /// `EventIntervalStore.intervalFrameSQL`),过滤同 `frames(on:)`,不设上限。
+    func frames(fromMs startMs: Int64, toMs endMs: Int64, afterId: Int64, maxId: Int64) -> [TimelineFrame] {
+        queryFrames(startMs: startMs, endMs: endMs, afterId: afterId, maxId: maxId, limit: -1)
+    }
+
+    /// `limit` < 0 = 不设上限。按 (timestamp_ms, id) 升序。
+    private func queryFrames(startMs: Int64, endMs: Int64, afterId: Int64, maxId: Int64,
+                             limit: Int) -> [TimelineFrame] {
+        guard exists else { return [] }
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
@@ -180,7 +188,8 @@ struct TimelineDB: Sendable {
                    OR f.video_chunk_id IS NOT NULL
                    OR f.device_name = 'imported')
               AND f.timestamp_ms >= ? AND f.timestamp_ms < ?
-            ORDER BY f.timestamp_ms ASC
+              AND f.id > ? AND f.id <= ?
+            ORDER BY f.timestamp_ms ASC, f.id ASC
             LIMIT ?
             """
 
@@ -193,7 +202,9 @@ struct TimelineDB: Sendable {
 
         sqlite3_bind_int64(stmt, 1, startMs)
         sqlite3_bind_int64(stmt, 2, endMs)
-        sqlite3_bind_int(stmt, 3, Int32(limit))
+        sqlite3_bind_int64(stmt, 3, afterId)
+        sqlite3_bind_int64(stmt, 4, maxId)
+        sqlite3_bind_int(stmt, 5, Int32(limit))
 
         var results: [TimelineFrame] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -276,16 +287,11 @@ struct TimelineDB: Sendable {
         return orderedLines.joined(separator: "\n")
     }
 
-    /// 数当天有多少帧的 OCR 文本命中给定关键词集合中**任一个**(substring,
-    /// 大小写不敏感)。给 PersonalityRefresh 的 OCR 验证器(≥20 帧才落 tag)用。
+    /// 数 [startMs, endMs) 里有多少帧的 OCR 文本命中给定关键词集合中**任一个**(substring,
+    /// 大小写不敏感)。给 PersonalityRefresh 的 OCR 验证器用,窗口 = 该本地日 [00:00, 24:00)。
     /// 空 keywords → 返回 0。
-    func frameCount(on day: Date, keywords: [String]) -> Int {
+    func frameCount(fromMs startMs: Int64, toMs endMs: Int64, keywords: [String]) -> Int {
         guard exists, !keywords.isEmpty else { return 0 }
-
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "UTC") ?? .current
-        let dayStart = cal.startOfDay(for: day)
-        let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
 
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
@@ -306,8 +312,8 @@ struct TimelineDB: Sendable {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_int64(stmt, 1, Self.dbMs(dayStart))
-        sqlite3_bind_int64(stmt, 2, Self.dbMs(dayEnd))
+        sqlite3_bind_int64(stmt, 1, startMs)
+        sqlite3_bind_int64(stmt, 2, endMs)
         for (i, kw) in keywords.enumerated() {
             let pat = "%" + kw.lowercased() + "%"
             sqlite3_bind_text(stmt, Int32(3 + i), pat, -1, SQLITE_TRANSIENT)

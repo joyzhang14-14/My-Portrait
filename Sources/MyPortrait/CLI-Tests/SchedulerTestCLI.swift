@@ -66,15 +66,6 @@ enum SchedulerTestCLI {
         store.acquireLock(date: date, processor: stage.rawValue)
         store.setStatus(date: date, stage: stage, status: .inProgress)
 
-        // event 步：造一个当天 event 文件，验证崩溃回滚会删掉它。
-        if stage == .event, let day = ProcessingLogStore.day(from: date) {
-            let dir = PortraitPaths.eventsDayDir(for: day)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let dummy = dir.appendingPathComponent("_kill_test_dummy.md")
-            try? "# kill-test dummy event\n".write(to: dummy, atomically: true, encoding: .utf8)
-            print("created dummy event file: \(dummy.path)")
-        }
-
         print("LOCKED date=\(date) stage=\(stage.rawValue) pid=\(ProcessInfo.processInfo.processIdentifier) — heartbeating every 1s, sleeping (kill -9 me)")
         fflush(stdout)
 
@@ -146,12 +137,12 @@ enum SchedulerTestCLI {
         exit(0)
     }
 
-    // MARK: - 查询：daily job 是否还会处理这天
+    // MARK: - 查询：event job 是否还会处理这个区间
 
-    static func wouldProcess(date: String) {
+    static func wouldProcess(intervalId: String) {
         ensureMigrated()
-        let yes = MemoryScheduler.shared.wouldProcessInEventJob(date: date)
-        print("wouldProcessInEventJob(\(date)) = \(yes)")
+        let yes = MemoryScheduler.shared.wouldProcessInEventJob(intervalId: intervalId)
+        print("wouldProcessInEventJob(\(intervalId)) = \(yes)")
         exit(0)
     }
 

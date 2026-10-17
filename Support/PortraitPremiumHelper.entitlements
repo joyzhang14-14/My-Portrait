@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    PortraitPremiumHelper(封区间 LaunchAgent 的可执行体)的 entitlements —— 故意全空。
+    跟 PortraitSleepHelper 同理:自签名(无 Team ID)下 launchd 按 LWCR 放行,
+    Xcode 按 bundle id 合成的无 team application-identifier 和 Debug 注入的
+    get-task-allow 都不被授权。配合 project.yml 的 CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO。
+-->
+<plist version="1.0">
+<dict>
+</dict>
+</plist>

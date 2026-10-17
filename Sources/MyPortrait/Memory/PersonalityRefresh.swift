@@ -3,11 +3,11 @@ import os.log
 
 private let prLog = Logger(subsystem: "com.myportrait.memory", category: "personality-refresh")
 
-/// Personality 流水线总装 —— events 主导 + OCR 验证:
-///   1. events 源: 只看 weight > minEventWeight 的高权重事件
+/// Personality 流水线总装(一个本地日一次) —— events 主导 + OCR 验证:
+///   1. events 源: 只看 events/<本地日>/ 里 weight > minEventWeight 的高权重事件
 ///   2. PersonalityAgent → 每个 tag 自带 ocr_keywords(LLM 给的搜索词)
-///   3. OCR 验证: 当天命中 ocr_keywords 的帧数必须 ≥ minOCRFrames,
-///      不够就丢弃这个 tag
+///   3. OCR 验证: 该本地日 [00:00, 24:00) 里命中 ocr_keywords 的帧数必须
+///      ≥ minOCRFrames,不够就丢弃这个 tag
 ///   4. 幸存 tag 同时以 .events / .ocr 两种来源进 cluster + merge → 落盘
 ///
 /// 其他 portrait 板块(skills / interests / 等)不再做 personality 来源——
@@ -60,15 +60,17 @@ final class PersonalityRefresh {
         case apply                               // 落盘
     }
 
-    func refresh(day: Date, writeDailySnapshot: Bool = true,
+    /// `day` = 本地日按 UTC 零点存的 Date(按 UTC 格式化即该日期串:events/<day>/、
+    /// last_modified);`ocrWindow` = 该本地日 [00:00, 24:00) 的 UTC ms(钉死偏移)。
+    func refresh(day: Date, ocrWindow: (start: Int64, end: Int64), writeDailySnapshot: Bool = true,
                  progress: ((Phase) -> Void)? = nil) async throws -> Report {
         let napGuard = AppNapGuard.acquire(reason: "Personality refresh")
         defer { napGuard.release() }
-        return try await refreshImpl(day: day, writeDailySnapshot: writeDailySnapshot,
+        return try await refreshImpl(day: day, ocrWindow: ocrWindow, writeDailySnapshot: writeDailySnapshot,
                                      progress: progress)
     }
 
-    private func refreshImpl(day: Date, writeDailySnapshot: Bool,
+    private func refreshImpl(day: Date, ocrWindow: (start: Int64, end: Int64), writeDailySnapshot: Bool,
                              progress: ((Phase) -> Void)?) async throws -> Report {
 
         // ── 1) events 源(weight > threshold) ──────────────────────────
@@ -94,7 +96,8 @@ final class PersonalityRefresh {
                 dropped += 1
                 continue
             }
-            let frames = timeline.frameCount(on: day, keywords: tag.ocrKeywords)
+            let frames = timeline.frameCount(fromMs: ocrWindow.start, toMs: ocrWindow.end,
+                                             keywords: tag.ocrKeywords)
             if frames < Self.minOCRFrames {
                 prLog.notice("tag '\(tag.name, privacy: .public)': \(frames) frame(s) < \(Self.minOCRFrames) → drop (kw=\(tag.ocrKeywords, privacy: .public))")
                 dropped += 1

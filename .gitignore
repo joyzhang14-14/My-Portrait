@@ -33,6 +33,10 @@ MyPortrait.xcodeproj/
 
 # Contributor-local signing override (see Support/Signing.xcconfig)
 Support/Signing.local.xcconfig
+# Premium 默认服务地址(打包进 Info.plist;见 Support/Signing.xcconfig)
+Support/Premium.local.xcconfig
+# My Portrait Premium 头像(只在本机打包时带进 app)
+Sources/MyPortrait/Assets.xcassets/PremiumAvatar.imageset/
 
 # dmgbuild 本地 venv(scripts/release/dmg.sh 第一次跑会创建)
 scripts/release/dmg/.venv/

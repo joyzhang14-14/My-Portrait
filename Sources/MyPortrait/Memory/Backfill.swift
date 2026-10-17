@@ -1,41 +1,41 @@
 import Foundation
 
-/// Event-level backfill from captured timeline data.
+/// event 链的 event 步:把一个区间(`EventInterval`)的帧聚成事件。
 ///
-/// Per-day loop:
-///   1. Read frames for this day from `~/.portrait/portrait.sqlite`
-///      (resolved by `TimelineDB`).
-///   2. Tier 1 merge (app+window+5min, rule-based) → coarse sessions.
-///   3. Enrich each session with OCR; drop sessions with < 60 chars of OCR.
-///   4. EventBuilder (LLM, per-event clustering): one `DayClustering` with a
-///      list of events (each owning ≥1 session) plus a `skipped` list.
-///   5. Materialise:
-///      - join_existing → load the existing PortraitFile, +1 occurrence,
-///        append frame ids. Title / summary / facets are NOT changed.
-///      - new event     → create a fresh PortraitFile from the LLM's
-///        title + summary + type + facets.
-///   6. After all days: WeightCalculator pass + Archiver.
+///   1. 取区间全部帧(`TimelineDB.frames(fromMs:toMs:afterId:maxId:)`,不设上限)。
+///   2. Tier 1 合并(app + window + 5 min,规则)→ session。
+///   3. 每个 session 配 OCR;OCR 不足 60 字的丢掉。
+///   4. EventBuilder(LLM)聚类:事件列表(每个 ≥ 1 个 session)+ skipped。
+///      提示词里的日期与活跃窗口的参照日 = 整个区间帧的 attribute_day。
+///   5. 落到 overlay(还不写盘):
+///      - join_existing → 在已有事件上记一次出现(那几个 session 的 attribute_day)、
+///        追加帧 id、清空 distilledInto;title / summary / facets 不动。
+///      - 新事件 → `events/<本地日>/<本地日>_<slug>.md`,本地日 = 成员帧的 attribute_day
+///        (区间钉死的 tz_offset_min);同一日期目录可以被多个区间写入。
+///   调用方确认成功后 `overlay.commit`,失败什么都不写。weight pass 由调用方在
+///   整个 job 末尾跑一次。
 ///
-/// Coverage is enforced inside EventBuilder — if the LLM leaves a session
-/// uncovered the whole day throws and nothing is written for it. There is no
-/// empty-shell fallback anymore.
+/// 覆盖率在 EventBuilder 内保证 —— LLM 漏掉的 session 进 skipped,聚类抛错则整个
+/// 区间算失败。
 @MainActor
 enum Backfill {
-    struct Result {
-        let daysScanned: Int
-        let rawFrameCount: Int
-        let tier1SessionCount: Int
-        let emptySessionCount: Int   // dropped (no OCR) or LLM-skipped
-        let llmFailedDays: Int
-        let newEventCount: Int
-        let joinedSessionCount: Int
-        let skippedSessionCount: Int
+    /// 一个区间 event 步的结果。写入攒在 `overlay` 里,还没落盘。
+    struct IntervalRun {
+        var rawFrameCount = 0
+        var tier1SessionCount = 0
+        var emptySessionCount = 0   // OCR 不足被丢的
+        var llmFailed = false
+        var newEventCount = 0
+        var joinedSessionCount = 0
+        var skippedSessionCount = 0
+        /// 本区间新建与被 join 的事件文件(impact 的评分范围),去重保序。
+        var touched: [URL] = []
+        /// 这些事件归到的本地日。
+        var days: Set<String> = []
+        var overlay = EventOverlay()
     }
 
     struct Progress {
-        let dayIndex: Int          // 1-based current day in the loop
-        let dayCount: Int
-        let day: Date              // which day is being processed
         let phase: String
         /// 进度条单元信号(nil = 该阶段无单元粒度,只有 phase 文案)。
         var unit: Unit? = nil
@@ -46,35 +46,26 @@ enum Backfill {
         }
     }
 
-    /// Default: last 14 days. Idempotent + resumable — days whose
-    /// `events/<yyyy-MM-dd>/` directory already has files are skipped.
-    ///
-    /// `onlyDay` (non-nil) restricts the run to that single calendar day —
-    /// used by the `--backfill-day` dev entry point.
-    ///
-    /// `skipWeightPass`：MemoryScheduler.runEventJob 逐天循环调用时传 true，
-    /// 循环结束后统一调一次 `weightPass()`——否则 dayCap=7 时全树重写 7 遍
-    /// （跟 rebalance 从 per-day 挪到 job 末尾一次是同一个原因）。
-    static func run(
-        daysBack: Int = 14,
+    /// 聚类这一步(默认 = EventBuilder.clusterDay;自检换成确定性的假聚类)。
+    typealias Clusterer = (_ date: Date, _ sessions: [EventBuilder.EnrichedSession],
+                           _ active: [EventBuilder.ActiveEvent]) async throws -> EventBuilder.DayClustering
+
+    static func runInterval(
+        _ iv: EventInterval,
         activeWindowDays: Int = 14,
-        onlyDay: Date? = nil,
-        skipWeightPass: Bool = false,
+        clusterer: Clusterer? = nil,
         progress: ((Progress) -> Void)? = nil
-    ) async throws -> Result {
+    ) async throws -> IntervalRun {
         let napGuard = AppNapGuard.acquire(reason: "Backfill / event clustering")
         defer { napGuard.release() }
-        return try await runImpl(
-            daysBack: daysBack, activeWindowDays: activeWindowDays,
-            onlyDay: onlyDay, skipWeightPass: skipWeightPass, progress: progress
-        )
+        return try await runIntervalImpl(iv, activeWindowDays: activeWindowDays,
+                                         clusterer: clusterer, progress: progress)
     }
 
-    private static func runImpl(
-        daysBack: Int, activeWindowDays: Int, onlyDay: Date?,
-        skipWeightPass: Bool,
+    private static func runIntervalImpl(
+        _ iv: EventInterval, activeWindowDays: Int, clusterer: Clusterer?,
         progress: ((Progress) -> Void)?
-    ) async throws -> Result {
+    ) async throws -> IntervalRun {
         try PortraitPaths.ensureSeedTree()
 
         let db = TimelineDB()
@@ -85,199 +76,185 @@ enum Backfill {
             )
         }
 
-        var totals = Counters()
-        // UTC —— 跟 pendingDays / isRawReady / events/<date>/ 目录命名一致。
-        // 本地日历会把 pendingDays 传来的 UTC 午夜 day 错位到相邻日。
+        var r = IntervalRun()
+        let off = iv.tzOffsetMin
+        progress?(.init(phase: "reading frames"))
+        let frames = db.frames(fromMs: iv.startMs, toMs: iv.endMs,
+                               afterId: iv.afterFrameId, maxId: iv.maxFrameId)
+        r.rawFrameCount = frames.count
+        if frames.isEmpty {
+            DiagLog.event("backfill.interval.skipped", ctx: ["interval": iv.id, "reason": "no frames"])
+            return r
+        }
+
+        // Tier 1 merge.
+        let rawEvents = frames.map { f in
+            Tier1Merger.RawEvent(
+                timestamp: f.timestamp,
+                appName: f.appName,
+                windowName: f.windowName,
+                browserURL: f.browserUrl,
+                frameId: f.id
+            )
+        }
+        let sessions = Tier1Merger.merge(rawEvents)
+        r.tier1SessionCount = sessions.count
+        if sessions.isEmpty { return r }
+
+        var tsById: [Int64: Int64] = [:]
+        for f in frames { tsById[f.id] = ms(f.timestamp) }
+        func span(_ s: Tier1Merger.MergedEvent) -> (start: Int64, end: Int64) {
+            (ms(s.firstSeen), ms(s.lastSeen))
+        }
+        // 提示词里的日期、活跃窗口的参照日 = 整个区间帧的 attribute_day。
+        guard let ivDay = IntervalSegmenter.attributeDay(frameTs: frames.map { ms($0.timestamp) },
+                                                         spans: sessions.map(span), tzOffsetMin: off),
+              let day = ProcessingLogStore.day(from: ivDay) else { return r }
+
+        // Enrich + drop OCR-poor sessions (no OCR → nothing to summarise).
+        // maxOcrChars 2000→600:每个 session 的 OCR 前 ~600 字才有聚类信号(app
+        // 名 / 任务上下文),尾巴是重复噪音。session 主导 prompt,砍它直接把
+        // reasoning 模型在大 prompt 上的思考时间 + 额度都压下来(event 步太慢的
+        // 主因)。质量影响要跑几天对比 event 数 / dropped 率(下面那行日志)确认。
+        let minOcrChars = 60
+        let maxOcrChars = 600
+        var enriched: [EventBuilder.EnrichedSession] = []
+        for s in sessions {
+            let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: maxOcrChars)
+            if ocr.count < minOcrChars {
+                r.emptySessionCount += 1
+                continue
+            }
+            enriched.append(EventBuilder.EnrichedSession(
+                session: s, ocrSnippet: ocr, transcriptSnippet: ""
+            ))
+        }
+        let dropped = sessions.count - enriched.count
+        print("Interval \(iv.id) (\(ivDay)): \(frames.count) frames, \(sessions.count) sessions, \(enriched.count) enriched (OCR ≥ 60), \(dropped) dropped")
+        DiagLog.event("backfill.interval.sessions", ctx: [
+            "interval": iv.id, "day": ivDay, "frames": frames.count,
+            "sessions": sessions.count, "enriched": enriched.count, "dropped": dropped,
+        ])
+        if enriched.isEmpty { return r }
+
+        // Active-events catalogue from the in-memory cache.
+        var fileCache = await loadAllFiles()
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC") ?? .current
-        let today = cal.startOfDay(for: Date())
-        let onlyDayStart = onlyDay.map { cal.startOfDay(for: $0) }
+        let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
+        let active: [EventBuilder.ActiveEvent] = fileCache.values.compactMap { entry in
+            guard !entry.file.eventTitle.isEmpty,
+                  let last = entry.file.occurrences.max(),
+                  last >= activeCutoff else { return nil }
+            return EventBuilder.ActiveEvent(
+                id: entry.relativePath,
+                title: entry.file.eventTitle,
+                summary: entry.file.eventSummary,
+                type: entry.file.eventType.isEmpty ? "experience" : entry.file.eventType,
+                tags: entry.file.tags,
+                lastOccurredOn: last
+            )
+        }
 
-        // Pre-load existing files once; we mutate this cache as the day-loop
-        // creates / appends to events.
-        var fileCache = try await loadAllFiles()
-        // 从 Events Processor pipeline 的 config 读 provider/model,确保用户在
-        // Settings 改完后 scheduler 跑 backfill 时立刻用上新设置。
-        let evCfg = ConfigStore.shared.current.scheduler.event
-        let builder = EventBuilder(provider: evCfg.resolvedProvider, model: evCfg.resolvedModel)
-
-        // Iterate oldest → newest so EventBuilder always has the most
-        // relevant active events from prior days available.
-        let dayCount = daysBack
-        var dayIndex = 0
-        for offset in stride(from: daysBack - 1, through: 0, by: -1) {
-            dayIndex += 1
-            guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
-
-            // Single-day restriction.
-            if let target = onlyDayStart, cal.startOfDay(for: day) != target { continue }
-
-            // Resumability: events/<yyyy-MM-dd>/ already populated → skip.
-            // Force a re-run with `rm -rf ~/.portrait/events/<day>`.
-            let dayDir = PortraitPaths.eventsDayDir(for: day)
-            if let existing = try? FileManager.default.contentsOfDirectory(atPath: dayDir.path),
-               existing.contains(where: { $0.hasSuffix(".md") }) {
-                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "skipped (already processed)"))
-                print("Day \(isoDay(day)): skipped — events/ already populated")
-                DiagLog.event("backfill.day.skipped", ctx: ["day": isoDay(day), "reason": "events dir already populated"])
-                continue
+        // LLM per-event clustering.
+        progress?(.init(phase: "LLM clustering \(enriched.count) sessions"))
+        let clustering: EventBuilder.DayClustering
+        do {
+            if let clusterer {
+                clustering = try await clusterer(day, enriched, active)
+            } else {
+                // 从 Events Processor pipeline 的 config 读 provider/model,Settings 改完
+                // 下一次就用上。
+                let evCfg = ConfigStore.shared.current.scheduler.event
+                clustering = try await EventBuilder(provider: evCfg.resolvedProvider, model: evCfg.resolvedModel)
+                    .clusterDay(date: day, sessions: enriched, activeEvents: active, onBatch: { i, n in
+                        progress?(.init(phase: "LLM clustering batch \(i)/\(n)",
+                                        unit: .llmBatch(index: i, count: n)))
+                    })
             }
+        } catch let e as BudgetExhaustedError {
+            // 撞额度不是"失败"——上抛让调度器标 budget_deferred 而非 failed，
+            // 不计入 retry_count。
+            throw e
+        } catch {
+            r.llmFailed = true
+            print("Interval \(iv.id): LLM clustering FAILED — \(error.localizedDescription) — nothing written")
+            // 真实原因只 print 到 stdout 的话,scheduler 只会记一条笼统的
+            // "event step reported failure",事后完全无从排查。
+            DiagLog.warn("backfill.interval.llm_failed", ctx: [
+                "interval": iv.id, "error": error.localizedDescription,
+            ])
+            progress?(.init(phase: "LLM failed: \(error.localizedDescription)"))
+            return r
+        }
 
-            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "reading frames"))
-            let frames = db.frames(on: day, limit: 5000)
-            totals.rawFrameCount += frames.count
-            if frames.isEmpty {
-                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "no frames"))
-                DiagLog.event("backfill.day.skipped", ctx: ["day": isoDay(day), "reason": "no frames"])
-                continue
+        // Materialise into the overlay. `sessionIndices` are 1-based into `enriched`.
+        let clusterCount = clustering.events.count
+        for (ci, ev) in clustering.events.enumerated() {
+            progress?(.init(phase: "writing event \(ci + 1)/\(clusterCount)",
+                            unit: .materialise(index: ci + 1, count: clusterCount)))
+            let members = ev.sessionIndices.compactMap { idx -> EventBuilder.EnrichedSession? in
+                let i = idx - 1
+                guard i >= 0, i < enriched.count else { return nil }
+                return enriched[i]
             }
+            if members.isEmpty { continue }
+            let frameIds = members.flatMap { $0.session.sourceFrameIds }
+            // 事件日期 = 成员帧的 attribute_day(区间钉死的偏移)。
+            guard let ds = IntervalSegmenter.attributeDay(
+                    frameTs: frameIds.compactMap { tsById[$0] },
+                    spans: members.map { span($0.session) }, tzOffsetMin: off),
+                  let eday = ProcessingLogStore.day(from: ds) else { continue }
 
-            // Tier 1 merge.
-            let rawEvents = frames.map { f in
-                Tier1Merger.RawEvent(
-                    timestamp: f.timestamp,
-                    appName: f.appName,
-                    windowName: f.windowName,
-                    browserURL: f.browserUrl,
-                    frameId: f.id
-                )
-            }
-            let sessions = Tier1Merger.merge(rawEvents)
-            totals.tier1SessionCount += sessions.count
-            if sessions.isEmpty { continue }
-
-            // Enrich + drop OCR-poor sessions (no OCR → nothing to summarise).
-            // maxOcrChars 2000→600:每个 session 的 OCR 前 ~600 字才有聚类信号(app
-            // 名 / 任务上下文),尾巴是重复噪音。session 主导 prompt,砍它直接把
-            // reasoning 模型在大 prompt 上的思考时间 + 额度都压下来(event 步太慢的
-            // 主因)。质量影响要跑几天对比 event 数 / dropped 率(下面那行日志)确认。
-            let minOcrChars = 60
-            let maxOcrChars = 600
-            var enriched: [EventBuilder.EnrichedSession] = []
-            for s in sessions {
-                let ocr = db.ocrText(forFrameIds: s.sourceFrameIds, maxChars: maxOcrChars)
-                if ocr.count < minOcrChars {
-                    totals.emptySessionCount += 1
+            let url: URL
+            if let je = ev.joinExisting, let entry = fileCache[je] {
+                // Re-run safety: frames already accounted for.
+                if !frameIds.isEmpty,
+                   entry.file.memberFrameIds.contains(where: frameIds.contains) {
+                    r.skippedSessionCount += 1
                     continue
                 }
-                enriched.append(EventBuilder.EnrichedSession(
-                    session: s, ocrSnippet: ocr, transcriptSnippet: ""
-                ))
+                // Join: +1 occurrence(这几个 session 的本地日), append frames.
+                // Title / summary / facets stay frozen at first creation.
+                var updated = entry.file
+                updated.recordOccurrence(on: eday)
+                updated.memberFrameIds.append(contentsOf: frameIds)
+                // 事件又活了 → 清空 distilledInto,让下次 distill 重新看到
+                // 它(增量 distill 的"改过"通道)。
+                updated.distilledInto = []
+                r.overlay.put(updated, at: entry.url)
+                fileCache[je] = .init(url: entry.url,
+                                      relativePath: entry.relativePath,
+                                      file: updated)
+                r.joinedSessionCount += 1
+                url = entry.url
+            } else {
+                url = createNewEvent(cluster: ev, frameIds: frameIds, day: eday,
+                                     overlay: &r.overlay, cache: &fileCache)
+                r.newEventCount += 1
             }
-            let dropped = sessions.count - enriched.count
-            print("Day \(isoDay(day)): \(sessions.count) sessions, \(enriched.count) enriched (OCR ≥ 60), \(dropped) dropped")
-            DiagLog.event("backfill.day.sessions", ctx: [
-                "day": isoDay(day), "frames": frames.count,
-                "sessions": sessions.count, "enriched": enriched.count, "dropped": dropped,
-            ])
-            if enriched.isEmpty { continue }
-
-            // Active-events catalogue from the in-memory cache.
-            let activeCutoff = cal.date(byAdding: .day, value: -activeWindowDays, to: day) ?? day
-            let active: [EventBuilder.ActiveEvent] = fileCache.values.compactMap { entry in
-                guard !entry.file.eventTitle.isEmpty,
-                      let last = entry.file.occurrences.max(),
-                      last >= activeCutoff else { return nil }
-                return EventBuilder.ActiveEvent(
-                    id: entry.relativePath,
-                    title: entry.file.eventTitle,
-                    summary: entry.file.eventSummary,
-                    type: entry.file.eventType.isEmpty ? "experience" : entry.file.eventType,
-                    tags: entry.file.tags,
-                    lastOccurredOn: last
-                )
-            }
-
-            // LLM per-event clustering.
-            progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM clustering \(enriched.count) sessions"))
-            let clustering: EventBuilder.DayClustering
-            do {
-                clustering = try await builder.clusterDay(
-                    date: day, sessions: enriched, activeEvents: active,
-                    onBatch: { i, n in
-                        progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day,
-                                        phase: "LLM clustering batch \(i)/\(n)",
-                                        unit: .llmBatch(index: i, count: n)))
-                    }
-                )
-            } catch let e as BudgetExhaustedError {
-                // 撞额度不是"失败"——上抛让调度器标 budget_deferred 而非 failed，
-                // 不计入 retry_count。整个 Backfill 中止。
-                throw e
-            } catch {
-                totals.llmFailedDays += 1
-                print("Day \(isoDay(day)): LLM clustering FAILED — \(error.localizedDescription) — nothing written")
-                // 真实原因只 print 到 stdout 的话,scheduler 只会记一条笼统的
-                // "event step reported failure",事后完全无从排查(2026-07 那次
-                // OAuth refresh 401 连炸 5 天就是这么被埋掉的)。
-                DiagLog.warn("backfill.day.llm_failed", ctx: [
-                    "day": isoDay(day), "error": error.localizedDescription,
-                ])
-                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day, phase: "LLM failed: \(error.localizedDescription)"))
-                continue
-            }
-
-            // Materialise. `sessionIndices` are 1-based into `enriched`.
-            let clusterCount = clustering.events.count
-            for (ci, ev) in clustering.events.enumerated() {
-                progress?(.init(dayIndex: dayIndex, dayCount: dayCount, day: day,
-                                phase: "writing event \(ci + 1)/\(clusterCount)",
-                                unit: .materialise(index: ci + 1, count: clusterCount)))
-                let members = ev.sessionIndices.compactMap { idx -> EventBuilder.EnrichedSession? in
-                    let i = idx - 1
-                    guard i >= 0, i < enriched.count else { return nil }
-                    return enriched[i]
-                }
-                if members.isEmpty { continue }
-                let frameIds = members.flatMap { $0.session.sourceFrameIds }
-
-                if let je = ev.joinExisting, let entry = fileCache[je] {
-                    // Re-run safety: frames already accounted for.
-                    if !frameIds.isEmpty,
-                       entry.file.memberFrameIds.contains(where: frameIds.contains) {
-                        totals.skippedSessionCount += 1
-                        continue
-                    }
-                    // Cross-day join: +1 occurrence, append frames. Title /
-                    // summary / facets stay frozen at first creation.
-                    var updated = entry.file
-                    updated.recordOccurrence(on: day)
-                    updated.memberFrameIds.append(contentsOf: frameIds)
-                    // 事件又活了 → 清空 distilledInto,让下次 distill 重新看到
-                    // 它(增量 distill 的"改过"通道)。
-                    updated.distilledInto = []
-                    try PortraitFileIO.write(updated, to: entry.url)
-                    fileCache[je] = .init(url: entry.url,
-                                          relativePath: entry.relativePath,
-                                          file: updated)
-                    totals.joinedSessionCount += 1
-                } else {
-                    try createNewEvent(cluster: ev, members: members,
-                                       day: day, cache: &fileCache)
-                    totals.newEventCount += 1
-                }
-            }
-            totals.skippedSessionCount += clustering.skippedIndices.count
+            if !r.touched.contains(url) { r.touched.append(url) }
+            r.days.insert(ds)
         }
-
-        // Weight pass across the events tree.
-        if !skipWeightPass {
-            await weightPass()
-        }
+        r.skippedSessionCount += clustering.skippedIndices.count
 
         // 归档不在这里跑 —— 它动的是 portrait/ 文件，挪到了
         // PortraitDistiller.distill 之后。
+        return r
+    }
 
-        return Result(
-            daysScanned: daysBack,
-            rawFrameCount: totals.rawFrameCount,
-            tier1SessionCount: totals.tier1SessionCount,
-            emptySessionCount: totals.emptySessionCount,
-            llmFailedDays: totals.llmFailedDays,
-            newEventCount: totals.newEventCount,
-            joinedSessionCount: totals.joinedSessionCount,
-            skippedSessionCount: totals.skippedSessionCount
-        )
+    /// 成员帧与 `frameIds` 相交的事件文件(按路径排序)。event 步早已成功、只剩 impact
+    /// 要重试时,用它找回本区间新建与被 join 的事件。
+    static func eventFiles(withAnyFrameIn frameIds: Set<Int64>) async -> [URL] {
+        guard !frameIds.isEmpty else { return [] }
+        return await loadAllFiles().values
+            .filter { $0.file.memberFrameIds.contains(where: frameIds.contains) }
+            .map(\.url)
+            .sorted { $0.path < $1.path }
+    }
+
+    nonisolated private static func ms(_ d: Date) -> Int64 {
+        Int64((d.timeIntervalSince1970 * 1000).rounded())
     }
 
     // MARK: - File materialisation
@@ -288,34 +265,22 @@ enum Backfill {
         var file: PortraitFile
     }
 
-    private struct Counters {
-        var rawFrameCount = 0
-        var tier1SessionCount = 0
-        var emptySessionCount = 0
-        var llmFailedDays = 0
-        var newEventCount = 0
-        var joinedSessionCount = 0
-        var skippedSessionCount = 0
-    }
-
-    /// Build and write a new PortraitFile from a clustered event.
+    /// Build a new PortraitFile from a clustered event into the overlay; returns its URL.
     private static func createNewEvent(
         cluster: EventBuilder.ClusteredEvent,
-        members: [EventBuilder.EnrichedSession],
+        frameIds: [Int64],
         day: Date,
+        overlay: inout EventOverlay,
         cache: inout [String: Entry]
-    ) throws {
-        let frameIds = members.flatMap { $0.session.sourceFrameIds }
-
+    ) -> URL {
         let filename = makeFilename(title: cluster.title, day: day)
         // Events live under events/<yyyy-MM-dd>/. Routing into portrait
         // subdirs is the Distiller's job, based on type + portraitFacets.
         let url = PortraitPaths.eventsDayDir(for: day).appendingPathComponent(filename)
-        let finalURL = uniqueURL(url)
+        let finalURL = uniqueURL(url, overlay: overlay)
 
-        // `created` = the event's day (UTC startOfDay), aligned with
-        // `occurrences`. Using a raw session timestamp instead can land on
-        // the next calendar day (UTC) and make created > last occurrence.
+        // `created` = the event's local day(按 UTC 零点存,文件里写 yyyy-MM-dd),
+        // aligned with `occurrences`.
         //
         // No placeholder impact — a new event is `unscored` until the LLM
         // (ImpactScorer) gives it a real score. impact starts at the 0.0
@@ -337,10 +302,11 @@ enum Backfill {
         file.occurrences = [PortraitFile.truncateToDay(day)]
         file.impactSource = "unscored"
 
-        try PortraitFileIO.write(file, to: finalURL)
+        overlay.put(file, at: finalURL, isNew: true)
         let rel = finalURL.path
             .replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
         cache[rel] = Entry(url: finalURL, relativePath: rel, file: file)
+        return finalURL
     }
 
     // MARK: - Title/file helpers
@@ -384,14 +350,18 @@ enum Backfill {
         return trimmed.isEmpty ? "event" : trimmed
     }
 
-    private static func uniqueURL(_ url: URL) -> URL {
-        if !FileManager.default.fileExists(atPath: url.path) { return url }
+    /// 盘上已有或本区间 overlay 里已占用的路径都算重名。
+    private static func uniqueURL(_ url: URL, overlay: EventOverlay) -> URL {
+        func taken(_ u: URL) -> Bool {
+            overlay.contains(u) || FileManager.default.fileExists(atPath: u.path)
+        }
+        if !taken(url) { return url }
         let dir = url.deletingLastPathComponent()
         let base = url.deletingPathExtension().lastPathComponent
         let ext = url.pathExtension
         for n in 2...100 {
             let candidate = dir.appendingPathComponent("\(base)_\(n).\(ext)")
-            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            if !taken(candidate) { return candidate }
         }
         return url    // give up; will overwrite
     }
@@ -430,8 +400,7 @@ enum Backfill {
         return out
     }
 
-    /// 非 private —— MemoryScheduler.runEventJob 逐天循环传 skipWeightPass
-    /// 后,在 job 末尾单独调一次(跟 rebalance 同模式)。
+    /// MemoryScheduler.runEventJob 在所有区间跑完后调一次(跟 rebalance 同模式)。
     nonisolated static func weightPass() async {
         await Task.detached(priority: .userInitiated) {
             weightPassSync()
@@ -472,5 +441,83 @@ enum Backfill {
                 continue
             }
         }
+    }
+}
+
+/// 一个区间 event 步的写入:先攒在内存里,成功才落盘。落盘前先写撤销清单(新建了
+/// 哪些文件、被 join 的文件原文),落盘中途出错当场撤销;进程在落盘后、台账记
+/// complete 前死掉,恢复时按清单撤销。只动本区间碰过的文件。
+struct EventOverlay {
+    private(set) var order: [URL] = []
+    private var files: [URL: PortraitFile] = [:]
+    private var created: Set<URL> = []
+
+    var isEmpty: Bool { order.isEmpty }
+    func contains(_ url: URL) -> Bool { files[url] != nil }
+
+    mutating func put(_ file: PortraitFile, at url: URL, isNew: Bool = false) {
+        if files[url] == nil { order.append(url) }
+        files[url] = file
+        if isNew { created.insert(url) }
+    }
+
+    /// 撤销清单:路径相对 events/。
+    private struct Journal: Codable {
+        var created: [String]
+        var originals: [String: Data]
+    }
+
+    static func journalURL(intervalId: String) -> URL {
+        Storage.rootURL.appendingPathComponent(".staging/event_intervals", isDirectory: true)
+            .appendingPathComponent(intervalId.replacingOccurrences(of: ":", with: "_") + ".json")
+    }
+
+    private static func rel(_ url: URL) -> String {
+        url.path.replacingOccurrences(of: Storage.eventsDir.path + "/", with: "")
+    }
+
+    /// 写撤销清单 → 逐个落盘;中途出错按清单撤销后抛出。
+    func commit(intervalId: String) throws {
+        guard !order.isEmpty else { return }
+        var j = Journal(created: [], originals: [:])
+        for url in order {
+            if created.contains(url) { j.created.append(Self.rel(url)) }
+            else { j.originals[Self.rel(url)] = try Data(contentsOf: url) }
+        }
+        let ju = Self.journalURL(intervalId: intervalId)
+        try FileManager.default.createDirectory(at: ju.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try JSONEncoder().encode(j).write(to: ju, options: .atomic)
+        do {
+            for url in order {
+                guard let f = files[url] else { continue }
+                try PortraitFileIO.write(f, to: url)
+            }
+        } catch {
+            Self.undo(intervalId: intervalId)
+            throw error
+        }
+    }
+
+    /// 按撤销清单还原本区间的写入(新建的删、被 join 的恢复原文),再删清单。
+    /// 没有清单 → 什么都不动。
+    static func undo(intervalId: String) {
+        let ju = journalURL(intervalId: intervalId)
+        guard let data = try? Data(contentsOf: ju),
+              let j = try? JSONDecoder().decode(Journal.self, from: data) else { return }
+        let fm = FileManager.default
+        for r in j.created {
+            try? fm.removeItem(at: Storage.eventsDir.appendingPathComponent(r))
+        }
+        for (r, original) in j.originals {
+            try? original.write(to: Storage.eventsDir.appendingPathComponent(r), options: .atomic)
+        }
+        try? fm.removeItem(at: ju)
+        print("[Backfill] undo \(intervalId): removed \(j.created.count) new event(s), restored \(j.originals.count) joined event(s)")
+    }
+
+    /// 本区间 event 步已记为 complete:清单作废。
+    static func clearJournal(intervalId: String) {
+        try? FileManager.default.removeItem(at: journalURL(intervalId: intervalId))
     }
 }

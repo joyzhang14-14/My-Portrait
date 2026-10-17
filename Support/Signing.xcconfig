@@ -29,3 +29,11 @@ CODE_SIGN_STYLE  = Automatic
 DEVELOPMENT_TEAM = VYHNX2Y2AL
 
 #include? "Signing.local.xcconfig"
+
+// Premium (remote compute) server address baked into Info.plist as `PremiumServerURL`.
+// Empty in open-source builds (users enter the address in Connections → Premium). To bake one in,
+// create the gitignored `Support/Premium.local.xcconfig` with
+//     PREMIUM_SERVER_URL = https:/$()/your-host.example
+// (`$()` keeps xcconfig from reading `//` as a comment), then re-run `xcodegen generate`.
+PREMIUM_SERVER_URL =
+#include? "Premium.local.xcconfig"

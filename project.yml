@@ -87,6 +87,15 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
+      # Premium 夜间导出 helper 的 agent plist —— 拷进
+      # .app/Contents/Library/LaunchAgents/(SMAppService.agent 要求在 bundle 内)。
+      # 可执行文件是 PortraitPremiumHelper(BundleProgram = Contents/MacOS/PortraitPremiumHelper),
+      # 由它拉起 app 本体跑封区间。
+      - path: Support/com.joyzhang.myportrait.premium-export.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     dependencies:
       # 图谱物理静态库(Debug 也 -O,见上)。静态链接,无需 embed/签名。
       - target: GraphPhysics
@@ -120,6 +129,14 @@ targets:
         copy:
           destination: executables
           subpath: ""
+      # 封区间 LaunchAgent 的可执行体 —— 同样嵌进 .app/Contents/MacOS/、同一身份重签。
+      # BundleProgram 指的就是这里的 Contents/MacOS/PortraitPremiumHelper。
+      - target: PortraitPremiumHelper
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+          subpath: ""
     # DEVELOPMENT_TEAM 通过 xcconfig 注入,不在 settings.base 里硬编。
     # base 里的 build settings 优先级高于 xcconfig,会覆盖掉它,所以这里必须
     # 用 configFiles 而不是 base。Signing.xcconfig 里有默认 team,contributor
@@ -131,16 +148,14 @@ targets:
       path: Support/Info.plist
       properties:
         CFBundleDisplayName: My Portrait
+        # Premium 默认地址:Signing.xcconfig 里默认空,Premium.local.xcconfig(不进 git)填值。
+        PremiumServerURL: $(PREMIUM_SERVER_URL)
         CFBundleName: MyPortrait
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "15.0"
         NSHighResolutionCapable: true
         NSMicrophoneUsageDescription: My Portrait records microphone audio to build your personal activity timeline.
-        # macOS 14+ (Sonoma) 起 Calendar 权限分 write-only / full,我们要读
-        # 事件给 LLM 当上下文,得申请 full access。第一次调用
-        # EKEventStore.requestFullAccessToEvents 时系统弹这个文案。
-        NSCalendarsFullAccessUsageDescription: My Portrait reads your calendar so AI cronJobs and timeline context can reason about your meetings and schedule.
         # 屏幕录制 —— ScreenCaptureKit / CGRequestScreenCaptureAccess 用。
         # 公证审查必查;缺这条 macOS 14+ 拒绝授权。
         NSScreenCaptureUsageDescription: My Portrait captures screen contents to extract text (OCR) for your personal activity timeline. All processing happens on this Mac.
@@ -236,6 +251,36 @@ targets:
         #     application-identifier(受限 entitlement,无 profile 不授权)
         CODE_SIGN_ENTITLEMENTS: Support/PortraitSleepHelper.entitlements
         #   · 关掉 Debug 基础注入 → 去掉 get-task-allow(可调试的 root,同样不授权)
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
+
+  # ── 封区间 LaunchAgent 的可执行体(用户级,见 Support/com.joyzhang.myportrait.premium-export.plist)──
+  # 只负责拉起同目录的 app 本体跑 `--premium-export --seal-check`。单独成程序、源码稳定,
+  # build.sh 按源码哈希复用已签名二进制,cdhash 跨版本不变(BTM 把启动约束锁在它上面)。
+  # 签名配置照 PortraitSleepHelper:同一 Signing.xcconfig、零 entitlement、Info.plist 烤进 binary。
+  PortraitPremiumHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/PortraitPremiumHelper
+    configFiles:
+      Debug: Support/Signing.xcconfig
+      Release: Support/Signing.xcconfig
+    info:
+      path: Support/PortraitPremiumHelper-Info.plist
+      properties:
+        CFBundleIdentifier: com.joyzhang.myportrait.PremiumHelper
+        CFBundleInfoDictionaryVersion: "6.0"
+        CFBundlePackageType: APPL
+    settings:
+      base:
+        PRODUCT_NAME: PortraitPremiumHelper
+        PRODUCT_BUNDLE_IDENTIFIER: com.joyzhang.myportrait.PremiumHelper
+        SWIFT_VERSION: "6.0"
+        ARCHS: arm64
+        ENABLE_HARDENED_RUNTIME: true
+        CREATE_INFOPLIST_SECTION_IN_BINARY: "YES"
+        SKIP_INSTALL: "NO"
+        CODE_SIGN_ENTITLEMENTS: Support/PortraitPremiumHelper.entitlements
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS: "NO"
 
   # MyPortraitTests target 已摘除 —— Tests/ 整个不进仓库(见 .gitignore),

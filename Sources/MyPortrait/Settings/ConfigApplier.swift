@@ -32,6 +32,7 @@ final class ConfigApplier {
     private var lastShowDockIcon: Bool? = nil
     private var lastAppName: String = ConfigApplier.unapplied
     private var lastLaunchAtLogin: Bool? = nil
+    private var premiumAgentSynced = false
 
     private init() {}
 
@@ -59,6 +60,7 @@ final class ConfigApplier {
             _ = ConfigStore.shared.display.showDockIcon
             _ = ConfigStore.shared.display.appName
             _ = ConfigStore.shared.general.launchAtLogin
+            _ = ConfigStore.shared.scheduler
         } onChange: { [weak self] in
             Task { @MainActor in
                 self?.applyAll()
@@ -142,6 +144,12 @@ final class ConfigApplier {
         if lastLaunchAtLogin != general.launchAtLogin {
             lastLaunchAtLogin = general.launchAtLogin
             applyLaunchAtLogin(general.launchAtLogin)
+        }
+
+        // 封区间 helper:启动时注册一次(本机链和 Premium 都靠它封区间)。
+        if !premiumAgentSynced {
+            premiumAgentSynced = true
+            PremiumNightlyAgent.sync()
         }
     }
 

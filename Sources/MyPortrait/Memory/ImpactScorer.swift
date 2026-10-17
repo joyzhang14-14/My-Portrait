@@ -64,30 +64,40 @@ final class ImpactScorer {
         self.perBatchTimeout = perBatchTimeout
     }
 
-    /// Rescore every non-archived `unscored` event under `root`. Returns
-    /// counts + duration. `progress` is called on the main actor between
-    /// batches.
-    ///
-    /// `root` defaults to the whole events tree; the scheduler passes a single
-    /// day's directory (`events/<yyyy-MM-dd>/`) so the impact step is per-day.
+    /// Rescore every non-archived event under `root` (dev `--rescore`: the whole
+    /// events tree). Returns counts + duration. `progress` is called on the main
+    /// actor between batches.
     func rescoreAll(
         root: URL = Storage.eventsDir,
         progress: ((Progress) -> Void)? = nil
     ) async throws -> Result {
         let napGuard = AppNapGuard.acquire(reason: "Impact rescoring")
         defer { napGuard.release() }
-        return try await rescoreAllImpl(root: root, progress: progress)
+        return try await rescoreImpl(candidates: try await collectCandidates(root: root), progress: progress)
     }
 
-    private func rescoreAllImpl(
-        root: URL, progress: ((Progress) -> Void)?
+    /// 给定的事件文件(调度器传一个区间新建与被 join 的事件),按路径排序,跳过读不出
+    /// 或已归档的。
+    func rescore(
+        files: [URL],
+        progress: ((Progress) -> Void)? = nil
+    ) async throws -> Result {
+        let napGuard = AppNapGuard.acquire(reason: "Impact rescoring")
+        defer { napGuard.release() }
+        let candidates: [(URL, PortraitFile)] = Set(files).sorted { $0.path < $1.path }.compactMap { url in
+            guard let f = try? PortraitFileIO.read(from: url), f.archivedAt == nil else { return nil }
+            return (url, f)
+        }
+        return try await rescoreImpl(candidates: candidates, progress: progress)
+    }
+
+    private func rescoreImpl(
+        candidates: [(URL, PortraitFile)], progress: ((Progress) -> Void)?
     ) async throws -> Result {
         let start = Date()
 
-        // Collect every (url, file) under `root` that is NOT archived.
         // Backfill writes event files as `unscored`; this rescore gives them a
-        // real impact. Sequentially to keep memory tiny.
-        let candidates = try await collectCandidates(root: root)
+        // real impact.
         guard !candidates.isEmpty else {
             return Result(scoredCount: 0, failedCount: 0, elapsed: 0)
         }
@@ -125,7 +135,7 @@ final class ImpactScorer {
                 )
             } catch let e as BudgetExhaustedError {
                 // 撞额度：中止整个 rescore，调度器据此标 budget_deferred。
-                // 已写入的批次保留;重试按设计是**整天重评**(同一天的分数
+                // 已写入的批次保留;重试按设计是**整区间重评**(同一区间的分数
                 // 必须来自同一轮校准,不做增量补评 —— 避免两轮 LLM 标准不一致),
                 // 重评不清 rebalanceCount,见 apply 处注释。
                 throw e
@@ -134,7 +144,7 @@ final class ImpactScorer {
                 // turn id)会 resume 下一轮的 waiter,把 batch N 的分数按
                 // id→index 写进 batch N+1 的事件文件(off-by-one 写坏数据)。
                 // 不能 continue 复用同一 agent —— 中止整轮,已写入的批次
-                // 保留,调度器稍后重试时整天重评(见上)。
+                // 保留,调度器稍后重试时整区间重评(见上)。
                 throw ScorerError.agentTimeout
             } catch {
                 failed += batch.count
@@ -150,7 +160,7 @@ final class ImpactScorer {
                 let clamped = PortraitFile.clampImpact(s.impact)
                 file.impact = clamped
                 file.rawImpact = clamped         // preserve LLM's original
-                // ⚠️ 只在首评时置 0:整天重评(budget_deferred / 失败重试)会重写
+                // ⚠️ 只在首评时置 0:整区间重评(budget_deferred / 失败重试)会重写
                 // 已评分文件,清零会把 MemoryBudget 用 maxRebalances 冻结的事件
                 // 重新解冻 —— 每重试一次,已稳定的 impact 被多扰动一轮,额度紧张
                 // 的大日子变成反复解冻烧额度的循环。保留已有计数。
@@ -171,7 +181,7 @@ final class ImpactScorer {
                         scoredCount: scored,
                         totalCount: candidates.count))
 
-        // rebalance 不在这里跑 —— rescoreAll 被 runEventJob 按天调用（一次
+        // rebalance 不在这里跑 —— rescore 被 runEventJob 按区间调用（一次
         // event 处理调 N 次），放这里会让 rebalance 跑 N 遍、几次就把
         // rebalance_count 烧到 maxRebalances 冻结。改成 runEventJob 末尾
         // 整个跑完只调一次。

@@ -263,10 +263,6 @@ struct CronJob: Identifiable, Hashable, Codable {
     var isEnabled: Bool
     var runs: [CronJobRun]
     var lastRunAt: Date?
-    /// Integration ids (see `IntegrationRegistry`) this cronJob uses. At run
-    /// time their credentials are injected into the agent process as env
-    /// vars. Old stored cronJobs without this key decode to `[]`.
-    var connections: [String] = []
     /// 用户在 banner 上点 Mute / 详情面板 toggle 标这条 = 任务照常跑,
     /// 但 NotificationCenterService 拦掉它的 .cronJobRun 通知。老 cron_job.md
     /// 没这字段时 parseMarkdown 默认 false。
@@ -274,11 +270,11 @@ struct CronJob: Identifiable, Hashable, Codable {
 
     init(id: UUID = UUID(), name: String, prompt: String, window: ContextWindow,
          schedule: Cadence = .everyMinutes(60), isEnabled: Bool = true,
-         runs: [CronJobRun] = [], lastRunAt: Date? = nil, connections: [String] = [],
+         runs: [CronJobRun] = [], lastRunAt: Date? = nil,
          muted: Bool = false) {
         self.id = id; self.name = name; self.prompt = prompt; self.window = window
         self.schedule = schedule; self.isEnabled = isEnabled
-        self.runs = runs; self.lastRunAt = lastRunAt; self.connections = connections
+        self.runs = runs; self.lastRunAt = lastRunAt
         self.muted = muted
     }
 }

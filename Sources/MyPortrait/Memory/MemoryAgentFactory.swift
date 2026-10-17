@@ -10,6 +10,8 @@ enum MemoryAgentFactory {
         switch provider {
         case .claudeCode:
             return ClaudeCodeAgent(model: model, oneshot: true)
+        case .premium:
+            fatalError("Premium: offloaded chain must not run locally")
         default:
             return try PiAgent(provider: provider, model: model)
         }

@@ -71,7 +71,8 @@ struct PipelineProviderPicker: View {
                 }
                 // 没配置 model(="")时 picker 留空白(不放占位项);pipeline 侧
                 // resolvedModel 把空串映射到 provider.defaultModel。
-                if selectedProvider != nil {
+                // Premium 用什么模型由服务器定,不显示模型行。
+                if let p = selectedProvider, p != .premium {
                     row(usesLightModel ? "Main model (heavy tasks)" : "Model") {
                         Picker("", selection: cfg.binding(pipeline.appending(path: \.model))) {
                             ForEach(models, id: \.self) { m in Text(m).tag(m) }
@@ -114,10 +115,12 @@ struct PipelineProviderPicker: View {
         case .openaiBYOK:  return "OpenAI (API key)"
         case .anthropic:   return "Anthropic (API key)"
         case .ollama:      return "Ollama (local)"
+        case .localModel:  return "Local Model"
         case .gemini:      return "Gemini (API key)"
         case .perplexity:  return "Perplexity (API key)"
         case .deepseek:    return "DeepSeek (API key)"
         case .claudeCode:  return "Claude Code CLI (Pro / Max subscription)"
+        case .premium:    return "My Portrait Premium"
         }
     }
 }

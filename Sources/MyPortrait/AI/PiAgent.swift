@@ -102,6 +102,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
          apiKeyRefOverride: String? = nil,
          extraEnv: [String: String] = [:],
          sessionPath: String? = nil) throws {
+        precondition(provider != .premium, "Premium: offloaded chain must not run locally")
         guard BunInstaller.isInstalled else { throw SpawnError.missingBun }
         guard PiInstaller.isInstalled else { throw SpawnError.missingPi }
 

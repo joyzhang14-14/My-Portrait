@@ -604,7 +604,7 @@ private struct ConnectAIStep: View {
             // 内嵌的再铺一张会在接缝处又起一次渐变 + 又亮一次左上角 glow,
             // 看着像两块颜色不同的画布拼在一起。
             ConnectionsView(
-                categoryFilter: [.ai, .local],
+                categoryFilter: [.ai, .local, .earlyAccess],
                 showsHeader: false,
                 showsBackground: false,
                 showsSearch: false
@@ -750,8 +750,8 @@ private struct MemoryProviderStep: View {
                 .frame(maxWidth: 280)
             }
             // 选了有效 provider 才显示 model 行。不放 "Provider default" 占位项
-            //(没配置 → picker 留空白)。
-            if selectedProvider != nil {
+            //(没配置 → picker 留空白)。Premium 的模型由服务器定,不显示。
+            if let p = selectedProvider, p != .premium {
                 Divider().overlay(Color.primary.opacity(0.08))
                 row("Main model", info: "Heavy tasks: impact scoring, event clustering, portrait distillation.") {
                     Picker("", selection: modelBinding) {
@@ -800,10 +800,12 @@ private struct MemoryProviderStep: View {
         case .openaiBYOK:  return "OpenAI (API key)"
         case .anthropic:   return "Anthropic (API key)"
         case .ollama:      return "Ollama (local)"
+        case .localModel:  return "Local Model"
         case .gemini:      return "Gemini (API key)"
         case .perplexity:  return "Perplexity (API key)"
         case .deepseek:    return "DeepSeek (API key)"
         case .claudeCode:  return "Claude Code CLI"
+        case .premium:    return "My Portrait Premium"
         }
     }
 }
