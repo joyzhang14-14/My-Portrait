@@ -1688,7 +1688,8 @@ struct MemorySettingsView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
-                    Text(entry.pipeline)
+                    // Premium 导入的结果在标题后标出来。
+                    Text(entry.trigger == PremiumExchange.integrationId ? "\(entry.pipeline) (Premium)" : entry.pipeline)
                         .font(.system(size: 11, weight: .medium))
                 }
                 HStack(spacing: 4) {
@@ -1696,7 +1697,7 @@ struct MemorySettingsView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                     Text("·").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Text(style.label + (entry.reason.map { " · \($0)" } ?? ""))
+                    Text(style.label)
                         .font(.system(size: 10))
                         .foregroundStyle(style.color)
                 }
