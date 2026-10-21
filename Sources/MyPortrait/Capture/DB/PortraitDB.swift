@@ -174,11 +174,14 @@ struct FrameRecord: Sendable {
     let deviceName: String       // monitor id，P1 = "main"
     let snapshotPath: String     // JPG 绝对路径
     let captureTrigger: String   // P1 = "timer"
+    let visibleApp: String?      // 画面最前普通窗口所属 app(见 FrontReading)
+    let focusState: String?      // FrameFocusState.rawValue
 
     init(
         timestampMs: Int64, appName: String, windowName: String?,
         browserUrl: String?, focused: Bool, deviceName: String,
-        snapshotPath: String, captureTrigger: String
+        snapshotPath: String, captureTrigger: String,
+        visibleApp: String? = nil, focusState: String? = nil
     ) {
         self.timestampMs = timestampMs
         self.appName = appName
@@ -188,6 +191,8 @@ struct FrameRecord: Sendable {
         self.deviceName = deviceName
         self.snapshotPath = snapshotPath
         self.captureTrigger = captureTrigger
+        self.visibleApp = visibleApp
+        self.focusState = focusState
     }
 }
 

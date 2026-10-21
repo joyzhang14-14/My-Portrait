@@ -157,14 +157,43 @@ actor FocusProbe {
         cached
     }
 
-    /// 即时读系统**最前台 app**(名 + bundleId)。`NSWorkspace.frontmostApplication`
-    /// 由系统实时维护,**无 refresh 节流 / AX 遍历延迟**。采集帧用它校正 active app:
-    /// 缓存 `FocusInfo` 靠 didActivateApplication 通知刷新,会滞后于实时截图,切换
-    /// 瞬间会出现"画面是 B、缓存还是 A"。
-    func liveFrontmostApp() async -> (name: String, bundleId: String?)? {
+    /// 同一时刻读两个前台来源(一次主线程跳转内读完,两边时间尽量贴近):
+    ///   - 激活 app:`NSWorkspace.frontmostApplication`,菜单栏显示的就是它;切换时
+    ///     比画面晚约 1s
+    ///   - 画面最前 app:`CGWindowList` 里最前面的 layer-0 窗口的所属进程,和截图像素
+    ///     同源;但切换动画期间会被别的 app 的辅助窗口骗(实测 Chrome 工具栏浮层)
+    /// 判读规则见 `FrontReading.isSettled`。实测数据:Tests/investigationResults/frontapp-probe/。
+    func liveFront() async -> FrontReading {
         await MainActor.run {
-            guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-            return (app.localizedName ?? "Unknown", app.bundleIdentifier)
+            let active = NSWorkspace.shared.frontmostApplication
+            let activePid = active?.processIdentifier ?? -1
+            let windows = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+            ) as? [[String: Any]] ?? []
+            var visiblePid: pid_t?
+            var visibleOwner: String?
+            var activeHasWindow = false
+            for w in windows {   // 前 → 后排序
+                guard (w[kCGWindowLayer as String] as? Int) == 0,
+                      let pid = w[kCGWindowOwnerPID as String] as? pid_t else { continue }
+                if visiblePid == nil {
+                    visiblePid = pid
+                    visibleOwner = w[kCGWindowOwnerName as String] as? String
+                }
+                if pid == activePid { activeHasWindow = true; break }
+            }
+            // 名字统一取 localizedName,和 app_name 列同一口径;取不到再退回窗口所属名。
+            let visibleName = visiblePid.flatMap {
+                NSRunningApplication(processIdentifier: $0)?.localizedName
+            } ?? visibleOwner
+            return FrontReading(
+                activeName: active?.localizedName ?? "Unknown",
+                activeBundleId: active?.bundleIdentifier,
+                activePid: activePid,
+                visibleName: visibleName,
+                visiblePid: visiblePid,
+                activeHasWindow: activeHasWindow
+            )
         }
     }
 
@@ -523,6 +552,39 @@ private let titleChangedCallback: AXObserverCallback = { _, _, _, refcon in
     let box = Unmanaged<FocusTitleObserverBox>.fromOpaque(refcon).takeUnretainedValue()
     guard let probe = box.probe else { return }
     Task { await probe.refresh() }
+}
+
+/// 一次前台读数(见 `FocusProbe.liveFront()`)。
+struct FrontReading: Equatable, Sendable {
+    /// 激活 app(NSWorkspace)。
+    let activeName: String
+    let activeBundleId: String?
+    let activePid: pid_t
+    /// 画面最前面的普通窗口所属 app(CGWindowList);屏上没有普通窗口时为 nil。
+    let visibleName: String?
+    let visiblePid: pid_t?
+    /// 激活 app 在屏上有没有自己的普通窗口。最小化 / 关窗 / Finder 无窗口时为 false。
+    let activeHasWindow: Bool
+
+    /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换)。
+    /// 激活 app 屏上有窗口却和画面最前不是同一个 → 正在切换,两边都不可信。
+    var isSettled: Bool { visiblePid == activePid || !activeHasWindow }
+}
+
+/// 帧的焦点状态,写进 `frames.focus_state`。
+enum FrameFocusState: String, Sendable {
+    /// 激活 app = 画面最前 app。
+    case normal
+    /// 截图期间前台在变(前后两次读数不同,或任一次处于切换中)。app_name 不可信。
+    case switching
+    /// 激活 app 没有窗口,画面内容属于 `visible_app`。app_name 仍是激活 app(菜单栏)。
+    case noWindow = "no_window"
+
+    /// 截图前后各读一次,任何变化都算切换。
+    static func classify(before: FrontReading, after: FrontReading) -> FrameFocusState {
+        guard before == after, after.isSettled else { return .switching }
+        return after.visiblePid == after.activePid ? .normal : .noWindow
+    }
 }
 
 public struct FocusInfo: Equatable, Sendable {

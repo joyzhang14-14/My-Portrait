@@ -22,6 +22,8 @@ struct FrameRow: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var ocrConfidence: Double?
     var textSource: String?
     var createdAtMs: Int64
+    var visibleApp: String? = nil
+    var focusState: String? = nil
 
     static let databaseTableName = "frames"
 

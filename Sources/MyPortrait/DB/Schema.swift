@@ -1119,6 +1119,15 @@ enum DBSchema {
             }
         }
 
+        // 帧的前台判定(10-20 update)。app_name 仍是激活 app(菜单栏);
+        //   visible_app = 画面最前普通窗口所属 app;
+        //   focus_state = normal / switching / no_window,语义见 FrameFocusState。
+        //   存量帧两列为 NULL。
+        m.registerMigration("v45_frames_focus_state") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN visible_app TEXT")
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN focus_state TEXT")
+        }
+
         return m
     }
 }

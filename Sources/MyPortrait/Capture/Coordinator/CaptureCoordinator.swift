@@ -43,6 +43,12 @@ actor CaptureCoordinator {
     private var lastCaptureAt: Date?
     /// DRM 命中时为 true —— captureOneFrame 全部跳过。
     private var drmActive: Bool = false
+    /// 切换补拍任务(见 scheduleSettleCapture)。同一时间最多一个。
+    private var settleTask: Task<Void, Never>?
+
+    /// 切换补拍:最多等多久让前台读数稳定。实测切换分歧最长 2.9s。
+    private let settleTimeoutMs = 3_000
+    private let settlePollMs = 100
 
     /// 帧入库事件输出流。stop() 会 finish 它;coordinator 被 Services 跨 capture
     /// off/on toggle 复用,故 start() 每次重建(镜像 EventSources/DRMWatcher),否则
@@ -178,9 +184,11 @@ actor CaptureCoordinator {
         captureTask?.cancel()
         drmTask?.cancel()
         sleepWakeTask?.cancel()
+        settleTask?.cancel()
         captureTask = nil
         drmTask = nil
         sleepWakeTask = nil
+        settleTask = nil
 
         await drmWatcher.stop()
         await sleepWakeBox.stop()
@@ -306,7 +314,15 @@ actor CaptureCoordinator {
         //    打字两路按时间对齐,少一帧就是时间轴上少一段。命中的窗口由
         //    ScreenCaptureService 在 SCK content filter 里排除(content
         //    masking:帧照拍,那个窗口在帧里被抠掉)。
+        //    截图前后各读一次前台(激活 app + 画面最前 app),判这帧的焦点状态。
+        //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
+        let frontBefore = await focus.liveFront()
         let image = try await screen.captureMainDisplay()
+        let front = await focus.liveFront()
+        let focusState = FrameFocusState.classify(before: frontBefore, after: front)
+        if focusState == .switching, trigger != .switchSettle {
+            scheduleSettleCapture()
+        }
 
         // 5. 去重。
         if !force, !comparer.shouldKeep(image, now: now) {
@@ -316,14 +332,12 @@ actor CaptureCoordinator {
 
         lastCaptureAt = now
 
-        // 5b. active app 即时校正:focusInfo 来自 FocusProbe 缓存,靠 app 切换通知
-        //     刷新(节流 + 主线程 AX 遍历),滞后于实时截图 —— 切换瞬间会"画面是 B、
-        //     记录还是 A"。frontmostApplication 系统实时维护,据它校正 app 名/图标;
-        //     若确实切换了,旧的 windowTitle/url/axText 属于上一个 app,一并作废
-        //     (宁可空也别张冠李戴,下一帧缓存追上就有了)。
+        // 5b. app 名取截图后的激活 app。focusInfo 是 FocusProbe 缓存(通知刷新,有节流),
+        //     会落后于激活 app;名字对不上或正在切换时,缓存里的 windowTitle/url/axText
+        //     不属于这帧,一并作废(宁可空也别张冠李戴)。
         var recordFocus = focusInfo
-        if let live = await focus.liveFrontmostApp(), live.name != focusInfo.appName {
-            recordFocus = FocusInfo(appName: live.name, bundleId: live.bundleId,
+        if front.activeName != focusInfo.appName || focusState == .switching {
+            recordFocus = FocusInfo(appName: front.activeName, bundleId: front.activeBundleId,
                                     windowTitle: nil, browserUrl: nil, axText: nil,
                                     axIdentifier: nil, isFocused: true)
         }
@@ -364,7 +378,9 @@ actor CaptureCoordinator {
             focused: recordFocus.isFocused,
             deviceName: config.monitorId,
             snapshotPath: url.path,
-            captureTrigger: trigger.rawValue
+            captureTrigger: trigger.rawValue,
+            visibleApp: front.visibleName,
+            focusState: focusState.rawValue
         )
 
         let frameId: Int64
@@ -402,6 +418,32 @@ actor CaptureCoordinator {
 
         // 不 await writeTask —— 主路径不等磁盘 IO 完成。
         _ = writeTask
+    }
+
+    /// 切换补拍:每 settlePollMs 读一次前台,稳定(或等满 settleTimeoutMs)后强制抓一帧。
+    /// 补拍帧自己若仍是 switching 不再续约,避免连环补拍。
+    private func scheduleSettleCapture() {
+        guard settleTask == nil else { return }
+        settleTask = Task { [weak self] in
+            guard let self else { return }
+            await self.runSettleCapture()
+        }
+    }
+
+    private func runSettleCapture() async {
+        defer { settleTask = nil }
+        var waitedMs = 0
+        while waitedMs < settleTimeoutMs {
+            try? await Task.sleep(nanoseconds: UInt64(settlePollMs) * 1_000_000)
+            if Task.isCancelled { return }
+            waitedMs += settlePollMs
+            if await focus.liveFront().isSettled { break }
+        }
+        do {
+            try await captureOneFrame(trigger: .switchSettle, force: true)
+        } catch {
+            logger.error("switch settle capture failed: \(String(describing: error), privacy: .public)")
+        }
     }
 }
 

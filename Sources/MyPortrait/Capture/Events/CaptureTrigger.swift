@@ -35,4 +35,8 @@ public enum CaptureTrigger: String, Sendable {
 
     /// 手动 (`captureOnce()` 调用)。
     case manual
+
+    /// 切换补拍:上一帧截在前台切换途中(focus_state = switching),等前台读数稳定
+    /// 后补一帧。由 CaptureCoordinator 自己发,不走 EventSources。
+    case switchSettle = "switch_settle"
 }
