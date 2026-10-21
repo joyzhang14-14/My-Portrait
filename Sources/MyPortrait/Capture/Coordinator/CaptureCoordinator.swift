@@ -314,12 +314,11 @@ actor CaptureCoordinator {
         //    打字两路按时间对齐,少一帧就是时间轴上少一段。命中的窗口由
         //    ScreenCaptureService 在 SCK content filter 里排除(content
         //    masking:帧照拍,那个窗口在帧里被抠掉)。
-        //    截图前后各读一次前台(激活 app + 画面最前 app),判这帧的焦点状态。
+        //    截图后立即读前台(激活 app + 画面最前 app),判这帧的焦点状态。
         //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
-        let frontBefore = await focus.liveFront()
         let image = try await screen.captureMainDisplay()
         let front = await focus.liveFront()
-        let focusState = FrameFocusState.classify(before: frontBefore, after: front)
+        let focusState = FrameFocusState.classify(front)
         if focusState == .switching, trigger != .switchSettle {
             scheduleSettleCapture()
         }

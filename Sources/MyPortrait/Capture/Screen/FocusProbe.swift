@@ -162,25 +162,45 @@ actor FocusProbe {
     ///     比画面晚约 1s
     ///   - 画面最前 app:`CGWindowList` 里最前面的 layer-0 窗口的所属进程,和截图像素
     ///     同源;但切换动画期间会被别的 app 的辅助窗口骗(实测 Chrome 工具栏浮层)
-    /// 判读规则见 `FrontReading.isSettled`。实测数据:Tests/investigationResults/frontapp-probe/。
+    ///   - 激活 app 若有一个非 layer-0 且盖住屏幕 ≥90% 的窗口(截图工具的全屏遮罩,
+    ///     实测在 layer 102),画面归激活 app
+    /// 透明度 ≈0 的窗口(关窗淡出的最后几帧)不算。
+    /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
             let active = NSWorkspace.shared.frontmostApplication
             let activePid = active?.processIdentifier ?? -1
+            let screen = CGDisplayBounds(CGMainDisplayID())
+            let screenArea = screen.width * screen.height
             let windows = CGWindowListCopyWindowInfo(
                 [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
             ) as? [[String: Any]] ?? []
             var visiblePid: pid_t?
             var visibleOwner: String?
             var activeHasWindow = false
+            var activeHasOverlay = false
             for w in windows {   // 前 → 后排序
-                guard (w[kCGWindowLayer as String] as? Int) == 0,
-                      let pid = w[kCGWindowOwnerPID as String] as? pid_t else { continue }
+                guard let pid = w[kCGWindowOwnerPID as String] as? pid_t,
+                      (w[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01 else { continue }
+                let layer = w[kCGWindowLayer as String] as? Int ?? 0
+                if layer != 0 {
+                    if pid == activePid, screenArea > 0,
+                       let b = w[kCGWindowBounds as String] as? [String: CGFloat],
+                       (b["Width"] ?? 0) * (b["Height"] ?? 0) >= screenArea * 0.9 {
+                        activeHasOverlay = true
+                    }
+                    continue
+                }
                 if visiblePid == nil {
                     visiblePid = pid
                     visibleOwner = w[kCGWindowOwnerName as String] as? String
                 }
-                if pid == activePid { activeHasWindow = true; break }
+                if pid == activePid { activeHasWindow = true }
+            }
+            if activeHasOverlay {
+                visiblePid = activePid
+                visibleOwner = active?.localizedName
+                activeHasWindow = true
             }
             // 名字统一取 localizedName,和 app_name 列同一口径;取不到再退回窗口所属名。
             let visibleName = visiblePid.flatMap {
@@ -555,7 +575,7 @@ private let titleChangedCallback: AXObserverCallback = { _, _, _, refcon in
 }
 
 /// 一次前台读数(见 `FocusProbe.liveFront()`)。
-struct FrontReading: Equatable, Sendable {
+struct FrontReading: Sendable {
     /// 激活 app(NSWorkspace)。
     let activeName: String
     let activeBundleId: String?
@@ -575,15 +595,15 @@ struct FrontReading: Equatable, Sendable {
 enum FrameFocusState: String, Sendable {
     /// 激活 app = 画面最前 app。
     case normal
-    /// 截图期间前台在变(前后两次读数不同,或任一次处于切换中)。app_name 不可信。
+    /// 截图时前台正在切换(激活 app 屏上有窗口,却不是画面最前)。app_name 不可信。
     case switching
     /// 激活 app 没有窗口,画面内容属于 `visible_app`。app_name 仍是激活 app(菜单栏)。
     case noWindow = "no_window"
 
-    /// 截图前后各读一次,任何变化都算切换。
-    static func classify(before: FrontReading, after: FrontReading) -> FrameFocusState {
-        guard before == after, after.isSettled else { return .switching }
-        return after.visiblePid == after.activePid ? .normal : .noWindow
+    /// 只看截图后那次读数:截图前再读一次只会多报(实测 44 帧里 42 帧画面已是新 app)。
+    static func classify(_ r: FrontReading) -> FrameFocusState {
+        if r.visiblePid == r.activePid { return .normal }
+        return r.activeHasWindow ? .switching : .noWindow
     }
 }
 
