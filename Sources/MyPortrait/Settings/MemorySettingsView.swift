@@ -258,9 +258,10 @@ struct MemorySettingsView: View {
         // attentionDays + recentChangelog 是同步 sqlite 扫表,放主线程会卡。
         // attentionDays 已 nonisolated,可以 off-main 跑;ProcessingLogStore
         // 是 Sendable struct,本来就能 off-main。
+        let sched = ConfigStore.shared.current.scheduler
         Task.detached(priority: .userInitiated) {
             let scheduler = await MemoryScheduler.shared
-            let att = scheduler.attentionDays()
+            let att = MemoryScheduler.localAttention(scheduler.attentionDays(), scheduler: sched)
             // 每行的 DB row 在这里一次算好,attentionRow(date:) 不再在 body 里逐行查。
             let rows = Dictionary(
                 att.compactMap { item in
@@ -476,7 +477,7 @@ struct MemorySettingsView: View {
             }
             try? MemoryStaging.reject(kind)
             actionStatus = "Run didn't finish — staged changes discarded, unfinished days reset to pending."
-            attention = s.attentionDays()
+            attention = MemoryScheduler.localAttention(s.attentionDays(), scheduler: ConfigStore.shared.current.scheduler)
         }
         refreshStaging()
         return true
@@ -507,7 +508,8 @@ struct MemorySettingsView: View {
         } catch {
             actionStatus = "Reject failed: \(error.localizedDescription)"
         }
-        attention = MemoryScheduler.shared.attentionDays()
+        attention = MemoryScheduler.localAttention(MemoryScheduler.shared.attentionDays(),
+                                                   scheduler: ConfigStore.shared.current.scheduler)
         refreshStaging()
     }
 

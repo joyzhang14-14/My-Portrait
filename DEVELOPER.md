@@ -597,6 +597,9 @@ from processing results (a local run or an imported Premium result), never from 
   that interval's events use it (`IntervalSegmenter.localDay` / `attributeDay`).
 
 **Local event job.** A chain on a local (cloud) provider runs in `MemoryScheduler.runEventJob`.
+A tick runs a chain locally only when its provider is known, is not Premium and is connected in
+Connections (`MemoryScheduler.runsLocally`); otherwise the chain does nothing — no run, no failure
+— and Needs attention leaves out its problems (`MemoryScheduler.localAttention`).
 Sealing an interval does not start a run. At `[scheduler.event] time_of_day` (the first tick at
 or after it on a day that has not run yet, so after sleep the first tick on wake) it processes
 every needsWork interval, oldest first; a run cut short by sleep / quit, or skipped because the

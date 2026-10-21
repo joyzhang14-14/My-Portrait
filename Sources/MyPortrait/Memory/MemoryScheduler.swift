@@ -681,7 +681,7 @@ final class MemoryScheduler {
         // ===== Tier 1 =====
         var tier1Ran = false
 
-        if !s.event.isOffloaded,   // 搬走时 classify 一起跳过
+        if Self.runsLocally(s.event),   // 搬走 / 没连 provider 时 classify 一起跳过
            let scope = Self.localRunScope(config: s.event, now: now,
                                           ranToday: lastRunDay(kLastEvent) == localDayString(now),
                                           hasRetry: eventNeedsRetry()) {
@@ -717,14 +717,14 @@ final class MemoryScheduler {
             && (portraitNeedsRetry() || portraitJobHasWork())
         let portraitScheduled = portraitToday
             && (Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp)
-        if !s.portrait.isOffloaded, portraitScheduled || portraitRetry {
+        if Self.runsLocally(s.portrait), portraitScheduled || portraitRetry {
             if portraitScheduled { setLastRun(kLastPortrait, now) }   // retry 不更新 lastRun
             await runPortraitJob()
         }
 
         // personality:自己的 time_of_day 到点,或本 tick 跑过 event(接力)→ 全部就绪日;
         // 否则只重试失败过且退避到期的本地日。
-        if !s.personality.isOffloaded {
+        if Self.runsLocally(s.personality) {
             var scope = Self.localRunScope(config: s.personality, now: now,
                                            ranToday: lastRunDay(kLastPersonality) == localDayString(now),
                                            hasRetry: personalityNeedsRetry())
@@ -738,7 +738,7 @@ final class MemoryScheduler {
 
         // writing_style:auto 模式 → 直接落 portrait/writing_style/,不审核。
         // 跟 writing capture 一样不参与 event/portrait/personality 三锁。Tier 2(下游)。
-        if !s.writingStyle.isOffloaded,
+        if Self.runsLocally(s.writingStyle),
            Self.shouldTriggerNow(config: s.writingStyle, now: now),
            lastRunDay(kLastWritingStyle) != localDayString(now) {
             setLastRun(kLastWritingStyle, now)
@@ -1861,6 +1861,28 @@ final class MemoryScheduler {
             }
             guard !problems.isEmpty else { return nil }
             return AttentionItem(date: row.date, retryCount: row.retryCount, problems: problems)
+        }
+    }
+
+    /// 这条链本机会不会跑:provider 认得、不是 Premium、且在 Connections 里连着。
+    /// 跑不了的链 tick 什么都不做:不跑、不记失败,它的旧问题也不进 Needs attention。
+    nonisolated static func runsLocally(_ c: SchedulerConfig) -> Bool {
+        guard let p = Provider(rawValue: c.providerId), p != .premium else { return false }
+        let connected = UserDefaults.standard.stringArray(forKey: AppState.connectedDefaultsKey) ?? []
+        return connected.contains(p.integrationId)
+    }
+
+    /// Needs attention 只留本机会跑的链的问题(event / impact / classify 归 event 链)。
+    nonisolated static func localAttention(_ items: [AttentionItem], scheduler s: SchedulerSettings) -> [AttentionItem] {
+        items.compactMap { item in
+            let problems = item.problems.filter { p in
+                switch p.stage {
+                case .distill:     return runsLocally(s.portrait)
+                case .personality: return runsLocally(s.personality)
+                default:           return runsLocally(s.event)
+                }
+            }
+            return problems.isEmpty ? nil : AttentionItem(date: item.date, retryCount: item.retryCount, problems: problems)
         }
     }
 

@@ -318,6 +318,13 @@ enum PremiumImportSelfTest {
         check(moved.writingStyle.providerId.isEmpty, "Premium disconnect → chain that was on Premium before → empty")
         check(moved.personality.providerId == Provider.chatgpt.rawValue,
               "Premium disconnect → chain changed by hand after connect stays")
+        var idle = SchedulerConfig()
+        idle.providerId = "retired-provider"
+        let unknownIdle = !MemoryScheduler.runsLocally(idle)
+        idle.providerId = ""
+        let emptyIdle = !MemoryScheduler.runsLocally(idle)
+        check(unknownIdle && emptyIdle && !MemoryScheduler.runsLocally(moved.writingStyle),
+              "chain with an unknown, empty or Premium provider doesn't run locally")
         var cfg = MyPortraitConfig()
         cfg.premium.previousProviders = saved
         let round = (try? TOMLEncoder().encode(cfg)).flatMap { try? TOMLDecoder().decode(MyPortraitConfig.self, from: $0) }
