@@ -12,6 +12,18 @@
         -->
 
         <item>
+            <title>1.3.229</title>
+            <pubDate>Wed, 21 Oct 2026 22:48:01 +0000</pubDate>
+            <sparkle:version>183</sparkle:version>
+            <sparkle:shortVersionString>1.3.229</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>My Portrait Premium</strong> &mdash; a new provider in Connections: free compute, with early access to advanced features. Pick it as a memory pipeline&apos;s provider and your Mac only seals and uploads each day; events, portrait, personality and writing style are processed remotely overnight and imported back on their own. Run history tags these runs &quot;(Premium)&quot;. Your data is used only to train better models.</li><li><strong>Events run at their scheduled time</strong> &mdash; sealing an interval no longer starts a run right away; the event job picks up every pending interval at its scheduled time, and personality follows.</li><li><strong>Run now includes the latest hours</strong> &mdash; Run now seals the current interval first, so nothing since the last seal is left out.</li></ul><h3>Bug fixes</h3><ul><li>A screenshot taken while you switch apps is now marked as such, and a fresh one is taken once the switch settles, so frames no longer carry the previous app&apos;s name.</li><li>Full-screen screenshot-tool overlays count as the active app, and windows fading out after closing no longer count as on screen.</li><li>Ollama stays in Pi&apos;s model list across launches.</li><li>Performance and reliability improvements across the existing memory pipelines.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.229/MyPortrait_1.3.229_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="6yLx2H9UY8+BxgGbJATLVX/7gQfv1cTAj0cUV50HOEonCZu9A4tuEUv8H87vLK1WZ7Iw6vVjfVbikVcCXlFcAQ==" length="28532436" />
+        </item>
+        <item>
             <title>1.3.222</title>
             <pubDate>Sun, 13 Sep 2026 10:29:00 +0000</pubDate>
             <sparkle:version>182</sparkle:version>
