@@ -12,6 +12,8 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 2 小时就封);有链搬到 Premium 时,上次发包之后又封了区间、或 event 链还有没发出去的区间(`exportDue`)就导出,
 /// Premium 连不上(地址不通、密钥无效)时这轮不导出、下一轮再试。`chains` = provider 为 Premium、频率不是 off、且有待处理
 /// 工作的链。一个包最多装一天的区间(`oneDayOfIntervals`),积压时同一次检查里一包一天地接着打。
+/// 包压缩后超过 `maxBundleBytes` 就对半拆:区间个数对半;只剩一个区间还超就按时间对半切成分片包(`part_from_ms` /
+/// `part_to_ms`),分片还超再对半,Premium 收齐同一区间的分片再合起来处理。
 /// 只算 provider 为 Premium 的链(`SchedulerSettings.offloadedChains`)。event 的 pending 是区间台账里 needsWork、
 /// 且还没在路上(`PremiumRemote.State.sentIntervals`:已发出、结果还没导入)的区间,personality 的是就绪的本地日
 /// (`EventIntervalStore`,在路上的区间也算进来),portrait / classify / writing style 沿用 MemoryScheduler 的判据。
@@ -136,10 +138,15 @@ enum PremiumExchangeExporter {
     /// 打好的包压缩后的上限,与服务器单包上限一致。
     static let maxBundleBytes: Int64 = 500 << 20
 
-    /// 包超了上限、装了 `count` 个区间时,重打要带几个:按超出比例估,至少少一个、至少留一个。
-    static func fewerIntervals(count: Int, bytes: Int64) -> Int {
-        let est = Int(Double(count) * Double(maxBundleBytes) / Double(max(bytes, 1)))
-        return max(1, min(count - 1, est))
+    /// 一个区间按时间对半切时,分片最短多长(再短也超就照发)。
+    static let minPartSpanMs: Int64 = 10 * 60_000
+
+    /// 包超了上限、装了 `count` 个区间时,重打带一半(向上取整)。
+    static func halfIntervals(_ count: Int) -> Int { max(1, (count + 1) / 2) }
+
+    /// [from, to) 的对半切点;切出来的两半短于 `minPartSpanMs` 就不切(nil)。
+    static func splitPoint(_ from: Int64, _ to: Int64) -> Int64? {
+        to - from >= 2 * minPartSpanMs ? from + (to - from) / 2 : nil
     }
 
     // MARK: - 手动导出(CLI)
@@ -190,31 +197,60 @@ enum PremiumExchangeExporter {
             }.value
         }
         var result = await package(input)
-        // 超了服务器单包上限:少带几个区间重打,剩下的区间仍是待发,下一个包接着带。
-        // 只剩一个区间还超就照发(服务器会拒,日志里留原因)。
-        while case .exported(let id, let archive) = result,
-              let bytes = archiveBytes(archive), bytes > maxBundleBytes {
-            let n = input.pending.eventIntervals.count
-            guard n > 1 else {
-                exportLog.error("bundle \(id, privacy: .public) is \(bytes >> 20) MB with \(n) interval(s), over the \(maxBundleBytes >> 20) MB cap and can't be split further")
-                break
-            }
-            let k = fewerIntervals(count: n, bytes: bytes)
-            exportLog.notice("bundle \(id, privacy: .public) is \(bytes >> 20) MB with \(n) intervals, repacking with \(k)")
+        // 超了服务器单包上限就对半拆:区间个数对半,没带上的区间仍是待发,下一个包接着带。
+        while case .exported(let id, let archive) = result, isOversized(archive),
+              input.pending.eventIntervals.count > 1 {
+            let k = halfIntervals(input.pending.eventIntervals.count)
+            exportLog.notice("bundle \(id, privacy: .public) over the cap with \(input.pending.eventIntervals.count) intervals, repacking with \(k)")
             try? FileManager.default.removeItem(at: archive)
             guard let smaller = gatherInput(dbPool: dbPool, maxIntervals: k) else { return .noWork }
             input = smaller
             result = await package(input)
         }
-        if case .exported(let id, _) = result {
+        // 只剩一个区间还超:按时间对半切成分片包,分片还超再对半;Premium 收齐分片再合起来处理。
+        func packParts(_ from: Int64, _ to: Int64) async -> [String]? {
+            var part = input
+            part.pending.eventIntervals[0].partFromMs = from
+            part.pending.eventIntervals[0].partToMs = to
+            guard case .exported(let id, let archive) = await package(part) else { return nil }
+            guard isOversized(archive), let mid = splitPoint(from, to) else {
+                if isOversized(archive) {
+                    exportLog.error("bundle \(id, privacy: .public) still over the cap at its smallest part")
+                }
+                return [id]
+            }
+            try? FileManager.default.removeItem(at: archive)
+            guard let a = await packParts(from, mid) else { return nil }
+            guard let b = await packParts(mid, to) else {
+                for x in a { try? FileManager.default.removeItem(at: PremiumRemote.archiveURL(root, x)) }
+                return nil
+            }
+            return a + b
+        }
+        var ids: [String] = []
+        if case .exported(let id, let archive) = result {
+            ids = [id]
+            if isOversized(archive), input.pending.eventIntervals.count == 1,
+               let iv = input.pending.eventIntervals.first, let s = iv.startMs, let e = iv.endMs,
+               splitPoint(s, e) != nil {
+                exportLog.notice("bundle \(id, privacy: .public) over the cap with one interval, splitting it by time")
+                try? FileManager.default.removeItem(at: archive)
+                guard let parts = await packParts(s, e) else { return .skipped("export failed while splitting") }
+                ids = parts
+                result = .exported(bundleId: parts[parts.count - 1], archive: PremiumRemote.archiveURL(root, parts[parts.count - 1]))
+            }
+        }
+        if !ids.isEmpty {
             PremiumRemote.updateState(root) { s in
-                s.uploads.append(.init(bundleId: id, trigger: input.trigger, chains: input.chains,
-                                       createdAt: PremiumExchange.isoNow(), status: PremiumRemote.statusPendingUpload,
-                                       intervals: input.pending.eventIntervals.map(\.id)))
-                s.lastExport = .init(bundleId: id, at: PremiumExchange.isoNow(), outcome: input.trigger)
+                for id in ids {
+                    s.uploads.append(.init(bundleId: id, trigger: input.trigger, chains: input.chains,
+                                           createdAt: PremiumExchange.isoNow(), status: PremiumRemote.statusPendingUpload,
+                                           intervals: input.pending.eventIntervals.map(\.id)))
+                }
+                s.lastExport = .init(bundleId: ids[ids.count - 1], at: PremiumExchange.isoNow(), outcome: input.trigger)
                 s.lastExportCutMs = cut ?? s.lastExportCutMs
             }
-            exportLog.notice("packed bundle \(id, privacy: .public)")
+            exportLog.notice("packed bundle(s) \(ids.joined(separator: ", "), privacy: .public)")
         }
         return result
     }
@@ -363,8 +399,8 @@ enum PremiumExchangeExporter {
 
     // MARK: - 打包(后台)
 
-    private static func archiveBytes(_ url: URL) -> Int64? {
-        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+    private static func isOversized(_ url: URL) -> Bool {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0) > maxBundleBytes
     }
 
     /// 写包到 `.staging/premium_upload/<id>/`、打成 `<id>.tar.gz`、删掉目录。
@@ -481,8 +517,10 @@ enum PremiumExchangeExporter {
 
     /// 区间内全部帧(`EventIntervalStore.intervalFrameSQL`,不设上限),按时间升序。
     static func writeIntervalFrames(_ iv: PremiumIntervalEntry, to url: URL, dbPool: DatabasePool) throws {
+        let start = max(iv.startMs ?? 0, iv.partFromMs ?? Int64.min)
+        let end = min(iv.endMs ?? 0, iv.partToMs ?? Int64.max)
         try writeFrameLines(where: EventIntervalStore.intervalFrameSQL, arguments: [
-            "iv_start": iv.startMs ?? 0, "iv_end": iv.endMs ?? 0,
+            "iv_start": start, "iv_end": end,
             "iv_after": iv.afterFrameId ?? 0, "iv_max": iv.maxFrameId ?? Int64.max,
         ], to: url, dbPool: dbPool)
     }

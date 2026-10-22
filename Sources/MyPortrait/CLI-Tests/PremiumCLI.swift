@@ -529,13 +529,13 @@ enum PremiumImportSelfTest {
               && E.oneDayOfIntervals(ivs, limit: 0).map(\.id) == ["iv:0"],
               "bundle interval limit keeps the oldest ones, at least one")
 
-        // 包超了上限:按超出比例少带区间,至少少一个、至少留一个。
-        let cap = E.maxBundleBytes
-        check(E.fewerIntervals(count: 4, bytes: cap * 2) == 2
-              && E.fewerIntervals(count: 4, bytes: cap + 1) == 3
-              && E.fewerIntervals(count: 2, bytes: cap * 10) == 1
-              && E.fewerIntervals(count: 10, bytes: cap * 3) == 3,
-              "oversized bundle is repacked with proportionally fewer intervals")
+        // 包超了上限:区间个数对半;只剩一个区间就按时间对半切,分片不短于 minPartSpanMs。
+        let minPart = E.minPartSpanMs
+        check(E.halfIntervals(4) == 2 && E.halfIntervals(3) == 2 && E.halfIntervals(2) == 1 && E.halfIntervals(1) == 1,
+              "oversized bundle is repacked with half of its intervals")
+        check(E.splitPoint(0, 4 * minPart) == 2 * minPart && E.splitPoint(0, 2 * minPart) == minPart
+              && E.splitPoint(0, 2 * minPart - 1) == nil,
+              "one oversized interval splits in half by time, parts no shorter than the minimum")
 
         // 在路上的区间不再发;导入一个包时连同并进它的包一起删。
         var st = R.State()
@@ -986,6 +986,39 @@ enum PremiumImportSelfTest {
             check(id1 != id2 && !fm.fileExists(atPath: PremiumRemote.uploadDir(pkRoot).appendingPathComponent(id1).path),
                   "each package gets a new id; bundle dir removed after packing")
         } else { check(false, "packageForUpload produced archives") }
+
+        // —— 分片包:只写 [part_from_ms, part_to_ms) 的帧,manifest 带上分片范围 ——
+        print("[premium-selftest] interval part")
+        let partPool = try PortraitDBImpl(path: tmp.appendingPathComponent("parts.sqlite").path).dbPool
+        try await partPool.write { db in
+            for t in [Int64(1100), 1300, 1500, 1600, 1900] {
+                try db.execute(sql: """
+                    INSERT INTO frames (timestamp_ms, app_name, snapshot_path, capture_trigger, full_text, created_at_ms)
+                    VALUES (:t, 'App', 'x.jpg', 'app_switch', 'text', :t)
+                    """, arguments: ["t": t])
+            }
+        }
+        var whole = PremiumIntervalEntry(id: "iv:1000", startMs: 1000, endMs: 2000)
+        var firstHalf = whole
+        firstHalf.partFromMs = 1000; firstHalf.partToMs = 1500
+        var secondHalf = whole
+        secondHalf.partFromMs = 1500; secondHalf.partToMs = 2000
+        func frameTimes(_ iv: PremiumIntervalEntry) throws -> [Int64] {
+            let url = tmp.appendingPathComponent("part-\(UUID().uuidString).jsonl")
+            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, dbPool: partPool)
+            return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").compactMap {
+                (try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["timestamp_ms"] as? Int64
+            }
+        }
+        check(try frameTimes(whole) == [1100, 1300, 1500, 1600, 1900]
+              && frameTimes(firstHalf) == [1100, 1300] && frameTimes(secondHalf) == [1500, 1600, 1900],
+              "interval part writes only its own time range; halves add up to the whole")
+        whole.partFromMs = nil
+        let partJSON = String(data: try JSONEncoder().encode(firstHalf), encoding: .utf8) ?? ""
+        let wholeJSON = String(data: try JSONEncoder().encode(whole), encoding: .utf8) ?? ""
+        check(partJSON.contains("\"part_from_ms\":1000") && partJSON.contains("\"part_to_ms\":1500")
+              && !wholeJSON.contains("part_"),
+              "manifest interval entry carries part_from_ms / part_to_ms only for a part")
 
         // —— manifest trigger / chains ——
         print("[premium-selftest] single-chain bundle")

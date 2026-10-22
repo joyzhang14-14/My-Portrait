@@ -225,6 +225,9 @@ struct PremiumIntervalEntry: Codable, Equatable {
     var frameCount: Int?
     var afterFrameId: Int64?
     var maxFrameId: Int64?
+    /// 分片包:这个包只带区间里 [partFromMs, partToMs) 的帧(区间太大、按时间对半切开发);整区间时都是 nil。
+    var partFromMs: Int64?
+    var partToMs: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, trigger
@@ -237,6 +240,8 @@ struct PremiumIntervalEntry: Codable, Equatable {
         case frameCount = "frame_count"
         case afterFrameId = "after_frame_id"
         case maxFrameId = "max_frame_id"
+        case partFromMs = "part_from_ms"
+        case partToMs = "part_to_ms"
     }
 }
 
