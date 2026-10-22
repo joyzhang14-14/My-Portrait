@@ -55,7 +55,7 @@ enum EventTimeline {
     /// 时间线条要显示的当日**变化**(总数右上角 HUD 已有,条上不重复)。
     struct DayStats: Equatable {
         var born = 0          // 那天新诞生的 event
-        var merged = 0        // 那天并进已有 event 的重复发生(Tier-1 合并)
+        var merged = 0        // 那天并进已有 event 的重复发生(backfill 的 joinExisting)
         var folders = 0       // 那天上画布的 folder 数
         var folderDelta = 0   // 与前一天相比的增减
         static let zero = DayStats()
@@ -70,7 +70,7 @@ enum EventTimeline {
         let range: ClosedRange<Date>
         /// 每天新诞生的 event 数(时间轴柱状图用)。
         let birthsPerDay: [Date: Int]
-        /// 每天**合并**进已有 event 的重复发生数(pipeline 的 Tier-1 重复检测:
+        /// 每天**合并**进已有 event 的重复发生数(backfill 的 `joinExisting`:
         /// 同一件事再次发生时往 occurrences 追加一天,而不是新建一条)。
         /// = 该天出现在某条 event 的 occurrences 里、但那天不是它的诞生日。
         let mergesPerDay: [Date: Int]
