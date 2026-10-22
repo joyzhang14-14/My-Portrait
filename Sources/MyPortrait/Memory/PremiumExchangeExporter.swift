@@ -236,7 +236,7 @@ enum PremiumExchangeExporter {
         guard case .exported(let id, let archive) = result else { return (result, [], input) }
         guard isOversized(archive), input.pending.eventIntervals.count == 1,
               let iv = input.pending.eventIntervals.first, let s = iv.startMs, let e = iv.endMs,
-              splitPoint(s, e) != nil else { return (result, [id], input) }
+              let mid = splitPoint(s, e) else { return (result, [id], input) }
         exportLog.notice("bundle \(id, privacy: .public) over the cap with one interval, splitting it by time")
         try? FileManager.default.removeItem(at: archive)
         let base = input
@@ -252,6 +252,9 @@ enum PremiumExchangeExporter {
                 return [(id, archive)]
             }
             try? FileManager.default.removeItem(at: archive)
+            return await halves(from, mid, to)
+        }
+        func halves(_ from: Int64, _ mid: Int64, _ to: Int64) async -> [(String, URL)]? {
             guard let a = await packParts(from, mid) else { return nil }
             guard let b = await packParts(mid, to) else {
                 for (_, url) in a { try? FileManager.default.removeItem(at: url) }
@@ -259,7 +262,7 @@ enum PremiumExchangeExporter {
             }
             return a + b
         }
-        guard let parts = await packParts(s, e), let last = parts.last else {
+        guard let parts = await halves(s, mid, e), let last = parts.last else {
             return (.skipped("export failed while splitting"), [], input)
         }
         return (.exported(bundleId: last.0, archive: last.1), parts.map(\.0), input)
