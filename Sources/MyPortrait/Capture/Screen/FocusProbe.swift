@@ -165,6 +165,9 @@ actor FocusProbe {
     ///   - 激活 app 若有一个非 layer-0 且盖住屏幕 ≥90% 的窗口(截图工具的全屏遮罩,
     ///     实测在 layer 102),画面归激活 app
     /// 透明度 ≈0 的窗口(关窗淡出的最后几帧)不算。
+    /// 最前面的 layer-0 窗口不和任何显示器相交 → 它属于别的桌面(Space),说明正在切桌面:
+    /// 滑动全屏桌面时全屏 Chrome 的工具栏条、切桌面时被提前激活的 app 的窗口都会这样排在最前,
+    /// 此时两个来源都不可信。
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
@@ -172,6 +175,10 @@ actor FocusProbe {
             let activePid = active?.processIdentifier ?? -1
             let screen = CGDisplayBounds(CGMainDisplayID())
             let screenArea = screen.width * screen.height
+            var displayIds = [CGDirectDisplayID](repeating: 0, count: 16)
+            var displayCount: UInt32 = 0
+            CGGetActiveDisplayList(16, &displayIds, &displayCount)
+            let displays = displayIds.prefix(Int(displayCount)).map { CGDisplayBounds($0) }
             let windows = CGWindowListCopyWindowInfo(
                 [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
             ) as? [[String: Any]] ?? []
@@ -179,6 +186,7 @@ actor FocusProbe {
             var visibleOwner: String?
             var activeHasWindow = false
             var activeHasOverlay = false
+            var frontOffscreen = false
             for w in windows {   // 前 → 后排序
                 guard let pid = w[kCGWindowOwnerPID as String] as? pid_t,
                       (w[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01 else { continue }
@@ -194,6 +202,11 @@ actor FocusProbe {
                 if visiblePid == nil {
                     visiblePid = pid
                     visibleOwner = w[kCGWindowOwnerName as String] as? String
+                    if !displays.isEmpty, let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
+                        let rect = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
+                                          width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+                        frontOffscreen = !displays.contains { $0.intersects(rect) }
+                    }
                 }
                 if pid == activePid { activeHasWindow = true }
             }
@@ -201,6 +214,7 @@ actor FocusProbe {
                 visiblePid = activePid
                 visibleOwner = active?.localizedName
                 activeHasWindow = true
+                frontOffscreen = false
             }
             // 名字统一取 localizedName,和 app_name 列同一口径;取不到再退回窗口所属名。
             let visibleName = visiblePid.flatMap {
@@ -212,7 +226,8 @@ actor FocusProbe {
                 activePid: activePid,
                 visibleName: visibleName,
                 visiblePid: visiblePid,
-                activeHasWindow: activeHasWindow
+                activeHasWindow: activeHasWindow,
+                frontOffscreen: frontOffscreen
             )
         }
     }
@@ -585,23 +600,28 @@ struct FrontReading: Sendable {
     let visiblePid: pid_t?
     /// 激活 app 在屏上有没有自己的普通窗口。最小化 / 关窗 / Finder 无窗口时为 false。
     let activeHasWindow: Bool
+    /// 最前面的普通窗口不在任何显示器上(正在切桌面)。
+    let frontOffscreen: Bool
 
     /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换)。
     /// 激活 app 屏上有窗口却和画面最前不是同一个 → 正在切换,两边都不可信。
-    var isSettled: Bool { visiblePid == activePid || !activeHasWindow }
+    /// 最前窗口在屏幕外 → 正在切桌面,两边一致也不算稳定。
+    var isSettled: Bool { !frontOffscreen && (visiblePid == activePid || !activeHasWindow) }
 }
 
 /// 帧的焦点状态,写进 `frames.focus_state`。
 enum FrameFocusState: String, Sendable {
     /// 激活 app = 画面最前 app。
     case normal
-    /// 截图时前台正在切换(激活 app 屏上有窗口,却不是画面最前)。app_name 不可信。
+    /// 截图时前台正在切换(激活 app 屏上有窗口却不是画面最前,或最前窗口在屏幕外)。
+    /// app_name 不可信。
     case switching
     /// 激活 app 没有窗口,画面内容属于 `visible_app`。app_name 仍是激活 app(菜单栏)。
     case noWindow = "no_window"
 
     /// 只看截图后那次读数:截图前再读一次只会多报(实测 44 帧里 42 帧画面已是新 app)。
     static func classify(_ r: FrontReading) -> FrameFocusState {
+        if r.frontOffscreen { return .switching }
         if r.visiblePid == r.activePid { return .normal }
         return r.activeHasWindow ? .switching : .noWindow
     }
