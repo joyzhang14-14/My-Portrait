@@ -697,13 +697,19 @@ enum PremiumImportSelfTest {
         // 服务端拒收(4xx)→ 删掉,下次按台账重新导出;404 的包从台账删掉。
         R.updateState(root) { s in
             s.uploads = [.init(bundleId: "20260102T000000Z-mac-0000beef", trigger: "nightly", chains: ["event"],
-                               createdAt: "", status: R.statusPendingUpload)]
+                               createdAt: "", status: R.statusPendingUpload, intervals: ["iv:9"]),
+                         .init(bundleId: "20260102T000001Z-mac-0000cafe", trigger: "nightly", chains: ["event"],
+                               createdAt: "", status: "queued", intervals: ["iv:9"])]
         }
         try Data("x".utf8).write(to: R.archiveURL(root, "20260102T000000Z-mac-0000beef"))
         fake.rejectNextUpload = 422
         await R.flushUploads(root: root, cfg: cfg)
-        check(R.readState(root).uploads.isEmpty && R.readState(root).lastExport?.outcome.hasPrefix("rejected") == true,
+        check(R.readState(root).uploads.map(\.bundleId) == ["20260102T000001Z-mac-0000cafe"]
+              && R.readState(root).lastExport?.outcome.hasPrefix("rejected") == true,
               "upload rejected by the server: dropped, last_export notes it")
+        check(!R.readState(root).sentIntervals.contains("iv:9"),
+              "rejected part: its interval is no longer in flight through the other parts, so it is exported again")
+        R.updateState(root) { $0.uploads = [] }
         R.updateState(root) { s in
             s.uploads = [.init(bundleId: "gone", trigger: "nightly", chains: ["event"], createdAt: "", status: "queued")]
         }

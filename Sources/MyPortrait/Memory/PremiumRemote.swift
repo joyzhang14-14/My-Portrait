@@ -353,10 +353,13 @@ enum PremiumRemote {
                 remoteLog.notice("uploaded \(u.bundleId, privacy: .public): \(r.status, privacy: .public)")
             } catch let e as RemoteError where e.code.map({ (400..<500).contains($0) && $0 != 429 }) == true {
                 // 服务端明确不收(格式、大小、id 冲突):留着也传不上去,删掉,下一次检查按台账重新导出。
+                // 同一区间的其他分片包也不再算它在路上,这个区间整个重新导出。
                 remoteLog.error("upload \(u.bundleId, privacy: .public) rejected: \(e.message, privacy: .public)")
                 try? FileManager.default.removeItem(at: file)
                 updateState(root) { s in
                     s.uploads.removeAll { $0.bundleId == u.bundleId }
+                    let rejected = Set(u.intervals ?? [])
+                    for i in s.uploads.indices { s.uploads[i].intervals?.removeAll { rejected.contains($0) } }
                     s.lastExport = Event(bundleId: u.bundleId, at: PremiumExchange.isoNow(), outcome: "rejected: \(e.message)")
                 }
             } catch {
