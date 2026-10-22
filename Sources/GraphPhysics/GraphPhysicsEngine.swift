@@ -651,6 +651,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             newVel[i] = .zero
         }
         n = m
+        allocateTree()   // 四叉树缓冲按 n 分配,节点变多不重分配会越界
         pos = newPos
         vel = newVel
         sceneRef = scene
