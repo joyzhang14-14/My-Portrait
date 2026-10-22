@@ -117,7 +117,7 @@ enum PremiumRemote {
         private static let session: URLSession = {
             let c = URLSessionConfiguration.ephemeral
             c.timeoutIntervalForRequest = 30
-            c.timeoutIntervalForResource = 900
+            c.timeoutIntervalForResource = 3600   // 整包上传上限 1 小时(含整天 MP4 的包可达数百 MB)
             return URLSession(configuration: c)
         }()
 
