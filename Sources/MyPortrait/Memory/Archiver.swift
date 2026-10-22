@@ -159,9 +159,9 @@ enum Archiver {
 
     // MARK: - events/
 
-    /// event 归档门槛:weight(按 now 现算)< 1,且创建满 90 天。
-    static let eventMaxWeight: Double = 1
-    static let eventMinAgeDays: Double = 90
+    /// event 归档门槛:weight(按 now 现算)< 0.65,且距上次发生满 90 天。
+    static let eventMaxWeight: Double = 0.65
+    static let eventMinDaysIdle = 90
 
     /// 把冷掉的老 event 移到 `events/_archive/<原相对路径>`,戳 `archived_at`。
     /// 触发点:本机 event job 收尾(weight / rebalance 之后、classify 之前)、
@@ -188,13 +188,13 @@ enum Archiver {
             guard let file = try? PortraitFileIO.read(from: url),
                   file.archivedAt == nil, !file.pinned else { continue }
             let w = WeightCalculator.weight(for: file, now: now)
-            let ageDays = now.timeIntervalSince(file.created) / 86_400
-            guard w < eventMaxWeight, ageDays >= eventMinAgeDays else { continue }
+            let idle = file.daysSinceLastOccurrence(now: now)
+            guard w < eventMaxWeight, idle >= eventMinDaysIdle else { continue }
             let rel = String(url.path.dropFirst(prefix.count))
             plans.append(Plan(
                 source: url,
                 destination: root.appendingPathComponent("_archive/\(rel)"),
-                reason: "weight=\(formatted(w)) age_days=\(Int(ageDays))"))
+                reason: "weight=\(formatted(w)) days_idle=\(idle)"))
         }
 
         // 执行与 portrait 同一套:先戳 archived_at 再移动,移动失败回滚戳。
