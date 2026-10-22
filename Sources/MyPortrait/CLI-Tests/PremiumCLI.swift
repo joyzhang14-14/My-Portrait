@@ -525,6 +525,17 @@ enum PremiumImportSelfTest {
               && E.oneDayOfIntervals(Array(ivs.suffix(1))).map(\.id) == ["iv:4"]
               && E.oneDayOfIntervals([]).isEmpty,
               "bundle holds at most one day of intervals, oldest first, at least one")
+        check(E.oneDayOfIntervals(ivs, limit: 2).map(\.id) == ["iv:0", "iv:1"]
+              && E.oneDayOfIntervals(ivs, limit: 0).map(\.id) == ["iv:0"],
+              "bundle interval limit keeps the oldest ones, at least one")
+
+        // 包超了上限:按超出比例少带区间,至少少一个、至少留一个。
+        let cap = E.maxBundleBytes
+        check(E.fewerIntervals(count: 4, bytes: cap * 2) == 2
+              && E.fewerIntervals(count: 4, bytes: cap + 1) == 3
+              && E.fewerIntervals(count: 2, bytes: cap * 10) == 1
+              && E.fewerIntervals(count: 10, bytes: cap * 3) == 3,
+              "oversized bundle is repacked with proportionally fewer intervals")
 
         // 在路上的区间不再发;导入一个包时连同并进它的包一起删。
         var st = R.State()

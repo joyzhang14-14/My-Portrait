@@ -125,12 +125,21 @@ enum PremiumExchangeExporter {
         return lastCut > (lastExportCutMs ?? Int64.min)
     }
 
-    /// 一个包最多装多少区间:最早那个区间开始后 24 小时内开始的区间(至少一个)。
+    /// 一个包最多装多少区间:最早那个区间开始后 24 小时内开始的区间(至少一个),再截到前 `limit` 个。
     static let maxBundleSpanMs: Int64 = 86_400_000
 
-    static func oneDayOfIntervals(_ ivs: [PremiumIntervalEntry]) -> [PremiumIntervalEntry] {
-        guard let first = ivs.compactMap(\.startMs).min() else { return ivs }
-        return ivs.filter { ($0.startMs ?? first) < first + maxBundleSpanMs }
+    static func oneDayOfIntervals(_ ivs: [PremiumIntervalEntry], limit: Int = .max) -> [PremiumIntervalEntry] {
+        guard let first = ivs.compactMap(\.startMs).min() else { return Array(ivs.prefix(max(limit, 1))) }
+        return Array(ivs.filter { ($0.startMs ?? first) < first + maxBundleSpanMs }.prefix(max(limit, 1)))
+    }
+
+    /// 打好的包压缩后的上限,与服务器单包上限一致。
+    static let maxBundleBytes: Int64 = 500 << 20
+
+    /// 包超了上限、装了 `count` 个区间时,重打要带几个:按超出比例估,至少少一个、至少留一个。
+    static func fewerIntervals(count: Int, bytes: Int64) -> Int {
+        let est = Int(Double(count) * Double(maxBundleBytes) / Double(max(bytes, 1)))
+        return max(1, min(count - 1, est))
     }
 
     // MARK: - 手动导出(CLI)
@@ -157,7 +166,7 @@ enum PremiumExchangeExporter {
               !MemoryStaging.hasPending(.personality, root: Storage.rootURL),
               !EditDraft.hasAnyPending() else { return .skipped("review pending") }
         let root = Storage.rootURL
-        guard let input = gatherInput(dbPool: dbPool) else { return .noWork }
+        guard var input = gatherInput(dbPool: dbPool) else { return .noWork }
         let cut = try? EventIntervalStore(dbPool: dbPool).lastCut()
 
         var lock: PremiumExchange.FileLock?
@@ -170,14 +179,33 @@ enum PremiumExchangeExporter {
         guard scheduler.acquireAllLocks() else { return .skipped("scheduler busy") }
         defer { scheduler.releaseAllLocks() }
 
-        let result: ExportResult = await Task.detached(priority: .utility) {
-            do {
-                return try packageForUpload(input: input, root: root, dbPool: dbPool)
-            } catch {
-                exportLog.error("export failed: \(error.localizedDescription, privacy: .public)")
-                return .skipped("export failed: \(error.localizedDescription)")
+        func package(_ input: Input) async -> ExportResult {
+            await Task.detached(priority: .utility) {
+                do {
+                    return try packageForUpload(input: input, root: root, dbPool: dbPool)
+                } catch {
+                    exportLog.error("export failed: \(error.localizedDescription, privacy: .public)")
+                    return .skipped("export failed: \(error.localizedDescription)")
+                }
+            }.value
+        }
+        var result = await package(input)
+        // 超了服务器单包上限:少带几个区间重打,剩下的区间仍是待发,下一个包接着带。
+        // 只剩一个区间还超就照发(服务器会拒,日志里留原因)。
+        while case .exported(let id, let archive) = result,
+              let bytes = archiveBytes(archive), bytes > maxBundleBytes {
+            let n = input.pending.eventIntervals.count
+            guard n > 1 else {
+                exportLog.error("bundle \(id, privacy: .public) is \(bytes >> 20) MB with \(n) interval(s), over the \(maxBundleBytes >> 20) MB cap and can't be split further")
+                break
             }
-        }.value
+            let k = fewerIntervals(count: n, bytes: bytes)
+            exportLog.notice("bundle \(id, privacy: .public) is \(bytes >> 20) MB with \(n) intervals, repacking with \(k)")
+            try? FileManager.default.removeItem(at: archive)
+            guard let smaller = gatherInput(dbPool: dbPool, maxIntervals: k) else { return .noWork }
+            input = smaller
+            result = await package(input)
+        }
         if case .exported(let id, _) = result {
             PremiumRemote.updateState(root) { s in
                 s.uploads.append(.init(bundleId: id, trigger: input.trigger, chains: input.chains,
@@ -195,7 +223,7 @@ enum PremiumExchangeExporter {
 
     /// 真实 pending。已经在路上(发出了、结果还没导入)的区间不再发;性格日就绪的判断把它们算作已有着落。
     @MainActor
-    static func pendingNow(dbPool: DatabasePool) -> PremiumPending {
+    static func pendingNow(dbPool: DatabasePool, maxIntervals: Int = .max) -> PremiumPending {
         let sched = MemoryScheduler.shared
         let store = EventIntervalStore(dbPool: dbPool)
         let sent = PremiumRemote.readState(Storage.rootURL).sentIntervals
@@ -217,13 +245,14 @@ enum PremiumExchangeExporter {
             },
             portraitHasWork: { sched.portraitJobHasWork() },
             classifyHasWork: { sched.classifierJobHasWork() },
-            writingUnprocessed: { (try? WritingStyleStore(dbPool: dbPool).unprocessedCount()) ?? 0 })
+            writingUnprocessed: { (try? WritingStyleStore(dbPool: dbPool).unprocessedCount()) ?? 0 },
+            maxIntervals: maxIntervals)
     }
 
-    /// `chains` = 有待处理工作的链,pending 只留这些链;都没活 → nil。
+    /// `chains` = 有待处理工作的链,pending 只留这些链;都没活 → nil。`maxIntervals`:包最多带几个区间。
     @MainActor
-    static func gatherInput(dbPool: DatabasePool) -> Input? {
-        let all = pendingNow(dbPool: dbPool)
+    static func gatherInput(dbPool: DatabasePool, maxIntervals: Int = .max) -> Input? {
+        let all = pendingNow(dbPool: dbPool, maxIntervals: maxIntervals)
         var chains = all.chainsWithWork
         guard !chains.isEmpty else { return nil }
         // event 在包里时,同样搬到 Premium 的 portrait / personality 也列进去:它们的活要等
@@ -315,11 +344,12 @@ enum PremiumExchangeExporter {
                                personalityDays: (Set<String>) -> [PremiumPersonalityDayEntry],
                                portraitHasWork: () -> Bool,
                                classifyHasWork: () -> Bool,
-                               writingUnprocessed: () -> Int) -> PremiumPending {
+                               writingUnprocessed: () -> Int,
+                               maxIntervals: Int = .max) -> PremiumPending {
         func on(_ key: String, _ c: SchedulerConfig) -> Bool { c.isOffloaded && c.frequency != .off }
         let eventOn = on("event", s.event)
         let wsOn = on("writing_style", s.writingStyle)
-        let ivs = eventOn ? oneDayOfIntervals(eventIntervals()) : []
+        let ivs = eventOn ? oneDayOfIntervals(eventIntervals(), limit: maxIntervals) : []
         let pdays = on("personality", s.personality) ? personalityDays(Set(ivs.map(\.id))) : []
         return PremiumPending(
             eventIntervals: ivs,
@@ -332,6 +362,10 @@ enum PremiumExchangeExporter {
     }
 
     // MARK: - 打包(后台)
+
+    private static func archiveBytes(_ url: URL) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+    }
 
     /// 写包到 `.staging/premium_upload/<id>/`、打成 `<id>.tar.gz`、删掉目录。
     static func packageForUpload(input: Input, root: URL, dbPool: DatabasePool) throws -> ExportResult {
