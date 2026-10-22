@@ -25,6 +25,10 @@ import GraphPhysics
 ///    Unclassified 里的存量 event 一次性收编。直接回投影会让 event 假装一出生
 ///    就在 folder 里,把这段历史抹掉。按上面的规则重建,还原的是真实发生过的
 ///    「先堆在 Unclassified → folder 结晶那天成批迁徙过去」。
+///
+/// ④ **归档**:`events/_archive/` 里的 event 照样读进来,`archived_at` 那天离场 ——
+///    归档前的历史照常显示,今天的状态与 live graph 一致。folder 的 `events[]`
+///    归档时不摘引用,归属照③还原。
 enum EventTimeline {
 
     /// 一条 event 的重建输入(解析一次,之后按日重算全在内存里)。
@@ -37,6 +41,8 @@ enum EventTimeline {
         let occurrenceDays: [Date]
         /// 诞生日 = created(取 occurrences 首日兜底)。
         let born: Date
+        /// 归档日(本地日历);这天起不在图上。nil = 没归档。
+        let gone: Date?
         /// 归入哪个 folder slug,以及**加入那天**;nil = 从未被分类。
         var join: (slug: String, day: Date)?
     }
@@ -91,8 +97,9 @@ enum EventTimeline {
             folders[f.slug] = (f.name, f.colorHex, fCreated)
         }
 
-        // 扫全部 event 文件
+        // 扫全部 event 文件(含 `_archive/`,见类型注释④)
         var entries: [Entry] = []
+        var archivedEntries: [Entry] = []
         var births: [Date: Int] = [:]
         var merges: [Date: Int] = [:]
         let fm = FileManager.default
@@ -103,21 +110,38 @@ enum EventTimeline {
         let prefix = eventsDir.path + "/"
         while let url = en.nextObject() as? URL {
             guard url.pathExtension == "md", url.lastPathComponent != "INDEX.md" else { continue }
-            if url.pathComponents.contains("_archive") { continue }
             if url.pathComponents.contains("_quarantine") { continue }
             if url.pathComponents.contains("_folders") { continue }
             guard let file = try? PortraitFileIO.read(from: url) else { continue }
-            let rel = url.path.hasPrefix(prefix)
+            var rel = url.path.hasPrefix(prefix)
                 ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
+            var gone: Date? = nil
+            if url.pathComponents.contains("_archive") {
+                // 归档路径 = `_archive/<原相对路径>`;身份与 folder 引用都按原路径
+                guard rel.hasPrefix("_archive/"), let at = file.archivedAt else { continue }
+                rel = String(rel.dropFirst("_archive/".count))
+                gone = cal.startOfDay(for: at)
+            }
             let days = file.occurrences.map(calendarDay).sorted()
             let born = calendarDay(file.created)
             let title = file.eventTitle.isEmpty
                 ? url.deletingPathExtension().lastPathComponent : file.eventTitle
-            entries.append(Entry(relPath: rel, url: url, title: title,
-                                 impact: file.impact ?? 0,
-                                 occurrenceDays: days, born: born, join: nil))
+            let entry = Entry(relPath: rel, url: url, title: title,
+                              impact: file.impact ?? 0,
+                              occurrenceDays: days, born: born, gone: gone, join: nil)
+            if gone == nil { entries.append(entry) } else { archivedEntries.append(entry) }
             births[born, default: 0] += 1
             for d in days where d != born { merges[d, default: 0] += 1 }
+        }
+        // 原路径又被新 event 占用时,归档那条保留 `_archive/` 路径当身份(不吃 folder 归属)
+        let liveRels = Set(entries.map(\.relPath))
+        for var e in archivedEntries {
+            if liveRels.contains(e.relPath) {
+                e = Entry(relPath: "_archive/" + e.relPath, url: e.url, title: e.title,
+                          impact: e.impact, occurrenceDays: e.occurrenceDays,
+                          born: e.born, gone: e.gone, join: nil)
+            }
+            entries.append(e)
         }
         guard !entries.isEmpty else { return nil }
         entries.sort { $0.relPath < $1.relPath }   // 规范顺序(节点身份跨天恒定)
@@ -158,6 +182,7 @@ enum EventTimeline {
         weight.reserveCapacity(idx.entries.count)
         for e in idx.entries {
             guard e.born <= d else { continue }          // 还没诞生
+            if let g = e.gone, g <= d { continue }       // 已归档
             weight[e.relPath] = weightAt(e, day: d, params: params)
             if let j = e.join, j.day <= d { folderOf[e.relPath] = j.slug }
         }

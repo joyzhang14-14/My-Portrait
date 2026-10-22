@@ -1075,6 +1075,10 @@ final class MemoryScheduler {
             eventProgress = StepProgress(fraction: 0.99, stage: "Rebalancing")
             _ = MemoryBudget_applyToDisk()
 
+            // weight 刚算好 → 归档冷掉的老 event;放在 classify 前,归档的不会再被分进 folder。
+            eventProgress = StepProgress(fraction: 0.993, stage: "Archiving events")
+            await Task.detached(priority: .userInitiated) { Archiver.runEvents() }.value
+
             // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
             // personality 按本地日自己判就绪(EventIntervalStore.readyPersonalityDays)。
             _ = store.ensureRow(for: distillAnchor)

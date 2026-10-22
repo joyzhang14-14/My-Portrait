@@ -157,18 +157,85 @@ enum Archiver {
         return Result(archivedCount: done.count, skippedCount: skipped, plans: done)
     }
 
+    // MARK: - events/
+
+    /// event 归档门槛:weight(按 now 现算)< 1,且创建满 90 天。
+    static let eventMaxWeight: Double = 1
+    static let eventMinAgeDays: Double = 90
+
+    /// 把冷掉的老 event 移到 `events/_archive/<原相对路径>`,戳 `archived_at`。
+    /// 触发点:本机 event job 收尾(weight / rebalance 之后、classify 之前)、
+    /// Premium 结果导入之后。
+    ///
+    /// - folder 的 `events[]` 引用保留:graph 只按盘上的 event 建成员,死引用无害;
+    ///   时间线靠它还原归档 event 当年的 folder 归属。
+    /// - 单向:同一件事再发生时 backfill 看不到 `_archive`,会新建一条 event。
+    @discardableResult
+    static func runEvents(now: Date = Date()) -> Int {
+        let root = Storage.eventsDir
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var plans: [Plan] = []
+        let prefix = root.path + "/"
+        for case let url as URL in enumerator {
+            guard url.pathExtension == "md", url.lastPathComponent != "INDEX.md" else { continue }
+            let parts = url.pathComponents
+            if parts.contains("_archive") || parts.contains("_quarantine")
+                || parts.contains("_folders") { continue }
+            guard let file = try? PortraitFileIO.read(from: url),
+                  file.archivedAt == nil, !file.pinned else { continue }
+            let w = WeightCalculator.weight(for: file, now: now)
+            let ageDays = now.timeIntervalSince(file.created) / 86_400
+            guard w < eventMaxWeight, ageDays >= eventMinAgeDays else { continue }
+            let rel = String(url.path.dropFirst(prefix.count))
+            plans.append(Plan(
+                source: url,
+                destination: root.appendingPathComponent("_archive/\(rel)"),
+                reason: "weight=\(formatted(w)) age_days=\(Int(ageDays))"))
+        }
+
+        // 执行与 portrait 同一套:先戳 archived_at 再移动,移动失败回滚戳。
+        var done: [Plan] = []
+        for plan in plans {
+            if fm.fileExists(atPath: plan.destination.path) { continue }
+            do {
+                var file = try PortraitFileIO.read(from: plan.source)
+                file.archivedAt = now
+                try PortraitFileIO.write(file, to: plan.source)
+                try fm.createDirectory(at: plan.destination.deletingLastPathComponent(),
+                                       withIntermediateDirectories: true)
+                do {
+                    try fm.moveItem(at: plan.source, to: plan.destination)
+                    done.append(plan)
+                } catch {
+                    file.archivedAt = nil
+                    try? PortraitFileIO.write(file, to: plan.source)
+                }
+            } catch {
+                continue
+            }
+        }
+        try? writeJournal(plans: done, now: now, root: root, label: "Event Archive")
+        return done.count
+    }
+
     // MARK: - Journal append
 
-    private static func writeJournal(plans: [Plan], now: Date) throws {
+    private static func writeJournal(plans: [Plan], now: Date,
+                                     root: URL = Storage.portraitDir,
+                                     label: String = "Archive") throws {
         guard !plans.isEmpty else { return }
         let url = PortraitPaths.todayJournalURL
         let fm = FileManager.default
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-        let header = "\n## Archive 归档 (\(plans.count), 程序触发, \(formatTime(now)))\n"
+        let header = "\n## \(label) 归档 (\(plans.count), 程序触发, \(formatTime(now)))\n"
         var lines = [header]
         for p in plans {
-            let rel = p.source.path.replacingOccurrences(of: Storage.portraitDir.path + "/", with: "")
+            let rel = p.source.path.replacingOccurrences(of: root.path + "/", with: "")
             lines.append("- \(rel) → _archive/  (\(p.reason))")
         }
         let chunk = lines.joined(separator: "\n") + "\n"

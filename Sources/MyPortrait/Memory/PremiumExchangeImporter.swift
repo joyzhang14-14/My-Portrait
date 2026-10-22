@@ -12,7 +12,7 @@ private let importLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 三方合并(逐文件):base = 结果包 `base_trees`,premium = `result_trees`,
 /// mac = 当前文件哈希。
 ///   - mac == premium                → 已一致,不动
-///   - mac 不存在 / mac == base     → 写 premium 版
+///   - mac 不存在 / mac == base     → 写 premium 版(本机已归档到 `events/_archive/` 的 event 除外,保留不写)
 ///   - premium == base               → 保留 mac
 ///   - 其余                         → 冲突:保留 mac,premium 版存 `.staging/premium_conflicts/<id>/`
 ///   - deleted:mac == base 才删,否则记冲突
@@ -121,6 +121,10 @@ enum PremiumExchangeImporter {
                     pipeline: "My Portrait Premium", kindLabel: "Import failed",
                     userMessage: err.localizedDescription))
             }
+        }
+        // Premium 写回的 event 也要过一遍归档(event 链在 Premium 时本机不跑 event job)。
+        if !imported.isEmpty {
+            await Task.detached(priority: .utility) { Archiver.runEvents() }.value
         }
         scheduler.releaseAllLocks()
         lock.release()
@@ -275,6 +279,13 @@ enum PremiumExchangeImporter {
             let dst = root.appendingPathComponent(rel)
             let mac = PremiumExchange.fileSHA(dst)
             if mac == premium { continue }
+            // 导出后本机才归档的 event:不写回原位,否则和 `_archive/` 里那份重复。
+            if mac == nil, rel.hasPrefix("events/"),
+               fm.fileExists(atPath: root.appendingPathComponent(
+                   "events/_archive/" + rel.dropFirst("events/".count)).path) {
+                report.kept += 1
+                continue
+            }
             if mac == nil || mac == base {
                 let src = bundleDir.appendingPathComponent(rel)
                 let data = try Data(contentsOf: src)
