@@ -196,50 +196,11 @@ enum PremiumExchangeExporter {
                 }
             }.value
         }
-        var result = await package(input)
-        // 超了服务器单包上限就对半拆:区间个数对半,没带上的区间仍是待发,下一个包接着带。
-        while case .exported(let id, let archive) = result, isOversized(archive),
-              input.pending.eventIntervals.count > 1 {
-            let k = halfIntervals(input.pending.eventIntervals.count)
-            exportLog.notice("bundle \(id, privacy: .public) over the cap with \(input.pending.eventIntervals.count) intervals, repacking with \(k)")
-            try? FileManager.default.removeItem(at: archive)
-            guard let smaller = gatherInput(dbPool: dbPool, maxIntervals: k) else { return .noWork }
-            input = smaller
-            result = await package(input)
-        }
-        // 只剩一个区间还超:按时间对半切成分片包,分片还超再对半;Premium 收齐分片再合起来处理。
-        func packParts(_ from: Int64, _ to: Int64) async -> [String]? {
-            var part = input
-            part.pending.eventIntervals[0].partFromMs = from
-            part.pending.eventIntervals[0].partToMs = to
-            guard case .exported(let id, let archive) = await package(part) else { return nil }
-            guard isOversized(archive), let mid = splitPoint(from, to) else {
-                if isOversized(archive) {
-                    exportLog.error("bundle \(id, privacy: .public) still over the cap at its smallest part")
-                }
-                return [id]
-            }
-            try? FileManager.default.removeItem(at: archive)
-            guard let a = await packParts(from, mid) else { return nil }
-            guard let b = await packParts(mid, to) else {
-                for x in a { try? FileManager.default.removeItem(at: PremiumRemote.archiveURL(root, x)) }
-                return nil
-            }
-            return a + b
-        }
-        var ids: [String] = []
-        if case .exported(let id, let archive) = result {
-            ids = [id]
-            if isOversized(archive), input.pending.eventIntervals.count == 1,
-               let iv = input.pending.eventIntervals.first, let s = iv.startMs, let e = iv.endMs,
-               splitPoint(s, e) != nil {
-                exportLog.notice("bundle \(id, privacy: .public) over the cap with one interval, splitting it by time")
-                try? FileManager.default.removeItem(at: archive)
-                guard let parts = await packParts(s, e) else { return .skipped("export failed while splitting") }
-                ids = parts
-                result = .exported(bundleId: parts[parts.count - 1], archive: PremiumRemote.archiveURL(root, parts[parts.count - 1]))
-            }
-        }
+        let packed = await packWithinCap(input, regather: { gatherInput(dbPool: dbPool, maxIntervals: $0) },
+                                          package: package)
+        let result = packed.result
+        let ids = packed.ids
+        input = packed.input
         if !ids.isEmpty {
             PremiumRemote.updateState(root) { s in
                 for id in ids {
@@ -253,6 +214,55 @@ enum PremiumExchangeExporter {
             exportLog.notice("packed bundle(s) \(ids.joined(separator: ", "), privacy: .public)")
         }
         return result
+    }
+
+    /// 打包;压缩后超过 `maxBundleBytes` 就对半拆:区间个数对半(`regather` 按个数重取输入,没带上的区间仍是待发,
+    /// 下一个包接着带);只剩一个区间还超就按时间对半切成分片包,分片还超再对半。
+    /// 返回最后一个包的结果、打出来的全部包 id(分片时多个,按时间先后)和实际打包用的输入。
+    @MainActor
+    static func packWithinCap(_ start: Input, regather: (Int) -> Input?,
+                              package: (Input) async -> ExportResult) async -> (result: ExportResult, ids: [String], input: Input) {
+        var input = start
+        var result = await package(input)
+        while case .exported(let id, let archive) = result, isOversized(archive),
+              input.pending.eventIntervals.count > 1 {
+            let k = halfIntervals(input.pending.eventIntervals.count)
+            exportLog.notice("bundle \(id, privacy: .public) over the cap with \(input.pending.eventIntervals.count) intervals, repacking with \(k)")
+            try? FileManager.default.removeItem(at: archive)
+            guard let smaller = regather(k) else { return (.noWork, [], input) }
+            input = smaller
+            result = await package(input)
+        }
+        guard case .exported(let id, let archive) = result else { return (result, [], input) }
+        guard isOversized(archive), input.pending.eventIntervals.count == 1,
+              let iv = input.pending.eventIntervals.first, let s = iv.startMs, let e = iv.endMs,
+              splitPoint(s, e) != nil else { return (result, [id], input) }
+        exportLog.notice("bundle \(id, privacy: .public) over the cap with one interval, splitting it by time")
+        try? FileManager.default.removeItem(at: archive)
+        let base = input
+        func packParts(_ from: Int64, _ to: Int64) async -> [(String, URL)]? {
+            var part = base
+            part.pending.eventIntervals[0].partFromMs = from
+            part.pending.eventIntervals[0].partToMs = to
+            guard case .exported(let id, let archive) = await package(part) else { return nil }
+            guard isOversized(archive), let mid = splitPoint(from, to) else {
+                if isOversized(archive) {
+                    exportLog.error("bundle \(id, privacy: .public) still over the cap at its smallest part")
+                }
+                return [(id, archive)]
+            }
+            try? FileManager.default.removeItem(at: archive)
+            guard let a = await packParts(from, mid) else { return nil }
+            guard let b = await packParts(mid, to) else {
+                for (_, url) in a { try? FileManager.default.removeItem(at: url) }
+                return nil
+            }
+            return a + b
+        }
+        guard let parts = await packParts(s, e), let last = parts.last else {
+            return (.skipped("export failed while splitting"), [], input)
+        }
+        return (.exported(bundleId: last.0, archive: last.1), parts.map(\.0), input)
     }
 
     // MARK: - 取输入(主线程)
