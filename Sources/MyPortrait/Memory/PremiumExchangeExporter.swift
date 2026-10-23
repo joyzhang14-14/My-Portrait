@@ -443,7 +443,13 @@ enum PremiumExchangeExporter {
     }
 
     /// 在 `parentDir/.<id>.partial/` 里写全包,rename 成 `parentDir/<id>/`,最后写 DONE。
-    /// manifest 的 `files` 记帧文件与写作记录的 sha256,`contents` 记包内容;不要 `ocr` 时帧的 OCR 文字写空串。
+    /// 按 `input.contents` 放内容(manifest `contents` 照记),区间(分片时只取分片那段)的:
+    /// - `ocr`:帧带 OCR 文字(不要时写空串);
+    /// - `event_session`:区间帧再带焦点(`focused` / `focus_state` / `visible_app`)、OCR 词框(`ocr_words_json`)和画面
+    ///   (`video` + `offset_ms` 指向 `video/` 里的 MP4 块,还没压成 MP4 的 `image` 指向 `images/` 里的 JPG),外加
+    ///   `keystrokes/` `mouse/` `typing/<interval_id>.jsonl`(击键、鼠标、打字记录);
+    /// - `audio`:`audio/<interval_id>.jsonl`(语音转写,带说话人名字)。
+    /// 性格日的帧文件只看 `ocr`。manifest 的 `files` 记树以外全部文件的 sha256。
     @discardableResult
     static func writeBundle(input: Input, bundleId: String, root: URL,
                             parentDir: URL, dbPool: DatabasePool) throws -> URL {
@@ -458,8 +464,42 @@ enum PremiumExchangeExporter {
         let framesDir = tmp.appendingPathComponent("frames", isDirectory: true)
         try fm.createDirectory(at: framesDir, withIntermediateDirectories: true)
         let ocr = input.contents.contains("ocr")
+        let session = input.contents.contains("event_session")
         for iv in input.pending.eventIntervals {
-            try writeIntervalFrames(iv, to: framesDir.appendingPathComponent("\(iv.id).jsonl"), ocr: ocr, dbPool: dbPool)
+            try writeIntervalFrames(iv, to: framesDir.appendingPathComponent("\(iv.id).jsonl"), ocr: ocr,
+                                    mediaInto: session ? tmp : nil, dbPool: dbPool)
+            let (s, e) = intervalRange(iv)
+            func rows(_ dir: String, _ sql: String) throws {
+                try writeJSONLines(sql: sql, arguments: ["s": s, "e": e],
+                                   to: tmp.appendingPathComponent("\(dir)/\(iv.id).jsonl"), dbPool: dbPool)
+            }
+            if session {
+                try rows("keystrokes", """
+                    SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers, input_source FROM keystroke_log
+                    WHERE ts_ms >= :s AND ts_ms < :e ORDER BY ts_ms, id
+                    """)
+                try rows("mouse", """
+                    SELECT id, ts_ms, bundle_id, kind, target_pid, target_bundle_id, x, y, screen_w, screen_h,
+                           click_count, modifiers FROM mouse_log
+                    WHERE ts_ms >= :s AND ts_ms < :e ORDER BY ts_ms, id
+                    """)
+                try rows("typing", """
+                    SELECT id, bundle_id, element_hash, started_at, ended_at, text, edit_log, total_chars,
+                           session_start, end_value, stripped, url FROM typing_events
+                    WHERE started_at >= :s AND started_at < :e ORDER BY started_at, id
+                    """)
+            }
+            if input.contents.contains("audio") {
+                try rows("audio", """
+                    SELECT t.id, CAST(c.recorded_at_ms + t.start_s * 1000 AS INTEGER) AS start_ms,
+                           CAST(c.recorded_at_ms + t.end_s * 1000 AS INTEGER) AS end_ms,
+                           t.text, sp.name AS speaker, c.is_input, t.engine
+                    FROM audio_transcriptions t JOIN audio_chunks c ON c.id = t.audio_chunk_id
+                    LEFT JOIN speakers sp ON sp.id = t.speaker_id
+                    WHERE c.recorded_at_ms + t.start_s * 1000 >= :s AND c.recorded_at_ms + t.start_s * 1000 < :e
+                    ORDER BY start_ms, t.id
+                    """)
+            }
         }
         for p in input.pending.personalityLog {
             try writeDayFrames(p, to: framesDir.appendingPathComponent("pday_\(p.day).jsonl"), ocr: ocr, dbPool: dbPool)
@@ -471,6 +511,14 @@ enum PremiumExchangeExporter {
                                     limit: input.params.writingStyleBatch, dbPool: dbPool)
         }
 
+        // 树以外的全部文件(此时包里只有它们)。
+        var files: [String: String] = [:]
+        let base = tmp.standardizedFileURL.path + "/"
+        for case let f as URL in fm.enumerator(at: tmp, includingPropertiesForKeys: [.isRegularFileKey])?.allObjects ?? []
+        where (try? f.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
+            files[String(f.standardizedFileURL.path.dropFirst(base.count))] = PremiumExchange.fileSHA(f)
+        }
+
         // 树镜像(原样字节复制),manifest.trees 按复制后的字节算。
         var trees: [String: String] = [:]
         for rel in PremiumExchange.listTreeFiles(root: root) {
@@ -479,15 +527,6 @@ enum PremiumExchangeExporter {
             try fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.copyItem(at: src, to: dst)
             if let h = PremiumExchange.fileSHA(dst) { trees[rel] = h }
-        }
-
-        var files: [String: String] = [:]
-        let names = (try? fm.contentsOfDirectory(atPath: framesDir.path)) ?? []
-        for name in names.sorted() where name.hasSuffix(".jsonl") {
-            files["frames/\(name)"] = PremiumExchange.fileSHA(framesDir.appendingPathComponent(name))
-        }
-        if let h = PremiumExchange.fileSHA(tmp.appendingPathComponent("writing_records.jsonl")) {
-            files["writing_records.jsonl"] = h
         }
 
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -518,71 +557,146 @@ enum PremiumExchangeExporter {
         return (w.start, w.end)
     }
 
-    private struct FrameLine: Encodable {
-        let id: Int64
-        let timestamp_ms: Int64
-        let app_name: String
-        let window_name: String
-        let browser_url: String?
-        let ocr: String
-
-        func encode(to encoder: Encoder) throws {
-            enum K: String, CodingKey { case id, timestamp_ms, app_name, window_name, browser_url, ocr }
-            var c = encoder.container(keyedBy: K.self)
-            try c.encode(id, forKey: .id)
-            try c.encode(timestamp_ms, forKey: .timestamp_ms)
-            try c.encode(app_name, forKey: .app_name)
-            try c.encode(window_name, forKey: .window_name)
-            try c.encode(browser_url, forKey: .browser_url)   // null 也写出
-            try c.encode(ocr, forKey: .ocr)
-        }
-    }
-
     private static func lineEncoder() -> JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.withoutEscapingSlashes]
         return e
     }
 
-    /// 区间内全部帧(`EventIntervalStore.intervalFrameSQL`,不设上限),按时间升序。`ocr` false = OCR 文字写空串。
-    static func writeIntervalFrames(_ iv: PremiumIntervalEntry, to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
-        let start = max(iv.startMs ?? 0, iv.partFromMs ?? Int64.min)
-        let end = min(iv.endMs ?? 0, iv.partToMs ?? Int64.max)
-        try writeFrameLines(where: EventIntervalStore.intervalFrameSQL, arguments: [
+    /// 区间(分片时是分片那段)的 [起, 止) UTC ms。
+    static func intervalRange(_ iv: PremiumIntervalEntry) -> (Int64, Int64) {
+        (max(iv.startMs ?? 0, iv.partFromMs ?? Int64.min), min(iv.endMs ?? 0, iv.partToMs ?? Int64.max))
+    }
+
+    /// 区间内全部帧(`EventIntervalStore.intervalFrameSQL`,不设上限),按时间升序。`ocr` false = OCR 文字写空串;
+    /// `mediaInto` 非 nil(event_session)= 再带焦点、OCR 词框,画面复制进这个包目录。
+    static func writeIntervalFrames(_ iv: PremiumIntervalEntry, to url: URL, ocr: Bool, mediaInto: URL?,
+                                    dbPool: DatabasePool) throws {
+        let (start, end) = intervalRange(iv)
+        let args: StatementArguments = [
             "iv_start": start, "iv_end": end,
             "iv_after": iv.afterFrameId ?? 0, "iv_max": iv.maxFrameId ?? Int64.max,
-        ], to: url, ocr: ocr, dbPool: dbPool)
+        ]
+        let media = try mediaInto.map {
+            try copyFrameMedia(where: EventIntervalStore.intervalFrameSQL, arguments: args, into: $0, dbPool: dbPool)
+        }
+        try writeFrameLines(where: EventIntervalStore.intervalFrameSQL, arguments: args, to: url, ocr: ocr,
+                            media: media, dbPool: dbPool)
     }
 
     /// 某本地日 [00:00, 24:00) 的全部帧(不过滤、不设上限),按时间升序。
     static func writeDayFrames(_ p: PremiumPersonalityDayEntry, to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
         let (s, e) = try dayBounds(p)
         try writeFrameLines(where: "timestamp_ms >= :start AND timestamp_ms < :end",
-                            arguments: ["start": s, "end": e], to: url, ocr: ocr, dbPool: dbPool)
+                            arguments: ["start": s, "end": e], to: url, ocr: ocr, media: nil, dbPool: dbPool)
     }
 
-    private static func writeFrameLines(where cond: String, arguments: StatementArguments,
-                                        to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
-        let enc = lineEncoder()
-        var out = Data()
+    /// `media` 非 nil(event_session)时每行再带焦点、OCR 词框和 `media[帧 id]` 的画面字段。
+    private static func writeFrameLines(where cond: String, arguments: StatementArguments, to url: URL, ocr: Bool,
+                                        media: [Int64: [String: Any]]?, dbPool: DatabasePool) throws {
+        let text = ocr ? "COALESCE(ocr_backfill_text, full_text, '')" : "''"
+        let session = media == nil ? ""
+            : ", focused, focus_state, visible_app, COALESCE(ocr_backfill_words, ocr_words_json) AS ocr_words_json"
+        try writeJSONLines(sql: """
+            SELECT id, timestamp_ms, COALESCE(app_name, '') AS app_name, COALESCE(window_name, '') AS window_name,
+                   browser_url, \(text) AS ocr\(session)
+            FROM frames
+            WHERE \(cond)
+            ORDER BY timestamp_ms ASC, id ASC
+            """, arguments: arguments, to: url, dbPool: dbPool,
+            extra: media.map { m in { r in m[r["id"]] ?? noMedia } })
+    }
+
+    private static var noMedia: [String: Any] { ["video": NSNull(), "offset_ms": NSNull(), "image": NSNull()] }
+
+    /// 帧的画面复制进包目录:压好的帧 → `video/<块文件名>`(行里 `video` + `offset_ms`),还没压的 → `images/<文件名>`
+    /// (`image`),文件不在 → 都是 null。JPG 正好被后台压缩删掉时再读一次这一帧,改用它的 MP4 块。
+    /// 返回 帧 id → 行里补的字段。
+    private static func copyFrameMedia(where cond: String, arguments: StatementArguments, into dir: URL,
+                                       dbPool: DatabasePool) throws -> [Int64: [String: Any]] {
+        let fm = FileManager.default
+        var placed: [String: String?] = [:]   // 库里的相对路径 → 包内路径(nil = 文件不在)
+        func place(_ raw: String?, _ sub: String) -> String? {
+            guard let raw else { return nil }
+            if let hit = placed[raw] { return hit }
+            var rel: String?
+            if let src = AssetPath.resolve(raw) {
+                let r = "\(sub)/\((raw as NSString).lastPathComponent)"
+                let dst = dir.appendingPathComponent(r)
+                try? fm.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if fm.fileExists(atPath: dst.path) || (try? fm.copyItem(atPath: src, toPath: dst.path)) != nil { rel = r }
+            }
+            placed[raw] = rel
+            return rel
+        }
+        /// nil = JPG 刚被删,要重读。
+        func fields(_ r: Row) -> [String: Any]? {
+            if let chunk: String = r["chunk"] {
+                return ["video": place(chunk, "video") ?? NSNull(), "offset_ms": (r["offset_ms"] as Int64?) ?? NSNull(),
+                        "image": NSNull()]
+            }
+            guard let snap: String = r["snapshot_path"] else { return noMedia }
+            guard let img = place(snap, "images") else { return nil }
+            return ["video": NSNull(), "offset_ms": NSNull(), "image": img]
+        }
+        let pick = """
+            SELECT id, offset_ms, snapshot_path,
+                   (SELECT file_path FROM video_chunks v WHERE v.id = frames.video_chunk_id) AS chunk
+            FROM frames
+            """
+        var out: [Int64: [String: Any]] = [:]
+        var retry: [Int64] = []
         try dbPool.read { db in
-            let rows = try Row.fetchCursor(db, sql: """
-                SELECT id, timestamp_ms, app_name, COALESCE(window_name, '') AS window_name,
-                       browser_url, \(ocr ? "COALESCE(ocr_backfill_text, full_text, '')" : "''") AS ocr
-                FROM frames
-                WHERE \(cond)
-                ORDER BY timestamp_ms ASC, id ASC
-                """, arguments: arguments)
+            let rows = try Row.fetchCursor(db, sql: "\(pick) WHERE \(cond)", arguments: arguments)
             while let r = try rows.next() {
-                out.append(try enc.encode(FrameLine(
-                    id: r["id"], timestamp_ms: r["timestamp_ms"],
-                    app_name: (r["app_name"] as String?) ?? "",
-                    window_name: r["window_name"], browser_url: r["browser_url"],
-                    ocr: r["ocr"])))
-                out.append(0x0A)
+                let id: Int64 = r["id"]
+                if let f = fields(r) { out[id] = f } else { retry.append(id) }
             }
         }
-        try out.write(to: url)
+        for id in retry {
+            let r = try dbPool.read { db in try Row.fetchOne(db, sql: "\(pick) WHERE id = :id", arguments: ["id": id]) }
+            out[id] = r.flatMap(fields) ?? noMedia
+        }
+        return out
+    }
+
+    /// 查询结果一行一个 JSON 对象写到 `url`(键 = 列名,NULL 写 null,BLOB 不写),边查边写;`extra` 给每行补字段。
+    private static func writeJSONLines(sql: String, arguments: StatementArguments, to url: URL, dbPool: DatabasePool,
+                                       extra: ((Row) -> [String: Any])? = nil) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard fm.createFile(atPath: url.path, contents: nil) else {
+            throw NSError(domain: "PremiumExport", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "cannot create \(url.lastPathComponent)"])
+        }
+        let out = try FileHandle(forWritingTo: url)
+        defer { try? out.close() }
+        var buf = Data()
+        try dbPool.read { db in
+            let rows = try Row.fetchCursor(db, sql: sql, arguments: arguments)
+            while let r = try rows.next() {
+                try autoreleasepool {   // 一天的帧连词框有几百 MB,临时对象逐行放掉
+                    var obj: [String: Any] = [:]
+                    for (col, v) in r {
+                        switch v.storage {
+                        case .null: obj[col] = NSNull()
+                        case .int64(let i): obj[col] = i
+                        case .double(let d): obj[col] = d
+                        case .string(let t): obj[col] = t
+                        case .blob: break
+                        }
+                    }
+                    if let extra { obj.merge(extra(r)) { $1 } }
+                    buf.append(try JSONSerialization.data(withJSONObject: obj, options: [.withoutEscapingSlashes]))
+                    buf.append(0x0A)
+                }
+                if buf.count >= 4 << 20 {
+                    try out.write(contentsOf: buf)
+                    buf.removeAll(keepingCapacity: true)
+                }
+            }
+        }
+        try out.write(contentsOf: buf)
     }
 
     private struct RecordLine: Encodable {

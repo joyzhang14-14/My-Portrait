@@ -95,8 +95,9 @@ enum PremiumRemote {
         var bundles: [BundleStatus]
     }
 
-    /// 这个版本能放进包里的内容。`ocr` = 帧文件带 OCR 文字(不要时帧只带时间、app、窗口、URL)。
-    static let supportedContents: Set<String> = ["ocr"]
+    /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字(不要时帧只带时间、app、窗口、URL);`event_session` = 区间的
+    /// 画面(MP4 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录;`audio` = 语音转写。见 `PremiumExchangeExporter.writeBundle`。
+    static let supportedContents: Set<String> = ["ocr", "event_session", "audio"]
 
     /// Premium 要的内容这台给不给得了:nil = 给得了,否则是原因。
     static func contentsProblem(_ contents: [String]?) -> String? {

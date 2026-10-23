@@ -744,6 +744,109 @@ enum PremiumImportSelfTest {
               "Detect: reachable + key valid → healthy with the user name and contents; offline → the reason")
     }
 
+    /// event_session / audio:画面(MP4 块 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录、语音转写,分片只取分片那段。
+    private static func checkEventSession(tmp: URL) async throws {
+        print("[premium-selftest] event session contents")
+        let fm = FileManager.default
+        let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("session.sqlite").path).dbPool
+        let media = tmp.appendingPathComponent("session-media", isDirectory: true)
+        try fm.createDirectory(at: media, withIntermediateDirectories: true)
+        let mp4 = media.appendingPathComponent("mmain_1000.mp4"), jpg = media.appendingPathComponent("1600_mmain.jpg")
+        try Data("mp4".utf8).write(to: mp4)
+        try Data("jpg".utf8).write(to: jpg)
+        try await pool.write { db in
+            try db.execute(sql: """
+                INSERT INTO video_chunks (id, file_path, device_name, fps, start_ts_ms, end_ts_ms, frame_count, created_at_ms)
+                VALUES (7, :p, 'main', 1, 1000, 1400, 2, 1)
+                """, arguments: ["p": mp4.path])
+            for (t, chunk, offset, snap) in [(Int64(1100), Int64?(7), Int64?(0), String?.none), (1300, 7, 200, nil),
+                                             (1600, nil, nil, jpg.path), (1900, nil, nil, media.appendingPathComponent("gone.jpg").path)] {
+                try db.execute(sql: """
+                    INSERT INTO frames (timestamp_ms, app_name, snapshot_path, video_chunk_id, offset_ms, capture_trigger,
+                                        full_text, ocr_words_json, focus_state, visible_app, created_at_ms)
+                    VALUES (:t, 'App', :snap, :chunk, :offset, 'click', 'text', '[{"text":"text"}]', 'normal', 'App', :t)
+                    """, arguments: ["t": t, "snap": snap, "chunk": chunk, "offset": offset])
+            }
+            for t in [Int64(1200), 1700, 2500] {
+                try db.execute(sql: """
+                    INSERT INTO keystroke_log (ts_ms, bundle_id, char, is_backspace, modifiers) VALUES (:t, 'app', 'a', 0, 0)
+                    """, arguments: ["t": t])
+            }
+            try db.execute(sql: """
+                INSERT INTO mouse_log (ts_ms, bundle_id, kind, click_count, modifiers) VALUES (1250, 'app', 'left_down', 1, 0)
+                """)
+            try db.execute(sql: """
+                INSERT INTO typing_events (bundle_id, element_hash, started_at, ended_at, text, edit_log, total_chars,
+                                           session_start, end_value, stripped, url)
+                VALUES ('app', 1, 1650, 1700, 'hello', '', 5, '', 'hello', '', '')
+                """)
+            try db.execute(sql: """
+                INSERT INTO speakers (id, name, embedding_count, hallucination, created_at_ms, updated_at_ms)
+                VALUES (3, 'Alice', 1, 0, 1, 1)
+                """)
+            try db.execute(sql: """
+                INSERT INTO audio_chunks (id, file_path, recorded_at_ms, duration_s, device, is_input, status, created_at_ms, retry_count)
+                VALUES (5, 'a.m4a', 1000, 1, 'mic', 1, 'done', 1, 0)
+                """)
+            try db.execute(sql: """
+                INSERT INTO audio_transcriptions (audio_chunk_id, start_s, end_s, text, speaker_id, engine, transcribed_at_ms)
+                VALUES (5, 0.8, 0.9, 'hi there', 3, 'whisper', 1)
+                """)
+        }
+        let root = tmp.appendingPathComponent("session-root", isDirectory: true)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        func bundle(_ iv: PremiumIntervalEntry, _ contents: [String], _ id: String) throws -> URL {
+            let input = PremiumExchangeExporter.Input(
+                chains: ["event"], contents: contents,
+                pending: PremiumPending(eventIntervals: [iv], personalityDays: [], distillPending: false,
+                                      classifyPending: false, writingStyleEnabled: false, writingRecordsUnprocessed: 0),
+                processingLog: [], aboutUserBlock: "", params: selftestParams, appVersion: "selftest")
+            return try PremiumExchangeExporter.writeBundle(input: input, bundleId: id, root: root,
+                                                         parentDir: tmp.appendingPathComponent("session", isDirectory: true),
+                                                         dbPool: pool)
+        }
+        func lines(_ d: URL, _ rel: String) -> [[String: Any]] {
+            (read(d.appendingPathComponent(rel)) ?? "").split(separator: "\n").compactMap {
+                try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+            }
+        }
+        let whole = PremiumIntervalEntry(id: "iv:1000", startMs: 1000, endMs: 2000)
+        let all = try bundle(whole, ["audio", "event_session", "ocr"], "20260104T000000Z-es")
+        let frames = lines(all, "frames/iv:1000.jsonl")
+        let man = try JSONDecoder().decode(PremiumBundleManifest.self,
+                                           from: Data(contentsOf: all.appendingPathComponent("manifest.json")))
+        check(frames.count == 4
+              && frames[0]["video"] as? String == "video/mmain_1000.mp4" && frames[1]["offset_ms"] as? Int64 == 200
+              && frames[2]["image"] as? String == "images/1600_mmain.jpg"
+              && frames[3]["image"] is NSNull && frames[3]["video"] is NSNull
+              && frames.allSatisfy { $0["focus_state"] as? String == "normal" && $0["visible_app"] as? String == "App"
+                                     && $0["ocr_words_json"] as? String == #"[{"text":"text"}]"# && $0["ocr"] as? String == "text" },
+              "event_session frames: MP4 chunk + offset or the not-yet-compressed JPG, focus, OCR word boxes")
+        check(read(all.appendingPathComponent("video/mmain_1000.mp4")) == "mp4"
+              && read(all.appendingPathComponent("images/1600_mmain.jpg")) == "jpg"
+              && man.files["video/mmain_1000.mp4"] == PremiumExchange.fileSHA(mp4)
+              && man.files["keystrokes/iv:1000.jsonl"] != nil && man.files["frames/iv:1000.jsonl"] != nil,
+              "event_session: screen media copied into the bundle, every file hashed in manifest.files")
+        let audio = lines(all, "audio/iv:1000.jsonl")
+        check(lines(all, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1200, 1700]
+              && lines(all, "mouse/iv:1000.jsonl").count == 1 && lines(all, "typing/iv:1000.jsonl").first?["text"] as? String == "hello"
+              && audio.count == 1 && audio.first?["speaker"] as? String == "Alice" && audio.first?["start_ms"] as? Int64 == 1800,
+              "event_session keys / mouse / typing and audio transcripts: only the interval's own time range")
+        var half = whole
+        half.partFromMs = 1500; half.partToMs = 2000
+        let part = try bundle(half, ["event_session", "ocr"], "20260104T000001Z-es")
+        check(lines(part, "frames/iv:1000.jsonl").count == 2 && !fm.fileExists(atPath: part.appendingPathComponent("video").path)
+              && lines(part, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1700]
+              && !fm.fileExists(atPath: part.appendingPathComponent("audio").path),
+              "event_session part: media and keys of that part only; no audio unless Premium asks for it")
+        let plain = try bundle(whole, ["ocr"], "20260104T000002Z-es")
+        let plainFrames = lines(plain, "frames/iv:1000.jsonl")
+        check(plainFrames.count == 4 && plainFrames.allSatisfy { $0["focus_state"] == nil && $0["video"] == nil }
+              && ["keystrokes", "mouse", "typing", "video", "images", "audio"].allSatisfy {
+                  !fm.fileExists(atPath: plain.appendingPathComponent($0).path) },
+              "OCR only: frames as before, nothing from EventSession or audio")
+    }
+
     /// 区间台账 + personality 就绪 + v2 输入包,在独立的临时库上跑(时区偏移固定 0)。
     private static func checkLedger(tmp: URL) async throws {
         let fm = FileManager.default
@@ -958,6 +1061,7 @@ enum PremiumImportSelfTest {
         checkSegmenter()
         print("[premium-selftest] interval ledger + personality days + v2 bundle")
         try await checkLedger(tmp: tmp)
+        try await checkEventSession(tmp: tmp)
 
         // —— 基线:两条 writing_records + 一行 processing_log + 一个区间 ——
         try await pool.write { db in
@@ -1049,7 +1153,7 @@ enum PremiumImportSelfTest {
         secondHalf.partFromMs = 1500; secondHalf.partToMs = 2000
         func frameTimes(_ iv: PremiumIntervalEntry) throws -> [Int64] {
             let url = tmp.appendingPathComponent("part-\(UUID().uuidString).jsonl")
-            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, dbPool: partPool)
+            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, mediaInto: nil, dbPool: partPool)
             return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").compactMap {
                 (try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["timestamp_ms"] as? Int64
             }
