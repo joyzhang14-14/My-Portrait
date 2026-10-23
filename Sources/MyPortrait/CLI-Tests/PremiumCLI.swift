@@ -455,6 +455,7 @@ enum PremiumImportSelfTest {
     /// 进程内的假收件服务:记下收到的包、按 `statuses` 回状态、按 `results` 给结果。
     final class FakePremium: PremiumRemote.Transport, @unchecked Sendable {
         var reachable = true
+        var contents: [String]? = ["ocr"]
         var rejectNextUpload: Int?
         var uploads: [String: Data] = [:]
         var statuses: [String: PremiumRemote.BundleStatus] = [:]
@@ -466,7 +467,7 @@ enum PremiumImportSelfTest {
         }
         func me() async throws -> PremiumRemote.Me {
             try await health()
-            return PremiumRemote.Me(user: "Selftest", bundles: Array(statuses.values))
+            return PremiumRemote.Me(user: "Selftest", contents: contents, bundles: Array(statuses.values))
         }
         func upload(bundleId: String, file: URL, sha256: String) async throws -> PremiumRemote.BundleStatus {
             try await health()
@@ -596,18 +597,24 @@ enum PremiumImportSelfTest {
         let root = tmp.appendingPathComponent("reach-root", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var writes = 0
+        var contents: [String] = []
         func round(_ nowMs: Int64, due: Bool = true) async -> E.SealCheckResult {
             let now = Date(timeIntervalSince1970: Double(nowMs) / 1000)
             return await E.sealThenExport(
                 seal: { try store.sealCheck(now: now, tzOffsetMin: 0) }, due: { due }, offloaded: true,
-                unreachable: { await R.unreachableReason(cfg) },
+                unreachable: {
+                    switch await R.check(cfg) {
+                    case .success(let c): contents = c; return nil
+                    case .failure(let e): return e.message
+                    }
+                },
                 write: {
                     writes += 1
                     do {
                         let sent = R.readState(root).sentIntervals          // 同 pendingNow:在路上的不再发
                         let ivs = try store.needsWork().filter { !sent.contains($0.id) }.map(PremiumIntervalEntry.init)
                         let input = E.Input(
-                            chains: ["event"],
+                            chains: ["event"], contents: contents,
                             pending: PremiumPending(eventIntervals: ivs,
                                                   personalityDays: [], distillPending: false, classifyPending: false,
                                                   writingStyleEnabled: false, writingRecordsUnprocessed: 0),
@@ -638,6 +645,17 @@ enum PremiumImportSelfTest {
         check(skipped(r1) == "Premium not reachable (offline)" && writes == 0,
               "seal check, Premium not reachable: export skipped with the reason, nothing packed")
         fake.reachable = true
+        fake.contents = ["ocr", "video"]
+        let rVideo = await round(t0 + 14 * h + 2 * m)
+        let probeVideo = await R.probe(cfg, root: root)
+        fake.contents = nil
+        let rNone = await round(t0 + 14 * h + 3 * m)
+        fake.contents = ["ocr"]
+        check(skipped(rVideo)?.contains("asks for video") == true && skipped(rNone)?.contains("did not say") == true
+              && writes == 0 && !probeVideo.healthy && probeVideo.problem?.contains("video") == true,
+              "Premium asks for content this version can't send, or says nothing: no bundle, Detect shows why")
+        check(R.contentsProblem([]) == nil && R.contentsProblem(["ocr"]) == nil,
+              "Premium asks for OCR or for nothing extra: this version can send it")
         let r2 = await round(t0 + 14 * h + 31 * m, due: false)
         check(skipped(r2) == E.notDueReason && writes == 0, "seal check, nothing new since the last upload: not packed")
         let r3 = await round(t0 + 15 * h)
@@ -650,13 +668,14 @@ enum PremiumImportSelfTest {
                                                    from: Data(contentsOf: dir.appendingPathComponent("manifest.json"))) {
                 let framesRel = "frames/\(sealedId).jsonl"
                 manifestOK = man.pending.eventIntervals.map(\.id) == [sealedId] && PremiumExchange.isDone(dir)
+                    && man.contents == ["ocr"]
                     && man.files[framesRel] == PremiumExchange.fileSHA(dir.appendingPathComponent(framesRel))
                     && !FileManager.default.fileExists(atPath: dir.appendingPathComponent("RUN_NOW").path)
             }
         }
         check(writes == 1 && manifestOK && !FileManager.default.fileExists(
                 atPath: R.uploadDir(root).appendingPathComponent(packed).path),
-              "seal check, reachable and due: packed as tar.gz (interval, DONE, frame hashes), bundle dir removed")
+              "seal check, reachable and due: packed as tar.gz (interval, DONE, frame hashes, contents), bundle dir removed")
         check(packed.split(separator: "-").last?.count == 8, "bundle id carries an 8-char random suffix")
         check(R.readState(root).uploads.first?.status == R.statusPendingUpload
               && R.readState(root).sentIntervals == [sealedId], "ledger: pending_upload with its interval before the upload")
@@ -720,8 +739,9 @@ enum PremiumImportSelfTest {
         fake.reachable = false
         let probeOff = await R.probe(cfg, root: root)
         fake.reachable = true
-        check(probe.healthy && probe.user == "Selftest" && !probeOff.healthy && probeOff.problem != nil,
-              "Detect: reachable + key valid → healthy with the user name; offline → the reason")
+        check(probe.healthy && probe.user == "Selftest" && probe.contents == ["ocr"]
+              && !probeOff.healthy && probeOff.problem != nil,
+              "Detect: reachable + key valid → healthy with the user name and contents; offline → the reason")
     }
 
     /// 区间台账 + personality 就绪 + v2 输入包,在独立的临时库上跑(时区偏移固定 0)。
@@ -860,7 +880,7 @@ enum PremiumImportSelfTest {
         let ivs = try store.all()
         let pday = PremiumPersonalityDayEntry(day: "2026-01-02", tzOffsetMin: 0, status: "pending", retryCount: 0)
         let input = PremiumExchangeExporter.Input(
-            chains: ["event", "personality"],
+            chains: ["event", "personality"], contents: ["ocr"],
             pending: PremiumPending(eventIntervals: ivs.map(PremiumIntervalEntry.init), personalityDays: ["2026-01-02"],
                                   distillPending: false, classifyPending: false, writingStyleEnabled: false,
                                   writingRecordsUnprocessed: 0, personalityLog: [pday]),
@@ -893,6 +913,24 @@ enum PremiumImportSelfTest {
                 .split(separator: "\n").count == dayFrames && dayFrames > 0,
               "v2 bundle: frames/pday_<day>.jsonl has all \(dayFrames) frames of that local day")
         check(PremiumExchange.isDone(dir), "v2 bundle: DONE valid")
+        func ocrTexts(_ d: URL) -> [String] {
+            ivs.flatMap { iv in
+                (read(d.appendingPathComponent("frames/\(iv.id).jsonl")) ?? "").split(separator: "\n").compactMap {
+                    (try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["ocr"] as? String
+                }
+            }
+        }
+        var noOCR = input
+        noOCR.contents = []
+        let dirNoOCR = try PremiumExchangeExporter.writeBundle(input: noOCR, bundleId: "20260103T000001Z-v2", root: root,
+                                                             parentDir: tmp.appendingPathComponent("v2", isDirectory: true),
+                                                             dbPool: pool)
+        let manNoOCR = try JSONDecoder().decode(PremiumBundleManifest.self,
+                                                from: Data(contentsOf: dirNoOCR.appendingPathComponent("manifest.json")))
+        check(manifest.contents == ["ocr"] && ocrTexts(dir).contains { !$0.isEmpty }
+              && manNoOCR.contents == [] && ocrTexts(dirNoOCR).count == ocrTexts(dir).count
+              && ocrTexts(dirNoOCR).allSatisfy(\.isEmpty),
+              "bundle contents: frames carry OCR text only when Premium asks for ocr, manifest records the contents")
     }
 
     private static let selftestParams = PremiumParams(
@@ -960,7 +998,7 @@ enum PremiumImportSelfTest {
         // —— 导出:包写进 staging、打成 tar.gz;每个包一个新 id ——
         print("[premium-selftest] export")
         let input = PremiumExchangeExporter.Input(
-            chains: ["event", "portrait", "writing_style"],
+            chains: ["event", "portrait", "writing_style"], contents: ["ocr"],
             pending: PremiumPending(eventIntervals: [PremiumIntervalEntry(id: "iv:1000", startMs: 1000, endMs: 2000,
                                                                       tzOffsetMin: 0, trigger: "gap")],
                                   personalityDays: [], distillPending: true,
@@ -1011,7 +1049,7 @@ enum PremiumImportSelfTest {
         secondHalf.partFromMs = 1500; secondHalf.partToMs = 2000
         func frameTimes(_ iv: PremiumIntervalEntry) throws -> [Int64] {
             let url = tmp.appendingPathComponent("part-\(UUID().uuidString).jsonl")
-            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, dbPool: partPool)
+            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, dbPool: partPool)
             return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").compactMap {
                 (try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["timestamp_ms"] as? Int64
             }

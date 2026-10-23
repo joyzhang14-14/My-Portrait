@@ -367,6 +367,8 @@ struct PremiumBundleManifest: Codable {
     var trigger: String
     /// 本包包含的链;不在其中的链 pending 恒为空 / false。
     var chains: [String]
+    /// 包里放的内容(Premium 定的,见 `PremiumRemote.check`)。
+    var contents: [String]
     var pending: PremiumPending
     /// 只有 `_distill_anchor` / `_classify_anchor` 两行。
     var processingLog: [PremiumProcessingLogEntry]
@@ -384,7 +386,7 @@ struct PremiumBundleManifest: Codable {
         case exportedAtMs = "exported_at_ms"
         case macNowMs = "mac_now_ms"
         case appVersion = "app_version"
-        case trigger, chains, pending
+        case trigger, chains, contents, pending
         case processingLog = "processing_log"
         case personalityLog = "personality_log"
         case aboutUserBlock = "about_user_block"

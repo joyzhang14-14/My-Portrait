@@ -10,7 +10,8 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// app tick(每 15 分钟)跑 `runSealCheck`,helper(用户级 LaunchAgent,见 `PremiumNightlyAgent`)每个 :00 / :30 跑同一个入口
 /// (`MyPortrait --premium-export --seal-check`)。每次都先按 `IntervalSegmenter` 的规则封区间(最后一帧有效记录之后空了
 /// 2 小时就封);有链搬到 Premium 时,上次发包之后又封了区间、或 event 链还有没发出去的区间(`exportDue`)就导出,
-/// Premium 连不上(地址不通、密钥无效)时这轮不导出、下一轮再试。`chains` = provider 为 Premium、频率不是 off、且有待处理
+/// Premium 连不上(地址不通、密钥无效)或要了这个版本发不了的内容(`PremiumRemote.check`)时这轮不导出、下一轮再试;
+/// 包里放什么按 Premium 这次说的(`Input.contents`)。`chains` = provider 为 Premium、频率不是 off、且有待处理
 /// 工作的链。一个包最多装一天的区间(`oneDayOfIntervals`),积压时同一次检查里一包一天地接着打。
 /// 包压缩后超过 `maxBundleBytes` 就对半拆:区间个数对半;只剩一个区间还超就按时间对半切成分片包(`part_from_ms` /
 /// `part_to_ms`),分片还超再对半,Premium 收齐同一区间的分片再合起来处理。
@@ -25,6 +26,8 @@ enum PremiumExchangeExporter {
     struct Input: Sendable {
         var trigger: String = PremiumExchange.triggerNightly
         var chains: [String]
+        /// 包里放的内容(Premium 定,见 `PremiumRemote.check`)。
+        var contents: [String]
         var pending: PremiumPending
         /// `_distill_anchor` / `_classify_anchor` 两行。
         var processingLog: [PremiumProcessingLogEntry]
@@ -72,16 +75,22 @@ enum PremiumExchangeExporter {
                 ? ((try? store.needsWork().filter { !st.sentIntervals.contains($0.id) }.count) ?? 0) : 0
             return exportDue(lastCut: try? store.lastCut(), lastExportCutMs: st.lastExportCutMs, pendingIntervals: unsent)
         }
+        var contents: [String] = []
         let r = await sealThenExport(
             seal: { try EventIntervalStore(dbPool: dbPool).sealCheck() },
             due: isDue,
             offloaded: !offloaded.isEmpty,
-            unreachable: { await PremiumRemote.unreachableReason(cfg) },
-            write: { await export(dbPool: dbPool, lockWait: nil) })
+            unreachable: {
+                switch await PremiumRemote.check(cfg) {
+                case .success(let c): contents = c; return nil
+                case .failure(let e): return e.message
+                }
+            },
+            write: { await export(dbPool: dbPool, contents: contents, lockWait: nil) })
         if case .exported? = r.export {
             for _ in 1..<maxBundlesPerCheck {
                 guard await Task.detached(priority: .utility, operation: isDue).value,
-                      case .exported = await export(dbPool: dbPool, lockWait: nil) else { break }
+                      case .exported = await export(dbPool: dbPool, contents: contents, lockWait: nil) else { break }
             }
         }
         lock.release()
@@ -90,8 +99,8 @@ enum PremiumExchangeExporter {
     }
 
     /// 持交换锁之后的主体。先封区间(封区间是纯本地操作,不看 Premium 在不在);没有链搬到
-    /// Premium → 不导出。封区间之后 `due` 说没有新区间也没有积压 → 不导出。`unreachable` 给出原因 = 这轮发不出去,
-    /// 下一轮再试;否则 `write` 打包。
+    /// Premium → 不导出。封区间之后 `due` 说没有新区间也没有积压 → 不导出。`unreachable` 给出原因 = 这轮发不出去
+    /// (连不上,或 Premium 要的内容这个版本给不了),下一轮再试;否则 `write` 打包。
     @MainActor
     static func sealThenExport(seal: @escaping @Sendable () throws -> [EventInterval],
                                due: @escaping @Sendable () -> Bool, offloaded: Bool,
@@ -155,15 +164,21 @@ enum PremiumExchangeExporter {
     @MainActor
     static func exportNow(dbPool: DatabasePool, lockWait: TimeInterval) async -> ExportResult {
         _ = await PremiumExchangeImporter.runIfNeeded(dbPool: dbPool, notify: false, lockWait: lockWait)
-        let r = await export(dbPool: dbPool, lockWait: lockWait)
-        await PremiumRemote.flushUploads(root: Storage.rootURL, cfg: ConfigStore.shared.current.premium)
+        let cfg = ConfigStore.shared.current.premium
+        let contents: [String]
+        switch await PremiumRemote.check(cfg) {
+        case .success(let c): contents = c
+        case .failure(let e): return .skipped("Premium not reachable (\(e.message))")
+        }
+        let r = await export(dbPool: dbPool, contents: contents, lockWait: lockWait)
+        await PremiumRemote.flushUploads(root: Storage.rootURL, cfg: cfg)
         return r
     }
 
     /// 持交换锁(跨进程)+ 三把调度锁打包,台账记 `pending_upload` 和包里的区间(上传由调用方放锁后做)。
-    /// `lockWait` nil = 调用方已持交换锁。
+    /// `contents` = 这次 `PremiumRemote.check` 拿到的包内容。`lockWait` nil = 调用方已持交换锁。
     @MainActor
-    private static func export(dbPool: DatabasePool, lockWait: TimeInterval?) async -> ExportResult {
+    private static func export(dbPool: DatabasePool, contents: [String], lockWait: TimeInterval?) async -> ExportResult {
         let config = ConfigStore.shared.current
         let offloaded = config.scheduler.offloadedChains
         guard !offloaded.isEmpty else { return .skipped("no chain offloaded") }
@@ -173,7 +188,7 @@ enum PremiumExchangeExporter {
               !MemoryStaging.hasPending(.personality, root: Storage.rootURL),
               !EditDraft.hasAnyPending() else { return .skipped("review pending") }
         let root = Storage.rootURL
-        guard var input = gatherInput(dbPool: dbPool) else { return .noWork }
+        guard var input = gatherInput(dbPool: dbPool, contents: contents) else { return .noWork }
         let cut = try? EventIntervalStore(dbPool: dbPool).lastCut()
 
         var lock: PremiumExchange.FileLock?
@@ -196,7 +211,7 @@ enum PremiumExchangeExporter {
                 }
             }.value
         }
-        let packed = await packWithinCap(input, regather: { gatherInput(dbPool: dbPool, maxIntervals: $0) },
+        let packed = await packWithinCap(input, regather: { gatherInput(dbPool: dbPool, contents: contents, maxIntervals: $0) },
                                           package: package)
         let result = packed.result
         let ids = packed.ids
@@ -300,7 +315,7 @@ enum PremiumExchangeExporter {
 
     /// `chains` = 有待处理工作的链,pending 只留这些链;都没活 → nil。`maxIntervals`:包最多带几个区间。
     @MainActor
-    static func gatherInput(dbPool: DatabasePool, maxIntervals: Int = .max) -> Input? {
+    static func gatherInput(dbPool: DatabasePool, contents: [String], maxIntervals: Int = .max) -> Input? {
         let all = pendingNow(dbPool: dbPool, maxIntervals: maxIntervals)
         var chains = all.chainsWithWork
         guard !chains.isEmpty else { return nil }
@@ -315,14 +330,14 @@ enum PremiumExchangeExporter {
         let store = ProcessingLogStore()
         let da = store.row(for: ProcessingLogStore.distillAnchorDate)?.distill ?? .idle
         let ca = store.row(for: ProcessingLogStore.classifyAnchorDate)?.classify ?? .idle
-        return makeInput(trigger: PremiumExchange.triggerNightly, chains: chains, pending: all.only(chains),
-                         distill: da.rawValue, classify: ca.rawValue)
+        return makeInput(trigger: PremiumExchange.triggerNightly, chains: chains, contents: contents,
+                         pending: all.only(chains), distill: da.rawValue, classify: ca.rawValue)
     }
 
     /// dry-run 测试包:把 [fromMs, toMs) 当作一个未处理的区间(帧不按 id 截断),四条链都
     /// 视为搬到 Premium;personality 带上完全落在这段里的本地日;distill / classify 视为
     /// pending;`chains` = event / portrait / personality,writing style 频率不是 off 时
-    /// 再加 writing_style。不读写台账,树镜像原样。
+    /// 再加 writing_style。包内容 = 这个版本能放的全部(`supportedContents`)。不读写台账,树镜像原样。
     @MainActor
     static func gatherDryRunInput(dbPool: DatabasePool, fromMs: Int64, toMs: Int64) throws -> Input {
         let s = ConfigStore.shared.current.scheduler
@@ -354,12 +369,12 @@ enum PremiumExchangeExporter {
             })
         return makeInput(trigger: PremiumExchange.triggerNightly,
                          chains: ["event", "portrait", "personality"] + (wsOn ? ["writing_style"] : []),
-                         pending: pending, distill: ProcessingStatus.pending.rawValue,
+                         contents: PremiumRemote.supportedContents.sorted(), pending: pending, distill: ProcessingStatus.pending.rawValue,
                          classify: ProcessingStatus.pending.rawValue)
     }
 
     @MainActor
-    private static func makeInput(trigger: String, chains: [String], pending: PremiumPending,
+    private static func makeInput(trigger: String, chains: [String], contents: [String], pending: PremiumPending,
                                   distill: String, classify: String) -> Input {
         let config = ConfigStore.shared.current
         let m = config.memory
@@ -378,7 +393,7 @@ enum PremiumExchangeExporter {
             PremiumProcessingLogEntry(date: ProcessingLogStore.distillAnchorDate, distillStatus: distill),
             PremiumProcessingLogEntry(date: ProcessingLogStore.classifyAnchorDate, classifyStatus: classify),
         ]
-        return Input(trigger: trigger, chains: chains, pending: pending, processingLog: log,
+        return Input(trigger: trigger, chains: chains, contents: contents, pending: pending, processingLog: log,
                      aboutUserBlock: MemoryPrompts.aboutUserBlock(config.personalInfo),
                      params: params, appVersion: PremiumExchange.appVersion)
     }
@@ -428,7 +443,7 @@ enum PremiumExchangeExporter {
     }
 
     /// 在 `parentDir/.<id>.partial/` 里写全包,rename 成 `parentDir/<id>/`,最后写 DONE。
-    /// manifest 的 `files` 记帧文件与写作记录的 sha256。
+    /// manifest 的 `files` 记帧文件与写作记录的 sha256,`contents` 记包内容;不要 `ocr` 时帧的 OCR 文字写空串。
     @discardableResult
     static func writeBundle(input: Input, bundleId: String, root: URL,
                             parentDir: URL, dbPool: DatabasePool) throws -> URL {
@@ -442,11 +457,12 @@ enum PremiumExchangeExporter {
         // frames/<interval_id>.jsonl + frames/pday_<day>.jsonl
         let framesDir = tmp.appendingPathComponent("frames", isDirectory: true)
         try fm.createDirectory(at: framesDir, withIntermediateDirectories: true)
+        let ocr = input.contents.contains("ocr")
         for iv in input.pending.eventIntervals {
-            try writeIntervalFrames(iv, to: framesDir.appendingPathComponent("\(iv.id).jsonl"), dbPool: dbPool)
+            try writeIntervalFrames(iv, to: framesDir.appendingPathComponent("\(iv.id).jsonl"), ocr: ocr, dbPool: dbPool)
         }
         for p in input.pending.personalityLog {
-            try writeDayFrames(p, to: framesDir.appendingPathComponent("pday_\(p.day).jsonl"), dbPool: dbPool)
+            try writeDayFrames(p, to: framesDir.appendingPathComponent("pday_\(p.day).jsonl"), ocr: ocr, dbPool: dbPool)
         }
 
         // writing_records.jsonl
@@ -477,7 +493,7 @@ enum PremiumExchangeExporter {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let manifest = PremiumBundleManifest(
             bundleId: bundleId, exportedAtMs: nowMs, macNowMs: nowMs,
-            appVersion: input.appVersion, trigger: input.trigger, chains: input.chains,
+            appVersion: input.appVersion, trigger: input.trigger, chains: input.chains, contents: input.contents,
             pending: input.pending, processingLog: input.processingLog,
             personalityLog: input.pending.personalityLog, aboutUserBlock: input.aboutUserBlock,
             params: input.params, trees: trees, files: files)
@@ -528,31 +544,31 @@ enum PremiumExchangeExporter {
         return e
     }
 
-    /// 区间内全部帧(`EventIntervalStore.intervalFrameSQL`,不设上限),按时间升序。
-    static func writeIntervalFrames(_ iv: PremiumIntervalEntry, to url: URL, dbPool: DatabasePool) throws {
+    /// 区间内全部帧(`EventIntervalStore.intervalFrameSQL`,不设上限),按时间升序。`ocr` false = OCR 文字写空串。
+    static func writeIntervalFrames(_ iv: PremiumIntervalEntry, to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
         let start = max(iv.startMs ?? 0, iv.partFromMs ?? Int64.min)
         let end = min(iv.endMs ?? 0, iv.partToMs ?? Int64.max)
         try writeFrameLines(where: EventIntervalStore.intervalFrameSQL, arguments: [
             "iv_start": start, "iv_end": end,
             "iv_after": iv.afterFrameId ?? 0, "iv_max": iv.maxFrameId ?? Int64.max,
-        ], to: url, dbPool: dbPool)
+        ], to: url, ocr: ocr, dbPool: dbPool)
     }
 
     /// 某本地日 [00:00, 24:00) 的全部帧(不过滤、不设上限),按时间升序。
-    static func writeDayFrames(_ p: PremiumPersonalityDayEntry, to url: URL, dbPool: DatabasePool) throws {
+    static func writeDayFrames(_ p: PremiumPersonalityDayEntry, to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
         let (s, e) = try dayBounds(p)
         try writeFrameLines(where: "timestamp_ms >= :start AND timestamp_ms < :end",
-                            arguments: ["start": s, "end": e], to: url, dbPool: dbPool)
+                            arguments: ["start": s, "end": e], to: url, ocr: ocr, dbPool: dbPool)
     }
 
     private static func writeFrameLines(where cond: String, arguments: StatementArguments,
-                                        to url: URL, dbPool: DatabasePool) throws {
+                                        to url: URL, ocr: Bool, dbPool: DatabasePool) throws {
         let enc = lineEncoder()
         var out = Data()
         try dbPool.read { db in
             let rows = try Row.fetchCursor(db, sql: """
                 SELECT id, timestamp_ms, app_name, COALESCE(window_name, '') AS window_name,
-                       browser_url, COALESCE(ocr_backfill_text, full_text, '') AS ocr
+                       browser_url, \(ocr ? "COALESCE(ocr_backfill_text, full_text, '')" : "''") AS ocr
                 FROM frames
                 WHERE \(cond)
                 ORDER BY timestamp_ms ASC, id ASC

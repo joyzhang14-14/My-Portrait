@@ -14,6 +14,8 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// `GET /v1/bundles/<id>/result`、`POST /v1/bundles/<id>/ack`,鉴权 `Authorization: Bearer <密钥>`,
 /// 外加 `X-MP-Names`(Personal Info 的名字)和 `X-MP-Device`(`deviceId`):服务器要求其中一个名字
 /// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上。
+/// 包里放什么由 Premium 定:`/v1/me` 的 `contents`(`supportedContents` 里的 id)。Detect 和每次打包前都取一次,
+/// 有这个版本发不了的内容就不打包、把原因报出来;收件服务只收 manifest `contents` 和它一致的包。
 ///
 /// 台账 `<数据根>/.staging/premium_remote.json`:每个上传过、还没导入完的包一条
 /// (`pending_upload` → 服务端的 queued / running / done / failed / superseded / cancelled),
@@ -88,7 +90,20 @@ enum PremiumRemote {
 
     struct Me: Codable, Sendable {
         var user: String
+        /// 包里要放的内容;nil = 服务端没说。
+        var contents: [String]?
         var bundles: [BundleStatus]
+    }
+
+    /// 这个版本能放进包里的内容。`ocr` = 帧文件带 OCR 文字(不要时帧只带时间、app、窗口、URL)。
+    static let supportedContents: Set<String> = ["ocr"]
+
+    /// Premium 要的内容这台给不给得了:nil = 给得了,否则是原因。
+    static func contentsProblem(_ contents: [String]?) -> String? {
+        guard let contents else { return "Premium did not say what to send" }
+        let missing = contents.filter { !supportedContents.contains($0) }
+        return missing.isEmpty ? nil
+            : "Premium asks for \(missing.joined(separator: ", ")), which this version can't send — update My Portrait"
     }
 
     struct RemoteError: LocalizedError, Sendable {
@@ -195,10 +210,20 @@ enum PremiumRemote {
         }
     }
 
-    /// 发不发得出去:nil = 能(地址通、密钥有效),否则是原因。
-    static func unreachableReason(_ cfg: PremiumConfig) async -> String? {
-        guard let t = transport(cfg) else { return serverURL(cfg) == nil ? "no Premium server address" : "no Premium key" }
-        do { _ = try await t.me(); return nil } catch { return error.localizedDescription }
+    /// 打包前的检查:地址通、密钥有效、Premium 要的内容都给得了 → 要放进包里的内容(排好序);否则是原因。
+    static func check(_ cfg: PremiumConfig) async -> Result<[String], RemoteError> {
+        guard let t = transport(cfg) else {
+            return .failure(RemoteError(message: serverURL(cfg) == nil ? "no Premium server address" : "no Premium key"))
+        }
+        do {
+            let me = try await t.me()
+            if let why = contentsProblem(me.contents) { return .failure(RemoteError(message: why)) }
+            return .success((me.contents ?? []).sorted())
+        } catch let e as RemoteError {
+            return .failure(e)
+        } catch {
+            return .failure(RemoteError(message: error.localizedDescription))
+        }
     }
 
     // MARK: - 本机台账
@@ -403,6 +428,8 @@ enum PremiumRemote {
         /// nil = 地址通、密钥有效;否则是原因。
         var problem: String?
         var user: String?
+        /// Premium 要的内容(连上时)。
+        var contents: [String]?
         var state: State
 
         var healthy: Bool { problem == nil }
@@ -417,7 +444,10 @@ enum PremiumRemote {
         }
         do {
             try await t.health()
-            st.user = try await t.me().user
+            let me = try await t.me()
+            st.user = me.user
+            st.contents = me.contents
+            st.problem = contentsProblem(me.contents)
         } catch {
             st.problem = error.localizedDescription
         }

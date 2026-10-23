@@ -331,8 +331,14 @@ struct ConnectionsView: View {
     private static let premiumChainTitles = ["event": "Events", "portrait": "Portrait",
                                            "personality": "Personality", "writing_style": "Writing style"]
 
+    /// Premium 要的包内容在 Connections 里的显示(帧的时间、app、窗口、URL 总是带)。
+    private static func premiumContentsLine(_ contents: [String]?) -> String {
+        let titles = ["ocr": "OCR text"]
+        return (["app & window names"] + (contents ?? []).map { titles[$0] ?? $0 }).joined(separator: ", ")
+    }
+
     /// Premium:未连接时填密钥(没打包地址时还要填地址),点 Connect 保存并验证;
-    /// 连上后只显示上次上传 / 导入。打包进来的地址不在界面上显示。
+    /// 连上后显示包里放什么、上次上传 / 导入。打包进来的地址不在界面上显示。
     @ViewBuilder
     private var premiumPanel: some View {
         let offloaded = ConfigStore.shared.current.scheduler.offloadedChains
@@ -350,6 +356,8 @@ struct ConnectionsView: View {
                 }
                 secureInputField("paste your key…", text: $premiumKeyDraft)
             } else if let st = premiumStatus {
+                // 包里放什么由 Premium 定;这个版本给不了、或连不上时这一行显示原因。
+                premiumRow("Sends", st.problem ?? Self.premiumContentsLine(st.contents), ok: st.healthy)
                 premiumRow("Last upload", st.state.lastExport.map { "\($0.bundleId) · \($0.at)" } ?? "none yet", ok: nil)
                 premiumRow("Last import", st.state.lastImport.map { "\($0.outcome) · \($0.at)" } ?? "none yet",
                          ok: st.state.lastImport.map { !$0.outcome.hasPrefix("failed") })
