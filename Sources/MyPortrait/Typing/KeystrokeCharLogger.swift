@@ -71,7 +71,7 @@ final class KeystrokeCharLogger {
         if flags.contains(.maskShift)     { modifiers |= 0x08 }
         let modifierBits = modifiers
         // `frontmostApplication` 实测在后台线程读 cached 值稳定(KeystrokeProbe 已验证)。
-        let app = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         // 击键当时所用的输入源(如 keylayout.US=英文键盘 / inputmethod.Squirrel=拼音)。
         // 读主线程维护的缓存(TIS 不能在 callback 线程调,会崩);切换通知保证缓存跟手。
@@ -82,10 +82,8 @@ final class KeystrokeCharLogger {
         // 只留计数所需字段(bundle_id / ts / is_backspace)。这样 Input 图谱按行计数
         // 就能显示黑名单 app 的打字量,而不暴露打了什么。写作采集 worker 读击键时按
         // bundle_id 排除同一份黑名单(WritingCaptureWorker),这些无内容行不会进 Pass2。
-        blacklistLock.lock()
-        var redact = blacklist.contains(app)
-        blacklistLock.unlock()
-
+        // (黑名单在下面跳主线程后判:Spotlight 焦点下前台 app 与 Spotlight 任一在黑名单都不记内容。)
+        //
         // 密码框:系统开着 secure event input 时不记内容。
         //
         // **本来就轮不到我们** —— secure input 一开,`.cgSessionEventTap` 根本
@@ -97,25 +95,34 @@ final class KeystrokeCharLogger {
         // `EnableSecureEventInput`(部分 Electron app),这里返回 false、AX 那
         // 路的 role 也不是 AXSecureTextField,两层都会漏。要堵死得让
         // TypingObserver 在焦点变化时把"当前焦点是密码框"推给这里。
-        if IsSecureEventInputEnabled() { redact = true }
+        let secureInput = IsSecureEventInputEnabled()
 
-        // 派到后台写 DB —— callback 立刻返回
+        // Spotlight 面板拿到键盘焦点时不会变成前台 app,键会记到上一个前台 app 头上。AX 只在主线程调,
+        // 先跳主线程问一次焦点 app 再派去写库 —— 两条都是串行队列,键的先后不乱;callback 立刻返回。
         let store = self.store
         let logger = self.log
-        writeQueue.async {
-            do {
-                var entry = KeystrokeEntry(
-                    id: nil,
-                    tsMs: nowMs,
-                    bundleId: app,
-                    char: redact ? nil : (chars.isEmpty ? nil : chars),
-                    isBackspace: isBackspace ? 1 : 0,
-                    modifiers: redact ? 0 : modifierBits,
-                    inputSource: redact ? nil : inputSource
-                )
-                try store.insert(&entry)
-            } catch {
-                logger.warning("insert failed: \(String(describing: error), privacy: .public)")
+        let writeQueue = self.writeQueue
+        blacklistLock.lock()
+        let blacklist = self.blacklist
+        blacklistLock.unlock()
+        DispatchQueue.main.async {
+            let app = FocusProbe.focusedSpotlight()?.bundleIdentifier ?? front
+            let redact = secureInput || blacklist.contains(app) || blacklist.contains(front)
+            writeQueue.async {
+                do {
+                    var entry = KeystrokeEntry(
+                        id: nil,
+                        tsMs: nowMs,
+                        bundleId: app,
+                        char: redact ? nil : (chars.isEmpty ? nil : chars),
+                        isBackspace: isBackspace ? 1 : 0,
+                        modifiers: redact ? 0 : modifierBits,
+                        inputSource: redact ? nil : inputSource
+                    )
+                    try store.insert(&entry)
+                } catch {
+                    logger.warning("insert failed: \(String(describing: error), privacy: .public)")
+                }
             }
         }
     }

@@ -171,7 +171,9 @@ actor FocusProbe {
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
-            let active = NSWorkspace.shared.frontmostApplication
+            // Spotlight 面板拿到键盘焦点时不会变成激活 app,这时以它为准:app_name 记 Spotlight,
+            // 它的面板不是 layer-0 窗口,画面最前的普通窗口照常进 visible_app(焦点状态 no_window)。
+            let active = Self.focusedSpotlight() ?? NSWorkspace.shared.frontmostApplication
             let activePid = active?.processIdentifier ?? -1
             let screen = CGDisplayBounds(CGMainDisplayID())
             let screenArea = screen.width * screen.height
@@ -230,6 +232,27 @@ actor FocusProbe {
                 frontOffscreen: frontOffscreen
             )
         }
+    }
+
+    static let spotlightBundleId = "com.apple.Spotlight"
+
+    /// 键盘焦点在 Spotlight 面板上时返回它,否则 nil。主线程调。
+    /// Spotlight 面板打开时 `frontmostApplication` 仍是上一个 app(菜单栏也不变),只有 AX 的
+    /// 焦点 app 会变成 Spotlight、关掉立刻变回(实测;关面板的淡出动画期间它的窗口还在,所以不看窗口)。
+    /// 系统级焦点查询单次 p50 0.07ms、最慢 ~20ms;超时设 50ms,卡住也不拖主线程。
+    @MainActor
+    static func focusedSpotlight() -> NSRunningApplication? {
+        let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
+              let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        var pid: pid_t = 0
+        // swiftlint:disable:next force_cast
+        guard AXUIElementGetPid(ref as! AXUIElement, &pid) == .success,
+              let app = NSRunningApplication(processIdentifier: pid),
+              app.bundleIdentifier == spotlightBundleId else { return nil }
+        return app
     }
 
     // MARK: - 私有
