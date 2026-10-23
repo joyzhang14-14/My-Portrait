@@ -17,6 +17,7 @@ private let importLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 ///   - 其余                         → 冲突:保留 mac,premium 版存 `.staging/premium_conflicts/<id>/`
 ///   - deleted:mac == base 才删,否则记冲突
 /// 结果里没有的文件一律不动。
+/// 重跑(`overwrite` 列出的文件:Premium 重跑某天时改过、删过的事件和那天的性格日)照 Premium 的版本写、删,不看本机改没改过。
 /// 只导完整的结果包(`PremiumExchange.resultReady`);已经 complete 的区间 / 本地日不被结果改回别的状态。
 ///
 /// 快照在 `.staging/premium_import_backup/<id>/`(三棵树 + 被改的 processing_log /
@@ -273,6 +274,7 @@ enum PremiumExchangeImporter {
                               conflictsDir: URL, report: inout Report) throws {
         let fm = FileManager.default
         var conflicts: [String] = []
+        let overwrite = Set(manifest.overwrite ?? [])
         for (rel, premium) in manifest.resultTrees.sorted(by: { $0.key < $1.key }) {
             guard validRel(rel) else { continue }
             let base = manifest.baseTrees[rel]
@@ -286,7 +288,7 @@ enum PremiumExchangeImporter {
                 report.kept += 1
                 continue
             }
-            if mac == nil || mac == base {
+            if mac == nil || mac == base || overwrite.contains(rel) {
                 let src = bundleDir.appendingPathComponent(rel)
                 let data = try Data(contentsOf: src)
                 guard PremiumExchange.sha256Hex(data) == premium else {
@@ -309,7 +311,7 @@ enum PremiumExchangeImporter {
             guard validRel(rel) else { continue }
             let dst = root.appendingPathComponent(rel)
             guard let mac = PremiumExchange.fileSHA(dst) else { continue }
-            if mac == manifest.baseTrees[rel] {
+            if mac == manifest.baseTrees[rel] || overwrite.contains(rel) {
                 try fm.removeItem(at: dst)
                 report.deleted += 1
             } else {

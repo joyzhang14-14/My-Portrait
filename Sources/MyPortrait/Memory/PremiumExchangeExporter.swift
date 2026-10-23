@@ -20,6 +20,9 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// (`EventIntervalStore`,在路上的区间也算进来),portrait / classify / writing style 沿用 MemoryScheduler 的判据。
 /// 前面的包还没处理完也照样发:同一个用户积压的几个包 Premium 合成一份处理,结果挂在最新的那个上,较早的标 merged。
 /// 包在锁里写好、打成 tar.gz、台账记 `pending_upload`,放锁后才上传。
+/// 每次检查还看 Premium 要不要重跑某些日子(`PremiumRemote.Ask.redo`,管理端下发):有就一天一个 `redo` 包地发
+/// (`exportRedo`,最多 `maxRedoDaysInFlight` 天在路上),Premium 把那天当新数据重跑、并回已有事件,结果导入时那天的
+/// 事件与性格日以 Premium 的版本为准(结果 manifest 的 `overwrite`)。
 enum PremiumExchangeExporter {
 
     /// 导出需要的全部输入(在主线程上一次性取好,之后的 IO 都在后台)。
@@ -34,6 +37,8 @@ enum PremiumExchangeExporter {
         var aboutUserBlock: String
         var params: PremiumParams
         var appVersion: String
+        /// 重跑的日子(只在 `redo` 包里有)。
+        var redo: [PremiumRedoEntry]? = nil
     }
 
     enum ExportResult: Sendable {
@@ -75,23 +80,28 @@ enum PremiumExchangeExporter {
                 ? ((try? store.needsWork().filter { !st.sentIntervals.contains($0.id) }.count) ?? 0) : 0
             return exportDue(lastCut: try? store.lastCut(), lastExportCutMs: st.lastExportCutMs, pendingIntervals: unsent)
         }
-        var contents: [String] = []
+        var ask: PremiumRemote.Ask?
         let r = await sealThenExport(
             seal: { try EventIntervalStore(dbPool: dbPool).sealCheck() },
             due: isDue,
             offloaded: !offloaded.isEmpty,
             unreachable: {
                 switch await PremiumRemote.check(cfg) {
-                case .success(let c): contents = c; return nil
+                case .success(let a): ask = a; return nil
                 case .failure(let e): return e.message
                 }
             },
-            write: { await export(dbPool: dbPool, contents: contents, lockWait: nil) })
+            write: { await export(dbPool: dbPool, contents: ask?.contents ?? [], lockWait: nil) })
         if case .exported? = r.export {
             for _ in 1..<maxBundlesPerCheck {
                 guard await Task.detached(priority: .utility, operation: isDue).value,
-                      case .exported = await export(dbPool: dbPool, contents: contents, lockWait: nil) else { break }
+                      case .exported = await export(dbPool: dbPool, contents: ask?.contents ?? [], lockWait: nil) else { break }
             }
+        }
+        // 重跑与有没有新区间无关:这轮没问过 Premium 就现在问。
+        if !offloaded.isEmpty {
+            if ask == nil, case .success(let a) = await PremiumRemote.check(cfg) { ask = a }
+            if let ask, !ask.redo.isEmpty { _ = await exportRedo(dbPool: dbPool, ask: ask) }
         }
         lock.release()
         if !offloaded.isEmpty { await PremiumRemote.flushUploads(root: Storage.rootURL, cfg: cfg) }
@@ -167,7 +177,7 @@ enum PremiumExchangeExporter {
         let cfg = ConfigStore.shared.current.premium
         let contents: [String]
         switch await PremiumRemote.check(cfg) {
-        case .success(let c): contents = c
+        case .success(let a): contents = a.contents
         case .failure(let e): return .skipped("Premium not reachable (\(e.message))")
         }
         let r = await export(dbPool: dbPool, contents: contents, lockWait: lockWait)
@@ -281,6 +291,162 @@ enum PremiumExchangeExporter {
             return (.skipped("export failed while splitting"), [], input)
         }
         return (.exported(bundleId: last.0, archive: last.1), parts.map(\.0), input)
+    }
+
+    // MARK: - 重跑(Premium 要重跑的日子)
+
+    /// 最多几天重跑在路上(发出了、结果还没导入):Premium 一轮最多跑 7 个性格日,积压的包也不多占磁盘。
+    static let maxRedoDaysInFlight = 7
+
+    /// 下一批要发的重跑日子:还没在路上的(`inFlight` = `<请求 id>/<本地日>`),按日子从早到晚,最多 `limit` 天。
+    static func nextRedoDays(_ redo: [PremiumRemote.Redo], inFlight: Set<String>,
+                             limit: Int) -> [(redo: PremiumRemote.Redo, day: String)] {
+        let todo = redo.flatMap { r in r.days.map { (redo: r, day: $0) } }.filter { !inFlight.contains("\($0.redo.id)/\($0.day)") }
+        return Array(todo.sorted { ($0.day, $0.redo.id) < ($1.day, $1.redo.id) }.prefix(max(limit, 0)))
+    }
+
+    /// 把 Premium 要重跑的日子打成包(调用方持交换锁,上传由调用方放锁后做):一天一份,最多 `maxRedoDaysInFlight`
+    /// 天在路上;台账记 `redo`(在路上时不再打)。返回打出来的包 id。
+    @MainActor
+    static func exportRedo(dbPool: DatabasePool, ask: PremiumRemote.Ask) async -> [String] {
+        let root = Storage.rootURL
+        guard !MemoryStaging.hasPending(.events, root: root),
+              !MemoryStaging.hasPending(.portrait, root: root),
+              !MemoryStaging.hasPending(.personality, root: root),
+              !EditDraft.hasAnyPending() else { return [] }
+        let inFlight = PremiumRemote.readState(root).redoInFlight
+        let todo = nextRedoDays(ask.redo, inFlight: inFlight, limit: maxRedoDaysInFlight - inFlight.count)
+        guard !todo.isEmpty else { return [] }
+        let scheduler = MemoryScheduler.shared
+        guard scheduler.acquireAllLocks() else { return [] }
+        defer { scheduler.releaseAllLocks() }
+        var all: [String] = []
+        for (redo, day) in todo {
+            let input: Input
+            do {
+                input = try gatherRedoInput(dbPool: dbPool, contents: ask.contents, redo: redo, day: day)
+            } catch {
+                exportLog.error("reprocess \(day, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                continue
+            }
+            guard let ids = await packRedoDay(input, dbPool: dbPool, root: root) else { continue }
+            let real = input.pending.eventIntervals.map(\.id).filter { !$0.hasPrefix(redoIntervalPrefix) }
+            PremiumRemote.updateState(root) { s in
+                for id in ids {
+                    s.uploads.append(.init(bundleId: id, trigger: PremiumExchange.triggerRedo, chains: input.chains,
+                                           createdAt: PremiumExchange.isoNow(), status: PremiumRemote.statusPendingUpload,
+                                           intervals: real, redo: "\(redo.id)/\(day)"))
+                }
+                s.lastExport = .init(bundleId: ids[ids.count - 1], at: PremiumExchange.isoNow(), outcome: "reprocess \(day)")
+            }
+            exportLog.notice("packed reprocess of \(day, privacy: .public) (\(redo.chains.joined(separator: ", "), privacy: .public)): \(ids.joined(separator: ", "), privacy: .public)")
+            all += ids
+        }
+        return all
+    }
+
+    /// 区间台账开始(origin)之前的日子没有区间,重跑时临时拼的区间 id 前缀(Premium 不回写台账)。
+    static let redoIntervalPrefix = "redo:"
+
+    /// 重跑某个本地日的输入。chains 有 event / impact 时带上碰到这天的全部已封区间(event 置 pending 重新聚类、连打分;
+    /// 只有 impact 时 event 保持 complete、只把 impact 置 pending),这天落在区间台账开始之前的那段拼成一个
+    /// `redo:<起点>` 区间;有 personality 时带上这天的性格日。portrait 搬到 Premium 时,重新聚类后接着蒸馏。
+    @MainActor
+    static func gatherRedoInput(dbPool: DatabasePool, contents: [String], redo: PremiumRemote.Redo,
+                                day: String) throws -> Input {
+        let store = EventIntervalStore(dbPool: dbPool)
+        let guess = IntervalSegmenter.dayWindow(day, tzOffsetMin: IntervalSegmenter.currentOffsetMin())
+        let noon = Date(timeIntervalSince1970: Double((guess?.start ?? 0) + 43_200_000) / 1000)
+        let off = try store.personalityDay(day)?.tzOffsetMin ?? IntervalSegmenter.currentOffsetMin(at: noon)
+        guard let w = IntervalSegmenter.dayWindow(day, tzOffsetMin: off) else {
+            throw NSError(domain: "PremiumExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad day \(day)"])
+        }
+        let ev = redo.chains.contains("event"), pers = redo.chains.contains("personality")
+        let rescore = ev || redo.chains.contains("impact")
+        let pending = ProcessingStatus.pending.rawValue
+        let event = ev ? pending : ProcessingStatus.complete.rawValue
+        var ivs: [PremiumIntervalEntry] = []
+        if rescore {
+            ivs = try store.all().filter { $0.startMs < w.end && $0.endMs > w.start }.map {
+                var e = PremiumIntervalEntry($0)
+                e.eventStatus = event
+                e.impactStatus = pending
+                e.retryCount = 0
+                return e
+            }
+            let t0 = try store.origin() ?? w.end
+            if w.start < t0 {
+                let end = min(w.end, t0)
+                let (n, maxId) = try dbPool.read { db -> (Int, Int64) in
+                    let r = try Row.fetchOne(db, sql: """
+                        SELECT COUNT(*) AS n, MAX(id) AS max_id FROM frames
+                        WHERE \(EventIntervalStore.eventFrameFilter) AND timestamp_ms >= :s AND timestamp_ms < :e
+                        """, arguments: ["s": w.start, "e": end])
+                    return (Int((r?["n"] as Int64?) ?? 0), (r?["max_id"] as Int64?) ?? 0)
+                }
+                ivs.insert(PremiumIntervalEntry(
+                    id: "\(redoIntervalPrefix)\(w.start)", startMs: w.start, endMs: end, tzOffsetMin: off,
+                    trigger: PremiumExchange.triggerRedo, eventStatus: event, impactStatus: pending, retryCount: 0,
+                    frameCount: n, afterFrameId: 0, maxFrameId: maxId), at: 0)
+            }
+        }
+        let pday = PremiumPersonalityDayEntry(day: day, tzOffsetMin: off, status: pending, retryCount: 0)
+        let p = PremiumPending(
+            eventIntervals: ivs, personalityDays: pers ? [day] : [], distillPending: false, classifyPending: ev,
+            writingStyleEnabled: false, writingRecordsUnprocessed: 0, personalityLog: pers ? [pday] : [])
+        let portrait = ev && ConfigStore.shared.current.scheduler.portrait.isOffloaded
+        let chains = PremiumPending.chainOrder.filter {
+            ($0 == "event" && rescore) || ($0 == "portrait" && portrait) || ($0 == "personality" && pers)
+        }
+        let store2 = ProcessingLogStore()
+        let da = store2.row(for: ProcessingLogStore.distillAnchorDate)?.distill ?? .idle
+        let ca = store2.row(for: ProcessingLogStore.classifyAnchorDate)?.classify ?? .idle
+        var input = makeInput(trigger: PremiumExchange.triggerRedo, chains: chains, contents: contents, pending: p,
+                              distill: da.rawValue, classify: ca.rawValue)
+        input.redo = [PremiumRedoEntry(id: redo.id, day: day, chains: redo.chains, intervals: ivs.map(\.id))]
+        return input
+    }
+
+    /// 一天的重跑包:整天先打一个,超了上限按 `packWithinCap` 把区间对半分,剩下的区间接着打下一个包;
+    /// 性格日只放在最后一个包里,每个包的 `redo` 只列它带的区间。有一个没打成就全部作废(nil,下一次检查再来)。
+    @MainActor
+    static func packRedoDay(_ input: Input, dbPool: DatabasePool, root: URL) async -> [String]? {
+        guard let entry = input.redo?.first else { return nil }
+        func make(_ ivs: [PremiumIntervalEntry], last: Bool) -> Input {
+            var x = input
+            x.pending.eventIntervals = ivs
+            if !last {
+                x.pending.personalityDays = []
+                x.pending.personalityLog = []
+            }
+            x.redo = [PremiumRedoEntry(id: entry.id, day: entry.day, chains: entry.chains, intervals: ivs.map(\.id))]
+            return x
+        }
+        func package(_ x: Input) async -> ExportResult {
+            await Task.detached(priority: .utility) {
+                do {
+                    return try packageForUpload(input: x, root: root, dbPool: dbPool)
+                } catch {
+                    exportLog.error("reprocess export failed: \(error.localizedDescription, privacy: .public)")
+                    return .skipped("export failed: \(error.localizedDescription)")
+                }
+            }.value
+        }
+        var rest = input.pending.eventIntervals
+        var ids: [String] = []
+        repeat {
+            let now = rest
+            let packed = await packWithinCap(make(now, last: true),
+                                             regather: { make(Array(now.prefix($0)), last: $0 >= now.count) },
+                                             package: package)
+            guard case .exported = packed.result else {
+                for id in ids { try? FileManager.default.removeItem(at: PremiumRemote.archiveURL(root, id)) }
+                return nil
+            }
+            ids += packed.ids
+            rest.removeFirst(min(packed.input.pending.eventIntervals.count, rest.count))
+        } while !rest.isEmpty
+        return ids
     }
 
     // MARK: - 取输入(主线程)
@@ -535,7 +701,7 @@ enum PremiumExchangeExporter {
             appVersion: input.appVersion, trigger: input.trigger, chains: input.chains, contents: input.contents,
             pending: input.pending, processingLog: input.processingLog,
             personalityLog: input.pending.personalityLog, aboutUserBlock: input.aboutUserBlock,
-            params: input.params, trees: trees, files: files)
+            params: input.params, trees: trees, files: files, redo: input.redo)
         try PremiumExchange.encoder().encode(manifest)
             .write(to: tmp.appendingPathComponent("manifest.json"))
 

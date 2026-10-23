@@ -15,6 +15,8 @@ enum PremiumExchange {
     /// 交换的三棵树(相对数据根)。
     static let treeNames = ["events", "portrait", "personality_daily"]
     static let triggerNightly = "nightly"
+    /// Premium 要重跑某天时发的包(`PremiumExchangeExporter.exportRedo`)。
+    static let triggerRedo = "redo"
 
     /// `<UTC yyyyMMddTHHmmssZ>-<主机短名>-<8 位随机十六进制>`(同一秒导出两个包也不撞)。
     static func makeBundleId(now: Date = Date()) -> String {
@@ -325,6 +327,15 @@ struct PremiumPending: Codable, Equatable {
     }
 }
 
+/// 重跑的一天(manifest `redo` 的一项):Premium 的请求 id、本地日、重跑哪些(`PremiumRemote.supportedRedoChains`)、
+/// 本包带的这天的区间 id。
+struct PremiumRedoEntry: Codable, Equatable, Sendable {
+    var id: String
+    var day: String
+    var chains: [String]
+    var intervals: [String]
+}
+
 struct PremiumParams: Codable, Equatable {
     var dailyBudget: Double
     var peakProtection: Double
@@ -363,7 +374,7 @@ struct PremiumBundleManifest: Codable {
     var exportedAtMs: Int64
     var macNowMs: Int64
     var appVersion: String
-    /// `nightly`(封区间检查发的包)或 `run_now`(某条链的 Run on Premium)。
+    /// `nightly`(封区间检查发的包)、`run_now`(某条链的 Run on Premium)或 `redo`(Premium 要重跑的日子)。
     var trigger: String
     /// 本包包含的链;不在其中的链 pending 恒为空 / false。
     var chains: [String]
@@ -379,6 +390,8 @@ struct PremiumBundleManifest: Codable {
     var trees: [String: String]
     /// 帧文件与写作记录(相对包目录)→ sha256,收件服务按它核对。
     var files: [String: String]
+    /// 重跑的日子(只在 `redo` 包里有)。
+    var redo: [PremiumRedoEntry]? = nil
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -390,7 +403,7 @@ struct PremiumBundleManifest: Codable {
         case processingLog = "processing_log"
         case personalityLog = "personality_log"
         case aboutUserBlock = "about_user_block"
-        case params, trees, files
+        case params, trees, files, redo
     }
 }
 
@@ -415,6 +428,8 @@ struct PremiumResultManifest: Codable {
     var baseTrees: [String: String]
     var resultTrees: [String: String]
     var deleted: [String]?
+    /// 重跑时改过 / 删过的文件:照 Premium 的版本覆盖,不看本机改没改过。
+    var overwrite: [String]?
     var summary: [String: Int]?
 
     enum CodingKeys: String, CodingKey {
@@ -423,7 +438,7 @@ struct PremiumResultManifest: Codable {
         case pipelineVersion = "pipeline_version"
         case startedMs = "started_ms"
         case endedMs = "ended_ms"
-        case status, stages, deleted, summary
+        case status, stages, deleted, overwrite, summary
         case baseTrees = "base_trees"
         case resultTrees = "result_trees"
     }

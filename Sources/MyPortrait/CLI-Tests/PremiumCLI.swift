@@ -604,7 +604,7 @@ enum PremiumImportSelfTest {
                 seal: { try store.sealCheck(now: now, tzOffsetMin: 0) }, due: { due }, offloaded: true,
                 unreachable: {
                     switch await R.check(cfg) {
-                    case .success(let c): contents = c; return nil
+                    case .success(let a): contents = a.contents; return nil
                     case .failure(let e): return e.message
                     }
                 },
@@ -847,6 +847,106 @@ enum PremiumImportSelfTest {
               "OCR only: frames as before, nothing from EventSession or audio")
     }
 
+    /// 重跑:Premium 给的日子按先后、去掉在路上的、限天数;做不了的项跳过那个请求;按天取区间(区间台账之前的那段拼一个
+    /// `redo:` 区间)与性格日;打成的包带 `redo`;导入时 `overwrite` 的文件照 Premium 的版本写、删。
+    private static func checkRedo(tmp: URL) async throws {
+        typealias E = PremiumExchangeExporter
+        typealias R = PremiumRemote
+        print("[premium-selftest] reprocess days")
+        let fm = FileManager.default
+        let a = R.Redo(id: "r1", days: ["2026-01-03", "2026-01-01"], chains: ["event", "impact"])
+        let b = R.Redo(id: "r2", days: ["2026-01-02"], chains: ["personality"])
+        let next = E.nextRedoDays([a, b], inFlight: ["r1/2026-01-01"], limit: 5).map { "\($0.redo.id)/\($0.day)" }
+        check(next == ["r2/2026-01-02", "r1/2026-01-03"] && E.nextRedoDays([a, b], inFlight: [], limit: 1).count == 1
+              && E.nextRedoDays([a], inFlight: [], limit: -2).isEmpty,
+              "reprocess: oldest day first, days already on their way skipped, at most the days still allowed in flight")
+        check(R.redoProblem([a, b]) == nil && R.redoProblem([R.Redo(id: "r3", days: [], chains: ["video"])])?.contains("video") == true,
+              "reprocess: a request with an item this version can't do is reported (and skipped by the check)")
+        var st = R.State()
+        st.uploads = [.init(bundleId: "x", trigger: "redo", chains: [], createdAt: "", status: "queued", redo: "r1/2026-01-01"),
+                      .init(bundleId: "y", trigger: "redo", chains: [], createdAt: "", status: "superseded", redo: "r1/2026-01-03")]
+        check(st.redoInFlight == ["r1/2026-01-01"], "reprocess: in flight = uploads not imported yet")
+
+        // 2026-01-02(偏移 0):区间台账从 10:00 开始,10:00–20:00、20:00–次日 05:00 两个区间,之前有两帧。
+        let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo.sqlite").path).dbPool
+        let iso = ISO8601DateFormatter()
+        func ms(_ s: String) -> Int64 { Int64(iso.date(from: s)!.timeIntervalSince1970 * 1000) }
+        let day0 = ms("2026-01-02T00:00:00Z"), t0 = ms("2026-01-02T10:00:00Z")
+        let t20 = ms("2026-01-02T20:00:00Z"), n5 = ms("2026-01-03T05:00:00Z"), n8 = ms("2026-01-03T08:00:00Z")
+        let frameTs = [ms("2026-01-02T08:00:00Z"), ms("2026-01-02T09:00:00Z"), ms("2026-01-02T11:00:00Z")]
+        try await pool.write { db in
+            try db.execute(sql: "INSERT INTO personality_days (day, tz_offset_min, status, retry_count, updated_at_ms) VALUES ('2026-01-02', 0, 'complete', 0, 0)")
+            for (id, s, e, trig) in [("iv:origin", t0, t0, "origin"), ("iv:a", t0, t20, "gap"), ("iv:b", t20, n5, "gap"),
+                                     ("iv:c", n5, n8, "gap")] {
+                try db.execute(sql: """
+                    INSERT INTO event_intervals (id, start_ms, end_ms, tz_offset_min, sealed_at_ms, trigger,
+                      frame_count, max_frame_id, event_status, impact_status, retry_count, updated_at_ms)
+                    VALUES (:id, :s, :e, 0, :e, :t, 0, 1000, 'complete', 'complete', 0, 0)
+                    """, arguments: ["id": id, "s": s, "e": e, "t": trig])
+            }
+            for t in frameTs {
+                try db.execute(sql: """
+                    INSERT INTO frames (timestamp_ms, app_name, snapshot_path, capture_trigger, full_text, created_at_ms)
+                    VALUES (:t, 'App', 'x.jpg', 'click', 'text', :t)
+                    """, arguments: ["t": t])
+            }
+        }
+        let all = R.Redo(id: "r9", days: ["2026-01-02"], chains: ["event", "impact", "personality"])
+        let full = try await MainActor.run { try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: all, day: "2026-01-02") }
+        let ivs = full.pending.eventIntervals
+        check(ivs.map(\.id) == ["redo:\(day0)", "iv:a", "iv:b"] && ivs[0].endMs == t0 && ivs[0].frameCount == 2
+              && ivs.allSatisfy { $0.eventStatus == "pending" && $0.impactStatus == "pending" }
+              && full.pending.personalityDays == ["2026-01-02"] && full.pending.personalityLog.first?.status == "pending"
+              && full.chains.contains("event") && full.chains.contains("personality") && full.trigger == "redo"
+              && full.redo == [PremiumRedoEntry(id: "r9", day: "2026-01-02", chains: all.chains, intervals: ivs.map(\.id))],
+              "reprocess a day: every interval touching it re-clustered, the part before the interval ledger as a redo: interval, its personality day")
+        let rescore = try await MainActor.run {
+            try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: R.Redo(id: "r8", days: [], chains: ["impact"]), day: "2026-01-02")
+        }
+        let pers = try await MainActor.run {
+            try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: R.Redo(id: "r7", days: [], chains: ["personality"]), day: "2026-01-02")
+        }
+        check(rescore.pending.eventIntervals.allSatisfy { $0.eventStatus == "complete" && $0.impactStatus == "pending" }
+              && rescore.pending.personalityDays.isEmpty && pers.pending.eventIntervals.isEmpty && pers.chains == ["personality"],
+              "reprocess impact only: events kept, scores redone; personality only: no intervals")
+
+        let root = tmp.appendingPathComponent("redo-root", isDirectory: true)
+        try fm.createDirectory(at: root.appendingPathComponent("events", isDirectory: true), withIntermediateDirectories: true)
+        let ids = await E.packRedoDay(full, dbPool: pool, root: root) ?? []
+        let unpacked = tmp.appendingPathComponent("redo-unpacked", isDirectory: true)
+        if let id = ids.first { try R.unpack(R.archiveURL(root, id), into: unpacked) }
+        let man = try? JSONDecoder().decode(PremiumBundleManifest.self, from: Data(contentsOf: unpacked.appendingPathComponent("manifest.json")))
+        let synth = (read(unpacked.appendingPathComponent("frames/redo:\(day0).jsonl")) ?? "").split(separator: "\n").count
+        check(ids.count == 1 && man?.trigger == "redo" && man?.redo == full.redo && man?.pending.personalityDays == ["2026-01-02"]
+              && synth == 2 && man?.files["frames/redo:\(day0).jsonl"] != nil,
+              "reprocess bundle: one per day, manifest.redo names the day and its intervals, frames before the ledger included")
+
+        // 导入:overwrite 里的文件不管本机改没改过都照 Premium 的版本;别的照常三方合并。
+        let iroot = tmp.appendingPathComponent("redo-import-root", isDirectory: true)
+        let res = tmp.appendingPathComponent("redo-result", isDirectory: true)
+        let rels = ["events/2026-01-02/x.md", "events/2026-01-02/y.md", "events/2026-01-02/z.md"]
+        for rel in rels { try write("LOCAL", iroot.appendingPathComponent(rel)) }
+        let h = { (t: String) in PremiumExchange.sha256Hex(Data(t.utf8)) }
+        let base = Dictionary(uniqueKeysWithValues: rels.map { ($0, h("BASE")) })
+        try write("NEW", res.appendingPathComponent(rels[0]))
+        try write("NEW", res.appendingPathComponent(rels[2]))
+        let rm = PremiumResultManifest(schemaVersion: 1, bundleId: "20260103T000000Z-redo", pipelineVersion: "selftest",
+                                       startedMs: 0, endedMs: 0, status: "complete", stages: nil, baseTrees: base,
+                                       resultTrees: [rels[0]: h("NEW"), rels[2]: h("NEW")], deleted: [rels[1]],
+                                       overwrite: [rels[0], rels[1]], summary: [:])
+        try PremiumExchange.encoder().encode(rm).write(to: res.appendingPathComponent("manifest.json"))
+        try PremiumExchange.encoder().encode(PremiumDbOps()).write(to: res.appendingPathComponent("db_ops.json"))
+        try PremiumExchange.writeDone(bundleDir: res)
+        let suite = "premium-redo-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let ipool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo-import.sqlite").path).dbPool
+        let rep = try PremiumExchangeImporter.importBundle(id: rm.bundleId, dir: res, root: iroot, dbPool: ipool, defaults: defaults)
+        check(read(iroot.appendingPathComponent(rels[0])) == "NEW" && !fm.fileExists(atPath: iroot.appendingPathComponent(rels[1]).path)
+              && read(iroot.appendingPathComponent(rels[2])) == "LOCAL" && rep.conflicts == [rels[2]],
+              "reprocess import: overwrite files replaced / removed even when edited on this Mac; others still merge three-way")
+    }
+
     /// 区间台账 + personality 就绪 + v2 输入包,在独立的临时库上跑(时区偏移固定 0)。
     private static func checkLedger(tmp: URL) async throws {
         let fm = FileManager.default
@@ -1062,6 +1162,7 @@ enum PremiumImportSelfTest {
         print("[premium-selftest] interval ledger + personality days + v2 bundle")
         try await checkLedger(tmp: tmp)
         try await checkEventSession(tmp: tmp)
+        try await checkRedo(tmp: tmp)
 
         // —— 基线:两条 writing_records + 一行 processing_log + 一个区间 ——
         try await pool.write { db in

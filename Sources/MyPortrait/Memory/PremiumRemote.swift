@@ -16,6 +16,7 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上。
 /// 包里放什么由 Premium 定:`/v1/me` 的 `contents`(`supportedContents` 里的 id)。Detect 和每次打包前都取一次,
 /// 有这个版本发不了的内容就不打包、把原因报出来;收件服务只收 manifest `contents` 和它一致的包。
+/// 要重跑哪些日子也由 Premium 定:`/v1/me` 的 `redo`(还没收到包的日子),见 `PremiumExchangeExporter.exportRedo`。
 ///
 /// 台账 `<数据根>/.staging/premium_remote.json`:每个上传过、还没导入完的包一条
 /// (`pending_upload` → 服务端的 queued / running / done / failed / superseded / cancelled),
@@ -92,7 +93,32 @@ enum PremiumRemote {
         var user: String
         /// 包里要放的内容;nil = 服务端没说。
         var contents: [String]?
+        /// 要重跑、还没收到包的日子;nil = 服务端没说(没有)。
+        var redo: [Redo]? = nil
         var bundles: [BundleStatus]
+    }
+
+    /// Premium 要重跑的一批日子(本地日):`chains` ⊂ `supportedRedoChains`,event = 重新聚类事件(连打分),
+    /// impact = 只重新打分,personality = 重跑性格日。
+    struct Redo: Codable, Sendable, Equatable {
+        var id: String
+        var days: [String]
+        var chains: [String]
+    }
+
+    static let supportedRedoChains: Set<String> = ["event", "impact", "personality"]
+
+    /// 打包前从 Premium 拿到的:包内容(排好序)和要重跑的日子(这个版本做不了的请求已去掉)。
+    struct Ask: Sendable {
+        var contents: [String]
+        var redo: [Redo]
+    }
+
+    /// 这个版本做不了的重跑请求(重跑的项不认识):nil = 都做得了,否则是原因。
+    static func redoProblem(_ redo: [Redo]?) -> String? {
+        let bad = Set((redo ?? []).flatMap(\.chains).filter { !supportedRedoChains.contains($0) })
+        return bad.isEmpty ? nil
+            : "Premium asks to reprocess \(bad.sorted().joined(separator: ", ")), which this version can't — update My Portrait"
     }
 
     /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字(不要时帧只带时间、app、窗口、URL);`event_session` = 区间的
@@ -211,15 +237,17 @@ enum PremiumRemote {
         }
     }
 
-    /// 打包前的检查:地址通、密钥有效、Premium 要的内容都给得了 → 要放进包里的内容(排好序);否则是原因。
-    static func check(_ cfg: PremiumConfig) async -> Result<[String], RemoteError> {
+    /// 打包前的检查:地址通、密钥有效、Premium 要的内容都给得了 → 包内容和要重跑的日子;否则是原因。
+    /// 重跑请求里有这个版本不认识的项时只跳过那个请求。
+    static func check(_ cfg: PremiumConfig) async -> Result<Ask, RemoteError> {
         guard let t = transport(cfg) else {
             return .failure(RemoteError(message: serverURL(cfg) == nil ? "no Premium server address" : "no Premium key"))
         }
         do {
             let me = try await t.me()
             if let why = contentsProblem(me.contents) { return .failure(RemoteError(message: why)) }
-            return .success((me.contents ?? []).sorted())
+            return .success(Ask(contents: (me.contents ?? []).sorted(),
+                                redo: (me.redo ?? []).filter { redoProblem([$0]) == nil }))
         } catch let e as RemoteError {
             return .failure(e)
         } catch {
@@ -243,16 +271,18 @@ enum PremiumRemote {
         var intervals: [String]?
         /// status = merged 时:并进了哪个包(跟着它的结果一起导入、一起删)。
         var mergedInto: String?
+        /// 重跑包:`<请求 id>/<本地日>`。
+        var redo: String?
 
         init(bundleId: String, trigger: String, chains: [String], createdAt: String, status: String,
-             intervals: [String]? = nil) {
+             intervals: [String]? = nil, redo: String? = nil) {
             self.bundleId = bundleId; self.trigger = trigger; self.chains = chains
-            self.createdAt = createdAt; self.status = status; self.intervals = intervals
+            self.createdAt = createdAt; self.status = status; self.intervals = intervals; self.redo = redo
         }
 
         enum CodingKeys: String, CodingKey {
             case bundleId = "bundle_id"
-            case trigger, chains, status, ahead, stage, summary, intervals
+            case trigger, chains, status, ahead, stage, summary, intervals, redo
             case createdAt = "created_at"
             case resultSha256 = "result_sha256"
             case mergedInto = "merged_into"
@@ -286,6 +316,11 @@ enum PremiumRemote {
         /// 在路上的包里的区间(不再发)。
         var sentIntervals: Set<String> {
             Set(uploads.filter { PremiumRemote.outstandingStatuses.contains($0.status) }.flatMap { $0.intervals ?? [] })
+        }
+
+        /// 在路上的重跑日子(`<请求 id>/<本地日>`)。
+        var redoInFlight: Set<String> {
+            Set(uploads.filter { PremiumRemote.outstandingStatuses.contains($0.status) }.compactMap(\.redo))
         }
 
         /// 导入了 `id` 的结果(或它在服务端失败了):删掉它和并进它的包。
@@ -431,6 +466,10 @@ enum PremiumRemote {
         var user: String?
         /// Premium 要的内容(连上时)。
         var contents: [String]?
+        /// Premium 要重跑、还没发出去的日子(连上时)。
+        var redo: [Redo] = []
+        /// 重跑请求这个版本做不了时的原因。
+        var redoProblem: String?
         var state: State
 
         var healthy: Bool { problem == nil }
@@ -449,6 +488,8 @@ enum PremiumRemote {
             st.user = me.user
             st.contents = me.contents
             st.problem = contentsProblem(me.contents)
+            st.redo = me.redo ?? []
+            st.redoProblem = redoProblem(me.redo)
         } catch {
             st.problem = error.localizedDescription
         }

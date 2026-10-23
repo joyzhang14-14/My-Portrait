@@ -338,8 +338,18 @@ struct ConnectionsView: View {
         return (["app & window names"] + (contents ?? []).map { titles[$0] ?? $0 }).joined(separator: ", ")
     }
 
+    /// Premium 要重跑的日子在 Connections 里的显示:日子(多了只列头尾)和重跑的项。
+    private static func premiumRedoLine(_ redo: [PremiumRemote.Redo]) -> String {
+        let titles = ["event": "events", "impact": "impact", "personality": "personality"]
+        return redo.map { r in
+            let days = r.days.count > 3 ? "\(r.days[0]) … \(r.days[r.days.count - 1]) (\(r.days.count) days)"
+                : r.days.joined(separator: ", ")
+            return "\(days): " + r.chains.map { titles[$0] ?? $0 }.joined(separator: ", ")
+        }.joined(separator: "; ")
+    }
+
     /// Premium:未连接时填密钥(没打包地址时还要填地址),点 Connect 保存并验证;
-    /// 连上后显示包里放什么、上次上传 / 导入。打包进来的地址不在界面上显示。
+    /// 连上后显示包里放什么、要重跑的日子、上次上传 / 导入。打包进来的地址不在界面上显示。
     @ViewBuilder
     private var premiumPanel: some View {
         let offloaded = ConfigStore.shared.current.scheduler.offloadedChains
@@ -359,6 +369,10 @@ struct ConnectionsView: View {
             } else if let st = premiumStatus {
                 // 包里放什么由 Premium 定;这个版本给不了、或连不上时这一行显示原因。
                 premiumRow("Sends", st.problem ?? Self.premiumContentsLine(st.contents), ok: st.healthy)
+                // Premium 要重跑的日子(还没发出去的);结果导入后在 Memory 的 Changelog 里每天一行 Reprocess。
+                if st.redoProblem != nil || !st.redo.isEmpty {
+                    premiumRow("Reprocess", st.redoProblem ?? Self.premiumRedoLine(st.redo), ok: st.redoProblem == nil ? nil : false)
+                }
                 premiumRow("Last upload", st.state.lastExport.map { "\($0.bundleId) · \($0.at)" } ?? "none yet", ok: nil)
                 premiumRow("Last import", st.state.lastImport.map { "\($0.outcome) · \($0.at)" } ?? "none yet",
                          ok: st.state.lastImport.map { !$0.outcome.hasPrefix("failed") })
