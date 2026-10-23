@@ -407,21 +407,13 @@ final class AppState {
             }
         }
 
-        // Inverse: if a credential exists but the cached connection is gone
-        // (e.g. user added a key in a prior session before this code shipped),
-        // light the tile back up.
+        // Inverse: if a ChatGPT token exists but the cached connection is gone,
+        // light the tile back up. API keys stay in SecretStore after Disconnect
+        // (the box shows them masked for the next Connect), so a stored key alone
+        // doesn't mean connected.
         if !connectedIds.contains("chatgpt"), ChatGPTOAuth.isLoggedIn() {
             connectedIds.insert("chatgpt")
             changed = true
-        }
-        for p in Provider.allCases {
-            guard let key = p.secretKey else { continue }
-            let intId = Self.integrationId(for: p)
-            if let intId, SecretStore.shared.get(key) != nil,
-               !connectedIds.contains(intId) {
-                connectedIds.insert(intId)
-                changed = true
-            }
         }
 
         // 已下线的卡片(不在 IntegrationRegistry 里了)留下的连接记录一并清掉。
@@ -443,23 +435,6 @@ final class AppState {
         }
 
         if changed { saveConnections() }
-    }
-
-    /// Inverse of `Provider.from(integrationId:)`. Used by the reverse-sync
-    /// step above to find the tile id for a provider with a credential.
-    private static func integrationId(for p: Provider) -> String? {
-        switch p {
-        case .chatgpt:       return "chatgpt"
-        case .anthropic:     return "anthropic-api"
-        case .gemini:        return "gemini"
-        case .ollama:        return "ollama"
-        case .localModel:    return "local-model"
-        case .perplexity:    return "perplexity"
-        case .deepseek:      return "deepseek"
-        case .claudeCode:    return "claude-code"
-        case .premium:      return "premium"
-        case .openaiBYOK:    return nil    // no dedicated tile yet
-        }
     }
 
     /// The currently selected model for `integrationId`, falling back to the

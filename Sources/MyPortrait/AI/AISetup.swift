@@ -81,12 +81,15 @@ final class AISetup {
         UserDefaults.standard.stringArray(forKey: AppState.connectedDefaultsKey)?.contains("ollama") ?? false
     }
 
-    /// All providers the user appears to have credentials for. Used to seed
-    /// `models.json` so Pi knows about every configured backend.
+    /// All connected providers that have credentials. Used to seed
+    /// `models.json` so Pi knows about every configured backend. A key kept
+    /// after Disconnect doesn't count.
     static func configuredProviders() -> [Provider] {
         var out: [Provider] = []
         if ChatGPTOAuth.isLoggedIn() { out.append(.chatgpt) }
-        for p in Provider.allCases {
+        let connected = (UserDefaults.standard.stringArray(forKey: AppState.connectedDefaultsKey) ?? [])
+            .compactMap { Provider.from(integrationId: $0) }
+        for p in Provider.allCases where connected.contains(p) {
             guard let key = p.secretKey, SecretStore.shared.get(key) != nil else { continue }
             if !out.contains(p) { out.append(p) }
         }

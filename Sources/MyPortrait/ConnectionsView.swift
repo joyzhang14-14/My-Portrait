@@ -31,6 +31,9 @@ struct ConnectionsView: View {
     @State private var connecting: String? = nil
     @State private var loginError: String? = nil
     @State private var apiKeyDraft: String = ""
+    /// 输入框里预填的、库里存着的密钥(没断开连接前存的,断开后不清)。输入框内容跟它不一样了才删库里的。
+    @State private var savedApiKey: String? = nil
+    @State private var savedPremiumKey: String? = nil
     /// Codex 当前 access token 的到期时刻。**只在页面出现 / 连接动作收尾时
     /// 算一次** —— 读 SecretStore 要解密,不能每帧 body 里现查。
     @State private var codexExpiry: Date? = nil
@@ -118,6 +121,18 @@ struct ConnectionsView: View {
         }
         // 面板是这一帧才插进 VStack 的,同一帧 scrollTo 那个 id 还不存在。
         // 推到下一个 runloop tick 再滚。
+        .onChange(of: selectedId) { _, now in loadKeyDrafts(now) }
+        // 预填的密钥被删掉或改动 → 删掉库里那份(改成的新密钥点 Connect 才存)。
+        .onChange(of: apiKeyDraft) { _, now in
+            guard let saved = savedApiKey, now != saved else { return }
+            if let id = selectedId, let key = Provider.from(integrationId: id)?.secretKey { SecretStore.shared.delete(key) }
+            savedApiKey = nil
+        }
+        .onChange(of: premiumKeyDraft) { _, now in
+            guard let saved = savedPremiumKey, now != saved else { return }
+            SecretStore.shared.delete(PremiumRemote.keyRef)
+            savedPremiumKey = nil
+        }
         .onChange(of: selectedId) { _, now in
             guard now != nil else { return }
             DispatchQueue.main.async {
@@ -457,19 +472,25 @@ struct ConnectionsView: View {
         }
     }
 
-    /// Wipe the credential on disconnect so the next connect starts clean.
+    /// 未连接的卡片打开时,把库里存着的密钥预填进输入框(显示成圆点);没存过就是空的。
+    private func loadKeyDrafts(_ id: String?) {
+        let stored = id.flatMap { Provider.from(integrationId: $0)?.secretKey }
+            .flatMap { SecretStore.shared.get($0) }.flatMap { String(data: $0, encoding: .utf8) }
+        savedApiKey = stored
+        apiKeyDraft = stored ?? ""
+        savedPremiumKey = id == PremiumExchange.integrationId ? PremiumRemote.key() : nil
+        premiumKeyDraft = savedPremiumKey ?? ""
+    }
+
+    /// 断开连接。填进去的密钥(API key、Premium 密钥)留在库里,输入框里预填着,用户删掉或改了才删;
+    /// 登录拿到的凭据(ChatGPT、Claude Code)照旧登出。
     private func disconnect(_ integration: Integration) {
         if integration.id == "chatgpt" {
             ChatGPTOAuth.logout()
             codexExpiry = nil          // 角标立刻消失
         }
         if integration.id == "claude-code" { ClaudeCodeSignIn.clear() }
-        if let p = Provider.from(integrationId: integration.id),
-           let key = p.secretKey {
-            SecretStore.shared.delete(key)
-        }
         if integration.id == PremiumExchange.integrationId {
-            SecretStore.shared.delete(PremiumRemote.keyRef)
             // 还在 Premium 上的链改回连接前的 provider,不然本机不跑、包也传不上去。
             ConfigStore.shared.mutate {
                 $0.scheduler.restoreFromPremium($0.premium.previousProviders) { p in
@@ -479,6 +500,7 @@ struct ConnectionsView: View {
             }
         }
         appState.toggleConnect(integration)
+        loadKeyDrafts(integration.id)
         // Re-write models.json without this provider so Pi stops listing it.
         try? PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
     }
@@ -496,6 +518,7 @@ struct ConnectionsView: View {
         }
         do {
             try SecretStore.shared.set(key, value: Data(trimmed.utf8))
+            savedApiKey = nil
             apiKeyDraft = ""
             if !appState.isConnected(integration.id) { appState.toggleConnect(integration) }
             try PiInstaller.writeModelsJSON(providers: stillConfiguredProviders())
@@ -645,6 +668,7 @@ struct ConnectionsView: View {
                 loginError = error.localizedDescription
                 return
             }
+            savedPremiumKey = nil
             premiumKeyDraft = ""
             connecting = integration.id
             Task { @MainActor in
