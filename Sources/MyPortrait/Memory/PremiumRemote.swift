@@ -13,7 +13,8 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// `PUT /v1/bundles/<id>`(tar.gz + `X-Content-SHA256`)、`GET /v1/bundles/<id>`、
 /// `GET /v1/bundles/<id>/result`、`POST /v1/bundles/<id>/ack`,鉴权 `Authorization: Bearer <密钥>`,
 /// 外加 `X-MP-Names`(Personal Info 的名字)和 `X-MP-Device`(`deviceId`):服务器要求其中一个名字
-/// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上。
+/// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上;断开 Premium 时 `release` 让服务器解绑
+/// (`POST /v1/unbind`),换一台 Mac 用同一把密钥就能连。
 /// 包里放什么由 Premium 定:`/v1/me` 的 `contents`(`supportedContents` 里的 id)。Detect 和每次打包前都取一次,
 /// 有这个版本发不了的内容就不打包、把原因报出来;收件服务只收 manifest `contents` 和它一致的包。
 /// 要重跑哪些日子也由 Premium 定(对所有用户):`/v1/me` 的 `redo`(这台还没发包、也没回报的日子),
@@ -158,6 +159,7 @@ enum PremiumRemote {
         func download(bundleId: String, to: URL) async throws -> String
         func ack(bundleId: String) async throws
         func reportRedo(id: String, day: String, report: RedoReport) async throws
+        func unbind() async throws
     }
 
     struct HTTPTransport: Transport {
@@ -244,6 +246,10 @@ enum PremiumRemote {
 
         func ack(bundleId: String) async throws {
             _ = try await Self.send(request("POST", "v1/bundles/\(bundleId)/ack"))
+        }
+
+        func unbind() async throws {
+            _ = try await Self.send(request("POST", "v1/unbind"))
         }
 
         func reportRedo(id: String, day: String, report: RedoReport) async throws {
@@ -474,6 +480,17 @@ enum PremiumRemote {
     }
 
     // MARK: - Connections 卡片 / Detect
+
+    /// 断开 Premium:让服务器把密钥和这台 Mac 解绑。nil = 解了(或没有密钥、地址,无从解),否则是原因。
+    static func release(_ cfg: PremiumConfig) async -> String? {
+        guard let t = transport(cfg) else { return nil }
+        do {
+            try await t.unbind()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
 
     struct Status: Sendable {
         var server: String

@@ -462,6 +462,7 @@ enum PremiumImportSelfTest {
         var results: [String: Data] = [:]
         var acked: [String] = []
         var redoReports: [String: PremiumRemote.RedoReport] = [:]
+        var unbound = 0
 
         func health() async throws {
             guard reachable else { throw PremiumRemote.RemoteError(message: "offline") }
@@ -500,6 +501,10 @@ enum PremiumImportSelfTest {
         func ack(bundleId: String) async throws {
             try await health()
             acked.append(bundleId)
+        }
+        func unbind() async throws {
+            try await health()
+            unbound += 1
         }
         func reportRedo(id: String, day: String, report: PremiumRemote.RedoReport) async throws {
             try await health()
@@ -661,6 +666,12 @@ enum PremiumImportSelfTest {
               "Premium asks for content this version can't send, or says nothing: no bundle, Detect shows why")
         check(R.contentsProblem([]) == nil && R.contentsProblem(["ocr"]) == nil,
               "Premium asks for OCR or for nothing extra: this version can send it")
+        let released = await R.release(cfg)
+        fake.reachable = false
+        let offline = await R.release(cfg)
+        fake.reachable = true
+        check(released == nil && fake.unbound == 1 && offline == "offline",
+              "disconnect: Premium releases this Mac from the key; offline, the reason comes back")
         let r2 = await round(t0 + 14 * h + 31 * m, due: false)
         check(skipped(r2) == E.notDueReason && writes == 0, "seal check, nothing new since the last upload: not packed")
         let r3 = await round(t0 + 15 * h)

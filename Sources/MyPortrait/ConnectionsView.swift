@@ -395,7 +395,8 @@ struct ConnectionsView: View {
         }
         .task {
             premiumServerDraft = ConfigStore.shared.current.premium.serverURL
-            premiumStatus = await PremiumRemote.probe(ConfigStore.shared.current.premium)
+            // 没连上时不去问服务器:带着留下的密钥一问,服务器就把它又绑回这台 Mac。
+            if connected { premiumStatus = await PremiumRemote.probe(ConfigStore.shared.current.premium) }
         }
     }
 
@@ -491,6 +492,15 @@ struct ConnectionsView: View {
         }
         if integration.id == "claude-code" { ClaudeCodeSignIn.clear() }
         if integration.id == PremiumExchange.integrationId {
+            // 密钥和这台 Mac 解绑,换电脑就能用同一把密钥。没解成(比如没网)就说一声:再连上、联网时断开一次。
+            let cfg = ConfigStore.shared.current.premium
+            Task { @MainActor in
+                if let why = await PremiumRemote.release(cfg) {
+                    loginError = "Disconnected, but Premium couldn't release this Mac from your key (\(why)). "
+                        + "To use the key on another Mac, connect here and disconnect again while online."
+                }
+            }
+            premiumStatus = nil
             // 还在 Premium 上的链改回连接前的 provider,不然本机不跑、包也传不上去。
             ConfigStore.shared.mutate {
                 $0.scheduler.restoreFromPremium($0.premium.previousProviders) { p in
