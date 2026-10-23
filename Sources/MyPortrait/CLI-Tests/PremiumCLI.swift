@@ -461,6 +461,7 @@ enum PremiumImportSelfTest {
         var statuses: [String: PremiumRemote.BundleStatus] = [:]
         var results: [String: Data] = [:]
         var acked: [String] = []
+        var redoReports: [String: PremiumRemote.RedoReport] = [:]
 
         func health() async throws {
             guard reachable else { throw PremiumRemote.RemoteError(message: "offline") }
@@ -499,6 +500,10 @@ enum PremiumImportSelfTest {
         func ack(bundleId: String) async throws {
             try await health()
             acked.append(bundleId)
+        }
+        func reportRedo(id: String, day: String, report: PremiumRemote.RedoReport) async throws {
+            try await health()
+            redoReports["\(id)/\(day)"] = report
         }
     }
 
@@ -866,6 +871,15 @@ enum PremiumImportSelfTest {
         st.uploads = [.init(bundleId: "x", trigger: "redo", chains: [], createdAt: "", status: "queued", redo: "r1/2026-01-01"),
                       .init(bundleId: "y", trigger: "redo", chains: [], createdAt: "", status: "superseded", redo: "r1/2026-01-03")]
         check(st.redoInFlight == ["r1/2026-01-01"], "reprocess: in flight = uploads not imported yet")
+        var sched = SchedulerSettings()
+        sched.event.providerId = Provider.premium.rawValue
+        sched.personality.providerId = Provider.ollama.rawValue
+        let parts = E.redoParts(["event", "impact", "personality"], sched)
+        sched.event.providerId = ""
+        let none = E.redoParts(["impact"], sched)
+        check(parts.keep == ["event", "impact"] && parts.skipped == ["personality": Provider.ollama.displayName]
+              && none.keep.isEmpty && none.skipped == ["impact": "no provider"],
+              "reprocess: only items whose chain runs on Premium are sent, the rest reported with the provider they use")
 
         // 2026-01-02(偏移 0):区间台账从 10:00 开始,10:00–20:00、20:00–次日 05:00 两个区间,之前有两帧。
         let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo.sqlite").path).dbPool
@@ -891,6 +905,8 @@ enum PremiumImportSelfTest {
                     """, arguments: ["t": t])
             }
         }
+        check(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-02") && !(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-05")),
+              "reprocess: a day without frames is reported as empty instead of sent")
         let all = R.Redo(id: "r9", days: ["2026-01-02"], chains: ["event", "impact", "personality"])
         let full = try await MainActor.run { try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: all, day: "2026-01-02") }
         let ivs = full.pending.eventIntervals

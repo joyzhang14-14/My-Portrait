@@ -20,9 +20,9 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// (`EventIntervalStore`,在路上的区间也算进来),portrait / classify / writing style 沿用 MemoryScheduler 的判据。
 /// 前面的包还没处理完也照样发:同一个用户积压的几个包 Premium 合成一份处理,结果挂在最新的那个上,较早的标 merged。
 /// 包在锁里写好、打成 tar.gz、台账记 `pending_upload`,放锁后才上传。
-/// 每次检查还看 Premium 要不要重跑某些日子(`PremiumRemote.Ask.redo`,管理端下发):有就一天一个 `redo` 包地发
-/// (`exportRedo`,最多 `maxRedoDaysInFlight` 天在路上),Premium 把那天当新数据重跑、并回已有事件,结果导入时那天的
-/// 事件与性格日以 Premium 的版本为准(结果 manifest 的 `overwrite`)。
+/// 每次检查还看 Premium 要不要重跑某些日子(`PremiumRemote.Ask.redo`,管理端对所有用户下发):有就一天一个 `redo` 包地发
+/// (`exportRedo`,最多 `maxRedoDaysInFlight` 天在路上;只发 provider 是 Premium 的项,那天没帧不发,都回报给 Premium),
+/// Premium 把那天当新数据重跑、并回已有事件,结果导入时那天的事件与性格日以 Premium 的版本为准(结果 manifest 的 `overwrite`)。
 enum PremiumExchangeExporter {
 
     /// 导出需要的全部输入(在主线程上一次性取好,之后的 IO 都在后台)。
@@ -305,7 +305,21 @@ enum PremiumExchangeExporter {
         return Array(todo.sorted { ($0.day, $0.redo.id) < ($1.day, $1.redo.id) }.prefix(max(limit, 0)))
     }
 
-    /// 把 Premium 要重跑的日子打成包(调用方持交换锁,上传由调用方放锁后做):一天一份,最多 `maxRedoDaysInFlight`
+    /// 重跑的项里这台能发的(那条链的 provider 是 Premium:event / impact 看 event 链,personality 看 personality 链)
+    /// 和不发的(项 → 那条链现在用的 provider)。
+    static func redoParts(_ chains: [String], _ s: SchedulerSettings) -> (keep: [String], skipped: [String: String]) {
+        var keep: [String] = [], skipped: [String: String] = [:]
+        for c in chains {
+            let cfg = c == "personality" ? s.personality : s.event
+            if cfg.isOffloaded { keep.append(c) } else {
+                skipped[c] = Provider(rawValue: cfg.providerId)?.displayName ?? "no provider"
+            }
+        }
+        return (keep, skipped)
+    }
+
+    /// 把 Premium 要重跑的日子打成包(调用方持交换锁,上传由调用方放锁后做):一天一份,只带 provider 是 Premium 的项
+    /// (`redoParts`),都不是或那天没有帧就不打包;每天怎么处理的回报给 Premium。最多 `maxRedoDaysInFlight`
     /// 天在路上;台账记 `redo`(在路上时不再打)。返回打出来的包 id。
     @MainActor
     static func exportRedo(dbPool: DatabasePool, ask: PremiumRemote.Ask) async -> [String] {
@@ -320,11 +334,31 @@ enum PremiumExchangeExporter {
         let scheduler = MemoryScheduler.shared
         guard scheduler.acquireAllLocks() else { return [] }
         defer { scheduler.releaseAllLocks() }
+        let sched = ConfigStore.shared.current.scheduler
+        let transport = PremiumRemote.transport(ConfigStore.shared.current.premium)
+        func report(_ redo: PremiumRemote.Redo, _ day: String, _ r: PremiumRemote.RedoReport) async {
+            do { try await transport?.reportRedo(id: redo.id, day: day, report: r) } catch {
+                exportLog.notice("reprocess \(day, privacy: .public): report failed, retry next check: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         var all: [String] = []
         for (redo, day) in todo {
+            let (keep, skipped) = redoParts(redo.chains, sched)
             let input: Input
             do {
-                input = try gatherRedoInput(dbPool: dbPool, contents: ask.contents, redo: redo, day: day)
+                guard !keep.isEmpty else {
+                    exportLog.notice("reprocess \(day, privacy: .public): nothing on Premium, not sent")
+                    await report(redo, day, .init(sent: false, empty: false, skipped: skipped))
+                    continue
+                }
+                guard try redoDayHasFrames(dbPool: dbPool, day: day) else {
+                    exportLog.notice("reprocess \(day, privacy: .public): no frames that day, not sent")
+                    await report(redo, day, .init(sent: false, empty: true, skipped: skipped))
+                    continue
+                }
+                var mine = redo
+                mine.chains = keep
+                input = try gatherRedoInput(dbPool: dbPool, contents: ask.contents, redo: mine, day: day)
             } catch {
                 exportLog.error("reprocess \(day, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 continue
@@ -339,10 +373,31 @@ enum PremiumExchangeExporter {
                 }
                 s.lastExport = .init(bundleId: ids[ids.count - 1], at: PremiumExchange.isoNow(), outcome: "reprocess \(day)")
             }
-            exportLog.notice("packed reprocess of \(day, privacy: .public) (\(redo.chains.joined(separator: ", "), privacy: .public)): \(ids.joined(separator: ", "), privacy: .public)")
+            exportLog.notice("packed reprocess of \(day, privacy: .public) (\(keep.joined(separator: ", "), privacy: .public)): \(ids.joined(separator: ", "), privacy: .public)")
+            await report(redo, day, .init(sent: true, empty: false, skipped: skipped))
             all += ids
         }
         return all
+    }
+
+    /// 本地日的偏移(性格日台账里钉死的,没有就按那天中午本机时区)和 [00:00, 24:00) 的 UTC ms。
+    private static func redoDayWindow(_ store: EventIntervalStore, _ day: String) throws -> (Int, (start: Int64, end: Int64)) {
+        let guess = IntervalSegmenter.dayWindow(day, tzOffsetMin: IntervalSegmenter.currentOffsetMin())
+        let noon = Date(timeIntervalSince1970: Double((guess?.start ?? 0) + 43_200_000) / 1000)
+        let off = try store.personalityDay(day)?.tzOffsetMin ?? IntervalSegmenter.currentOffsetMin(at: noon)
+        guard let w = IntervalSegmenter.dayWindow(day, tzOffsetMin: off) else {
+            throw NSError(domain: "PremiumExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad day \(day)"])
+        }
+        return (off, w)
+    }
+
+    /// 那天有没有帧(没有就不发重跑包,只回报)。
+    static func redoDayHasFrames(dbPool: DatabasePool, day: String) throws -> Bool {
+        let (_, w) = try redoDayWindow(EventIntervalStore(dbPool: dbPool), day)
+        return try dbPool.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM frames WHERE timestamp_ms >= :s AND timestamp_ms < :e)",
+                              arguments: ["s": w.start, "e": w.end]) ?? false
+        }
     }
 
     /// 区间台账开始(origin)之前的日子没有区间,重跑时临时拼的区间 id 前缀(Premium 不回写台账)。
@@ -355,12 +410,7 @@ enum PremiumExchangeExporter {
     static func gatherRedoInput(dbPool: DatabasePool, contents: [String], redo: PremiumRemote.Redo,
                                 day: String) throws -> Input {
         let store = EventIntervalStore(dbPool: dbPool)
-        let guess = IntervalSegmenter.dayWindow(day, tzOffsetMin: IntervalSegmenter.currentOffsetMin())
-        let noon = Date(timeIntervalSince1970: Double((guess?.start ?? 0) + 43_200_000) / 1000)
-        let off = try store.personalityDay(day)?.tzOffsetMin ?? IntervalSegmenter.currentOffsetMin(at: noon)
-        guard let w = IntervalSegmenter.dayWindow(day, tzOffsetMin: off) else {
-            throw NSError(domain: "PremiumExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "bad day \(day)"])
-        }
+        let (off, w) = try redoDayWindow(store, day)
         let ev = redo.chains.contains("event"), pers = redo.chains.contains("personality")
         let rescore = ev || redo.chains.contains("impact")
         let pending = ProcessingStatus.pending.rawValue

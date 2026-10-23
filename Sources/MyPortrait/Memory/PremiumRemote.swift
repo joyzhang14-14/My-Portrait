@@ -16,7 +16,8 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上。
 /// 包里放什么由 Premium 定:`/v1/me` 的 `contents`(`supportedContents` 里的 id)。Detect 和每次打包前都取一次,
 /// 有这个版本发不了的内容就不打包、把原因报出来;收件服务只收 manifest `contents` 和它一致的包。
-/// 要重跑哪些日子也由 Premium 定:`/v1/me` 的 `redo`(还没收到包的日子),见 `PremiumExchangeExporter.exportRedo`。
+/// 要重跑哪些日子也由 Premium 定(对所有用户):`/v1/me` 的 `redo`(这台还没发包、也没回报的日子),
+/// 每天怎么处理的用 `POST /v1/redo/<请求 id>/<本地日>` 回报(`RedoReport`),见 `PremiumExchangeExporter.exportRedo`。
 ///
 /// 台账 `<数据根>/.staging/premium_remote.json`:每个上传过、还没导入完的包一条
 /// (`pending_upload` → 服务端的 queued / running / done / failed / superseded / cancelled),
@@ -108,6 +109,14 @@ enum PremiumRemote {
 
     static let supportedRedoChains: Set<String> = ["event", "impact", "personality"]
 
+    /// 重跑的一天这台怎么处理的,回报给 Premium(管理端看):`sent` = 打了包;`empty` = 那天没有帧,不发;
+    /// `skipped` = 没发的项 → 那条链现在用的 provider(不是 Premium)。
+    struct RedoReport: Codable, Sendable, Equatable {
+        var sent: Bool
+        var empty: Bool
+        var skipped: [String: String]
+    }
+
     /// 打包前从 Premium 拿到的:包内容(排好序)和要重跑的日子(这个版本做不了的请求已去掉)。
     struct Ask: Sendable {
         var contents: [String]
@@ -148,6 +157,7 @@ enum PremiumRemote {
         /// 存到 `to`,返回响应头 `X-Content-SHA256`。
         func download(bundleId: String, to: URL) async throws -> String
         func ack(bundleId: String) async throws
+        func reportRedo(id: String, day: String, report: RedoReport) async throws
     }
 
     struct HTTPTransport: Transport {
@@ -234,6 +244,13 @@ enum PremiumRemote {
 
         func ack(bundleId: String) async throws {
             _ = try await Self.send(request("POST", "v1/bundles/\(bundleId)/ack"))
+        }
+
+        func reportRedo(id: String, day: String, report: RedoReport) async throws {
+            var r = request("POST", "v1/redo/\(id)/\(day)")
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try JSONEncoder().encode(report)
+            _ = try await Self.send(r)
         }
     }
 
