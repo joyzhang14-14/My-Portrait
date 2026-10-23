@@ -171,9 +171,9 @@ actor FocusProbe {
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
-            // Spotlight 面板拿到键盘焦点时不会变成激活 app,这时以它为准:app_name 记 Spotlight,
-            // 它的面板不是 layer-0 窗口,画面最前的普通窗口照常进 visible_app(焦点状态 no_window)。
-            let active = Self.focusedSpotlight() ?? NSWorkspace.shared.frontmostApplication
+            // Spotlight、Bob 这类面板拿到键盘焦点时不会变成激活 app,这时以它为准:app_name 记面板的 app,
+            // 面板不是 layer-0 窗口,画面最前的普通窗口照常进 visible_app(焦点状态 no_window)。
+            let active = Self.focusedPanelApp() ?? NSWorkspace.shared.frontmostApplication
             let activePid = active?.processIdentifier ?? -1
             let screen = CGDisplayBounds(CGMainDisplayID())
             let screenArea = screen.width * screen.height
@@ -234,14 +234,14 @@ actor FocusProbe {
         }
     }
 
-    static let spotlightBundleId = "com.apple.Spotlight"
-
-    /// 键盘焦点在 Spotlight 面板上时返回它,否则 nil。主线程调。
-    /// Spotlight 面板打开时 `frontmostApplication` 仍是上一个 app(菜单栏也不变),只有 AX 的
-    /// 焦点 app 会变成 Spotlight、关掉立刻变回(实测;关面板的淡出动画期间它的窗口还在,所以不看窗口)。
+    /// 键盘焦点在一个 accessory 进程(菜单栏 / 后台小工具)的面板上时返回它,否则 nil。主线程调。
+    /// Spotlight、Bob 这类面板打开时 `frontmostApplication` 仍是上一个 app(菜单栏也不变),只有 AX 的
+    /// 焦点 app 会变成它、关掉立刻变回(实测;关面板的淡出动画期间它的窗口还在,所以不看窗口)。
+    /// 只认 accessory:系统替前台 app 跑的打开/存储对话框服务是 prohibited,归前台 app;
+    /// 切 app 瞬间 AX 先指到的新 app 是 regular,交给 switching 判读。
     /// 系统级焦点查询单次 p50 0.07ms、最慢 ~20ms;超时设 50ms,卡住也不拖主线程。
     @MainActor
-    static func focusedSpotlight() -> NSRunningApplication? {
+    static func focusedPanelApp() -> NSRunningApplication? {
         let sys = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(sys, 0.05)
         var ref: CFTypeRef?
@@ -251,7 +251,7 @@ actor FocusProbe {
         // swiftlint:disable:next force_cast
         guard AXUIElementGetPid(ref as! AXUIElement, &pid) == .success,
               let app = NSRunningApplication(processIdentifier: pid),
-              app.bundleIdentifier == spotlightBundleId else { return nil }
+              app.activationPolicy == .accessory else { return nil }
         return app
     }
 

@@ -82,7 +82,7 @@ final class KeystrokeCharLogger {
         // 只留计数所需字段(bundle_id / ts / is_backspace)。这样 Input 图谱按行计数
         // 就能显示黑名单 app 的打字量,而不暴露打了什么。写作采集 worker 读击键时按
         // bundle_id 排除同一份黑名单(WritingCaptureWorker),这些无内容行不会进 Pass2。
-        // (黑名单在下面跳主线程后判,看的是收到这颗键的 app:Spotlight 焦点下就是 Spotlight,不是它底下的前台 app。)
+        // (黑名单在下面跳主线程后判,看的是收到这颗键的 app:Spotlight 等面板焦点下就是面板的 app,不是它底下的前台 app。)
         //
         // 密码框:系统开着 secure event input 时不记内容。
         //
@@ -97,7 +97,7 @@ final class KeystrokeCharLogger {
         // TypingObserver 在焦点变化时把"当前焦点是密码框"推给这里。
         let secureInput = IsSecureEventInputEnabled()
 
-        // Spotlight 面板拿到键盘焦点时不会变成前台 app,键会记到上一个前台 app 头上。AX 只在主线程调,
+        // Spotlight、Bob 这类面板拿到键盘焦点时不会变成前台 app,键会记到上一个前台 app 头上。AX 只在主线程调,
         // 先跳主线程问一次焦点 app 再派去写库 —— 两条都是串行队列,键的先后不乱;callback 立刻返回。
         let store = self.store
         let logger = self.log
@@ -106,7 +106,7 @@ final class KeystrokeCharLogger {
         let blacklist = self.blacklist
         blacklistLock.unlock()
         DispatchQueue.main.async {
-            let app = FocusProbe.focusedSpotlight()?.bundleIdentifier ?? front
+            let app = FocusProbe.focusedPanelApp()?.bundleIdentifier ?? front
             let redact = secureInput || blacklist.contains(app)
             writeQueue.async {
                 do {
