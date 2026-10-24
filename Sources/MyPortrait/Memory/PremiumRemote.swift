@@ -129,8 +129,8 @@ enum PremiumRemote {
     }
 
     /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字;`event_session` = 区间的画面(MP4 / JPG)、帧焦点、OCR 词框、
-    /// 击键、鼠标、打字记录(EventSession 要的全部元数据);`audio` = 语音转写。见 `PremiumExchangeExporter.writeBundle`。
-    static let supportedContents: Set<String> = ["ocr", "event_session", "audio"]
+    /// 击键、鼠标、打字记录(EventSession 要的全部元数据)。见 `PremiumExchangeExporter.writeBundle`。
+    static let supportedContents: Set<String> = ["ocr", "event_session"]
     static let eventSessionContents = ["event_session", "ocr"]
 
     /// 包内容:EventSession 交给 Premium 时带全部元数据,否则只带 OCR 文字(帧的时间、app、窗口、URL 总是带)。

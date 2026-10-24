@@ -348,8 +348,7 @@ struct ConnectionsView: View {
 
     /// Premium 要的包内容在 Connections 里的显示(帧的时间、app、窗口、URL 总是带)。
     private static func premiumContentsLine(_ contents: [String]) -> String {
-        let titles = ["ocr": "OCR text", "event_session": "EventSession (screen video, focus, keys & mouse, typing, OCR boxes)",
-                      "audio": "audio transcripts"]
+        let titles = ["ocr": "OCR text", "event_session": "EventSession (screen video, focus, keys & mouse, typing, OCR boxes)"]
         return (["app & window names"] + contents.map { titles[$0] ?? $0 }).joined(separator: ", ")
     }
 

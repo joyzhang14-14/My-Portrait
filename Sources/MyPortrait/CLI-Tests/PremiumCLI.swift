@@ -753,7 +753,7 @@ enum PremiumImportSelfTest {
               "Detect: reachable + key valid → healthy with the user name and contents; offline → the reason")
     }
 
-    /// event_session / audio:画面(MP4 块 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录、语音转写,分片只取分片那段。
+    /// event_session:画面(MP4 块 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录,分片只取分片那段。
     private static func checkEventSession(tmp: URL) async throws {
         print("[premium-selftest] event session contents")
         let fm = FileManager.default
@@ -789,18 +789,6 @@ enum PremiumImportSelfTest {
                                            session_start, end_value, stripped, url)
                 VALUES ('app', 1, 1650, 1700, 'hello', '', 5, '', 'hello', '', '')
                 """)
-            try db.execute(sql: """
-                INSERT INTO speakers (id, name, embedding_count, hallucination, created_at_ms, updated_at_ms)
-                VALUES (3, 'Alice', 1, 0, 1, 1)
-                """)
-            try db.execute(sql: """
-                INSERT INTO audio_chunks (id, file_path, recorded_at_ms, duration_s, device, is_input, status, created_at_ms, retry_count)
-                VALUES (5, 'a.m4a', 1000, 1, 'mic', 1, 'done', 1, 0)
-                """)
-            try db.execute(sql: """
-                INSERT INTO audio_transcriptions (audio_chunk_id, start_s, end_s, text, speaker_id, engine, transcribed_at_ms)
-                VALUES (5, 0.8, 0.9, 'hi there', 3, 'whisper', 1)
-                """)
         }
         let root = tmp.appendingPathComponent("session-root", isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -820,7 +808,7 @@ enum PremiumImportSelfTest {
             }
         }
         let whole = PremiumIntervalEntry(id: "iv:1000", startMs: 1000, endMs: 2000)
-        let all = try bundle(whole, ["audio", "event_session", "ocr"], "20260104T000000Z-es")
+        let all = try bundle(whole, ["event_session", "ocr"], "20260104T000000Z-es")
         let frames = lines(all, "frames/iv:1000.jsonl")
         let man = try JSONDecoder().decode(PremiumBundleManifest.self,
                                            from: Data(contentsOf: all.appendingPathComponent("manifest.json")))
@@ -836,24 +824,21 @@ enum PremiumImportSelfTest {
               && man.files["video/mmain_1000.mp4"] == PremiumExchange.fileSHA(mp4)
               && man.files["keystrokes/iv:1000.jsonl"] != nil && man.files["frames/iv:1000.jsonl"] != nil,
               "event_session: screen media copied into the bundle, every file hashed in manifest.files")
-        let audio = lines(all, "audio/iv:1000.jsonl")
         check(lines(all, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1200, 1700]
-              && lines(all, "mouse/iv:1000.jsonl").count == 1 && lines(all, "typing/iv:1000.jsonl").first?["text"] as? String == "hello"
-              && audio.count == 1 && audio.first?["speaker"] as? String == "Alice" && audio.first?["start_ms"] as? Int64 == 1800,
-              "event_session keys / mouse / typing and audio transcripts: only the interval's own time range")
+              && lines(all, "mouse/iv:1000.jsonl").count == 1 && lines(all, "typing/iv:1000.jsonl").first?["text"] as? String == "hello",
+              "event_session keys / mouse / typing: only the interval's own time range")
         var half = whole
         half.partFromMs = 1500; half.partToMs = 2000
         let part = try bundle(half, ["event_session", "ocr"], "20260104T000001Z-es")
         check(lines(part, "frames/iv:1000.jsonl").count == 2 && !fm.fileExists(atPath: part.appendingPathComponent("video").path)
-              && lines(part, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1700]
-              && !fm.fileExists(atPath: part.appendingPathComponent("audio").path),
-              "event_session part: media and keys of that part only; no audio unless Premium asks for it")
+              && lines(part, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1700],
+              "event_session part: media and keys of that part only")
         let plain = try bundle(whole, ["ocr"], "20260104T000002Z-es")
         let plainFrames = lines(plain, "frames/iv:1000.jsonl")
         check(plainFrames.count == 4 && plainFrames.allSatisfy { $0["focus_state"] == nil && $0["video"] == nil }
-              && ["keystrokes", "mouse", "typing", "video", "images", "audio"].allSatisfy {
+              && ["keystrokes", "mouse", "typing", "video", "images"].allSatisfy {
                   !fm.fileExists(atPath: plain.appendingPathComponent($0).path) },
-              "OCR only: frames as before, nothing from EventSession or audio")
+              "OCR only: frames as before, nothing from EventSession")
     }
 
     /// 重跑:Premium 给的日子按先后、去掉在路上的、限天数;做不了的项跳过那个请求;按天取区间(区间台账之前的那段拼一个

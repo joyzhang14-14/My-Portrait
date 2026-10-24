@@ -668,8 +668,7 @@ enum PremiumExchangeExporter {
     /// - `ocr`:帧带 OCR 文字(不要时写空串);
     /// - `event_session`:区间帧再带焦点(`focused` / `focus_state` / `visible_app`)、OCR 词框(`ocr_words_json`)和画面
     ///   (`video` + `offset_ms` 指向 `video/` 里的 MP4 块,还没压成 MP4 的 `image` 指向 `images/` 里的 JPG),外加
-    ///   `keystrokes/` `mouse/` `typing/<interval_id>.jsonl`(击键、鼠标、打字记录);
-    /// - `audio`:`audio/<interval_id>.jsonl`(语音转写,带说话人名字)。
+    ///   `keystrokes/` `mouse/` `typing/<interval_id>.jsonl`(击键、鼠标、打字记录)。
     /// 性格日的帧文件只看 `ocr`。manifest 的 `files` 记树以外全部文件的 sha256。
     @discardableResult
     static func writeBundle(input: Input, bundleId: String, root: URL,
@@ -708,17 +707,6 @@ enum PremiumExchangeExporter {
                     SELECT id, bundle_id, element_hash, started_at, ended_at, text, edit_log, total_chars,
                            session_start, end_value, stripped, url FROM typing_events
                     WHERE started_at >= :s AND started_at < :e ORDER BY started_at, id
-                    """)
-            }
-            if input.contents.contains("audio") {
-                try rows("audio", """
-                    SELECT t.id, CAST(c.recorded_at_ms + t.start_s * 1000 AS INTEGER) AS start_ms,
-                           CAST(c.recorded_at_ms + t.end_s * 1000 AS INTEGER) AS end_ms,
-                           t.text, sp.name AS speaker, c.is_input, t.engine
-                    FROM audio_transcriptions t JOIN audio_chunks c ON c.id = t.audio_chunk_id
-                    LEFT JOIN speakers sp ON sp.id = t.speaker_id
-                    WHERE c.recorded_at_ms + t.start_s * 1000 >= :s AND c.recorded_at_ms + t.start_s * 1000 < :e
-                    ORDER BY start_ms, t.id
                     """)
             }
         }
