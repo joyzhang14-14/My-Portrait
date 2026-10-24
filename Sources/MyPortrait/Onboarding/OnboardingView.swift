@@ -843,10 +843,13 @@ private struct SchedulerStep: View {
                     config: \.scheduler.personality)
                 // 07-30 update:Writing capture 那张 schedulerCard 删掉 —— 这条 pipeline
                 // 已停用重写,且新逻辑不跑模型,没有「定时批处理」这回事。
-                schedulerCard(
-                    title: "Writing style",
-                    info: "Learns **how you write** — tone, language mix, phrases you reuse.",
-                    config: \.scheduler.writingStyle)
+                // Writing style 没开放时(SchedulerSettings.writingStyleAvailable)不出这张卡。
+                if SchedulerSettings.writingStyleAvailable {
+                    schedulerCard(
+                        title: "Writing style",
+                        info: "Learns **how you write** — tone, language mix, phrases you reuse.",
+                        config: \.scheduler.writingStyle)
+                }
 
                 Color.clear.frame(height: 8)
             }

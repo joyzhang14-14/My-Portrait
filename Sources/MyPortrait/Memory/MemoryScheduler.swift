@@ -738,7 +738,8 @@ final class MemoryScheduler {
 
         // writing_style:auto 模式 → 直接落 portrait/writing_style/,不审核。
         // 跟 writing capture 一样不参与 event/portrait/personality 三锁。Tier 2(下游)。
-        if Self.runsLocally(s.writingStyle),
+        if SchedulerSettings.writingStyleAvailable,
+           Self.runsLocally(s.writingStyle),
            Self.shouldTriggerNow(config: s.writingStyle, now: now),
            lastRunDay(kLastWritingStyle) != localDayString(now) {
             setLastRun(kLastWritingStyle, now)

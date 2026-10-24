@@ -286,8 +286,8 @@ enum PremiumImportSelfTest {
         check(pw.eventIntervals.isEmpty && !pw.classifyPending && !pw.distillPending,
               "event local → no event intervals, classify false; portrait local → distill false")
         check(pw.personalityDays == ["2026-01-02"] && pw.personalityLog.map(\.day) == ["2026-01-02"]
-              && pw.writingStyleEnabled && pw.writingRecordsUnprocessed == 5,
-              "personality + writing style offloaded → personality days (+ log rows), writing records")
+              && !pw.writingStyleEnabled && pw.writingRecordsUnprocessed == 0,
+              "personality + writing style offloaded → personality days (+ log rows); writing style not open yet → no writing records")
         check(bundleIvs == [], "event local → personality readiness gets no same-bundle intervals")
         _ = pending(settings(["event", "personality"]))
         check(bundleIvs == ["iv:1"], "event + personality offloaded → personality readiness counts this bundle's intervals")
@@ -297,18 +297,18 @@ enum PremiumImportSelfTest {
               "writing style offloaded but frequency off → nothing pending")
 
         let all = settings(["event", "portrait", "personality", "writing_style"])
-        check(all.offloadedChains == ["event", "portrait", "personality", "writing_style"],
-              "offloadedChains lists all four in config order")
+        check(all.offloadedChains == ["event", "portrait", "personality"],
+              "offloadedChains lists the open chains in config order (writing style not open yet)")
 
         // —— 连上 Premium 全切 / 断开恢复 ——
         var moved = settings(["writing_style"])
         moved.event.providerId = Provider.deepseek.rawValue; moved.event.model = "deepseek-v4-pro"
         moved.portrait.providerId = Provider.ollama.rawValue; moved.portrait.model = "qwen3:8b"
         let saved = moved.moveAllToPremium()
-        check(moved.offloadedChains.count == 4 && moved.event.model == Provider.premium.defaultModel,
-              "Premium connect → all four chains on Premium")
-        check(saved["event"]?.model == "deepseek-v4-pro" && saved["writing_style"]?.providerId == Provider.premium.rawValue,
-              "Premium connect saves each chain's previous choice")
+        check(moved.offloadedChains == ["event", "portrait", "personality"] && moved.event.model == Provider.premium.defaultModel,
+              "Premium connect → the open chains on Premium")
+        check(saved["event"]?.model == "deepseek-v4-pro" && saved.count == 3 && saved["writing_style"] == nil,
+              "Premium connect saves each moved chain's previous choice")
         moved.personality.providerId = Provider.chatgpt.rawValue     // 连上后手动改过
         moved.restoreFromPremium(saved) { $0 == .deepseek || $0 == .chatgpt }
         check(moved.event.providerId == Provider.deepseek.rawValue && moved.event.model == "deepseek-v4-pro",

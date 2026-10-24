@@ -187,11 +187,16 @@ struct MemorySettingsView: View {
                     // writing style 不走 ManualTrigger(自己一套禁用判据 + 运行
                     // 态),所以手动那一行是自己写的,但卡片形态跟另外三条一样:
                     // 并进 Automatic processing,自动开关关掉时才伸出来。
-                    autoRunSection(nil, config: \.scheduler.writingStyle,
-                                   hasManual: true) {
-                        writingStyleManualRow
+                    // 没开放时(SchedulerSettings.writingStyleAvailable)只留 Coming soon,已有的风格条目照常在画像里。
+                    if SchedulerSettings.writingStyleAvailable {
+                        autoRunSection(nil, config: \.scheduler.writingStyle,
+                                       hasManual: true) {
+                            writingStyleManualRow
+                        }
+                        providerSection(\.scheduler.writingStyle, usesLightModel: false)
+                    } else {
+                        writingStyleComingSoonSection
                     }
-                    providerSection(\.scheduler.writingStyle, usesLightModel: false)
                     writingStyleReviewSection
                     pipelineFlowSection(.writingStyleDistiller)
                 case .changelog:
@@ -1574,6 +1579,21 @@ struct MemorySettingsView: View {
             info: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
             PipelineProviderPicker(pipeline: kp, usesLightModel: usesLightModel)
+        }
+    }
+
+    /// writing style 没开放时的说明:开关打不开,已有的条目留在画像里。
+    private var writingStyleComingSoonSection: some View {
+        section(
+            title: "Automatic processing",
+            blurb: "Writing style will learn how you write from what EventSession reads in each session. Your existing writing style entries stay in your portrait.",
+            titleTrailing: {
+                Toggle("", isOn: .constant(false)).labelsHidden().toggleStyle(.switch).disabled(true)
+            }
+        ) {
+            Text("Coming soon.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 

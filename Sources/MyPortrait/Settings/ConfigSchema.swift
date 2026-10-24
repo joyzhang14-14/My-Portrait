@@ -434,10 +434,14 @@ struct SchedulerSettings: Codable, Equatable {
                                 legacy?.dflt(SchedulerConfig.self, .speechStyle, writingStyle) ?? writingStyle)
     }
 
-    /// 可搬到 Premium 的四条链:config 键名 → 配置路径。
+    /// writing style 开没开放。它原来吃 rebuild 拼出的打字成品(writing_records),rebuild 停了就没有新数据;
+    /// 等 EventSession 做好、改从会话结果取打字内容再打开。关着时调度器不跑、Premium 不带、设置页显示 Coming soon。
+    static let writingStyleAvailable = false
+
+    /// 可搬到 Premium 的链:config 键名 → 配置路径(writing style 开放了才算)。
     static var offloadableChains: [(key: String, path: WritableKeyPath<SchedulerSettings, SchedulerConfig>)] {
-        [("event", \.event), ("portrait", \.portrait),
-         ("personality", \.personality), ("writing_style", \.writingStyle)]
+        [("event", \.event), ("portrait", \.portrait), ("personality", \.personality)]
+            + (writingStyleAvailable ? [("writing_style", \.writingStyle)] : [])
     }
 
     /// provider 是 Premium 的链(config 键名,固定顺序)。空 = 全在本机跑。

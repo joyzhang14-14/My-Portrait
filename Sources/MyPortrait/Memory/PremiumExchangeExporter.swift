@@ -579,7 +579,7 @@ enum PremiumExchangeExporter {
             guard let w = IntervalSegmenter.dayWindow($0, tzOffsetMin: off) else { return false }
             return w.start >= fromMs && w.end <= toMs
         }
-        let wsOn = s.writingStyle.frequency != .off
+        let wsOn = SchedulerSettings.writingStyleAvailable && s.writingStyle.frequency != .off
         let pending = PremiumPending(
             eventIntervals: [iv], personalityDays: days, distillPending: true, classifyPending: true,
             writingStyleEnabled: wsOn,
@@ -633,7 +633,7 @@ enum PremiumExchangeExporter {
                                maxIntervals: Int = .max) -> PremiumPending {
         func on(_ key: String, _ c: SchedulerConfig) -> Bool { c.isOffloaded && c.frequency != .off }
         let eventOn = on("event", s.event)
-        let wsOn = on("writing_style", s.writingStyle)
+        let wsOn = SchedulerSettings.writingStyleAvailable && on("writing_style", s.writingStyle)
         let ivs = eventOn ? oneDayOfIntervals(eventIntervals(), limit: maxIntervals) : []
         let pdays = on("personality", s.personality) ? personalityDays(Set(ivs.map(\.id))) : []
         return PremiumPending(
