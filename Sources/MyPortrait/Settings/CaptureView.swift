@@ -941,7 +941,7 @@ struct TypingCaptureSettingsView: View {
     private var typingSection: some View {
         SettingsCard(title: "Typing Capture") {
             SettingsRow("Typing Capture",
-                        info: "Records three things so your text and edit history can be rebuilt:\n\n⌨️  Keystrokes — which keys you press and when\n🖱  Clicks — where you click, so edits land in the right place\n📄  Accessibility text — what an input field contains after you finish typing in it\n\nEverything stays on this Mac and is never uploaded. Password fields are never read.",
+                        info: "Records three things about your typing, so My Portrait can tell what you were working on:\n\n⌨️  Keystrokes — which keys you press and when\n🖱  Clicks — where you click\n📄  Accessibility text — what an input field contains after you finish typing in it\n\nEverything stays on this Mac — it's only sent to My Portrait Premium if you turn on EventSession there. Password fields are never read.",
                         icon: "keyboard") {
                 Toggle("", isOn: config.binding(\.capture.typingCaptureEnabled)).labelsHidden().toggleStyle(.switch)
             }
