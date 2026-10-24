@@ -430,14 +430,15 @@ actor CaptureCoordinator {
     }
 
     private func runSettleCapture() async {
-        defer { settleTask = nil }
         var waitedMs = 0
         while waitedMs < settleTimeoutMs {
             try? await Task.sleep(nanoseconds: UInt64(settlePollMs) * 1_000_000)
-            if Task.isCancelled { return }
+            if Task.isCancelled { return }   // stop() 已清 settleTask
             waitedMs += settlePollMs
             if await focus.liveFront().isSettled { break }
         }
+        // 抓之前就让出位置:补拍帧的 OCR + 写库要几百 ms,这期间又截到的 switching 帧要能排上自己的补拍。
+        settleTask = nil
         do {
             try await captureOneFrame(trigger: .switchSettle, force: true)
         } catch {
