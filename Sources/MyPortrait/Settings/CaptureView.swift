@@ -851,12 +851,10 @@ struct ScreenCaptureSettingsView: View {
 
 }
 
-// MARK: - Typing Rebuild
+// MARK: - Typing Capture
 
-/// Typing Rebuild 设置子分区(07-30 从 "Typing Capture" 改名 —— 页面讲的是
-/// 「把输入和编辑历史重建出来」,不再是「学写作风格」)。
-/// ⚠️ 页内那张 `Typing Capture` 卡片和开关**故意保留原名** —— 它是采集总开关
-/// (`capture.typing_capture_enabled`),跟状态栏菜单同一个东西,改名会对不上。
+/// Typing Capture 设置子分区:采集总开关、打字黑名单、旧 staged 记录的审核。
+/// 页内那张 `Typing Capture` 卡片是采集总开关(`capture.typing_capture_enabled`),跟状态栏菜单同一个东西。
 struct TypingCaptureSettingsView: View {
     @State private var config = ConfigStore.shared
     @Environment(\.services) private var services
@@ -866,7 +864,7 @@ struct TypingCaptureSettingsView: View {
     var body: some View {
         // dev mode:capture / privacy 属于后台 section,永远读真实 config,
         // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
-        SettingsPage("Typing Capture & Rebuild",
+        SettingsPage("Typing Capture",
                      onResetCurrentPage: {
                          config.mutate {
                              let def = RecordingConfig()

@@ -59,7 +59,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .app(.health):            return "Health"
         case .capture(.screen):        return "Screen Capture & Timeline"
         case .capture(.audio):         return "Audio Capture & Transcript"
-        case .capture(.typing):        return "Typing Capture & Rebuild"
+        case .capture(.typing):        return "Typing Capture"
         case .memory(.eventsProcessor):       return "Events Processor"
         case .memory(.portraitsDistiller):    return "Portraits Distiller"
         case .memory(.personalityRefresher):  return "Personality Refresher"
