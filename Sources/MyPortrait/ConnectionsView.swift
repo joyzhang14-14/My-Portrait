@@ -347,15 +347,15 @@ struct ConnectionsView: View {
                                            "personality": "Personality", "writing_style": "Writing style"]
 
     /// Premium 要的包内容在 Connections 里的显示(帧的时间、app、窗口、URL 总是带)。
-    private static func premiumContentsLine(_ contents: [String]?) -> String {
+    private static func premiumContentsLine(_ contents: [String]) -> String {
         let titles = ["ocr": "OCR text", "event_session": "EventSession (screen video, focus, keys & mouse, typing, OCR boxes)",
                       "audio": "audio transcripts"]
-        return (["app & window names"] + (contents ?? []).map { titles[$0] ?? $0 }).joined(separator: ", ")
+        return (["app & window names"] + contents.map { titles[$0] ?? $0 }).joined(separator: ", ")
     }
 
     /// Premium 要重跑的日子在 Connections 里的显示:日子(多了只列头尾)和重跑的项。
     private static func premiumRedoLine(_ redo: [PremiumRemote.Redo]) -> String {
-        let titles = ["event": "events", "impact": "impact", "personality": "personality"]
+        let titles = ["event_session": "EventSession", "event": "events", "portrait": "portrait", "personality": "personality"]
         return redo.map { r in
             let days = r.days.count > 3 ? "\(r.days[0]) … \(r.days[r.days.count - 1]) (\(r.days.count) days)"
                 : r.days.joined(separator: ", ")
@@ -382,7 +382,7 @@ struct ConnectionsView: View {
                 }
                 secureInputField("paste your key…", text: $premiumKeyDraft)
             } else if let st = premiumStatus {
-                // 包里放什么由 Premium 定;这个版本给不了、或连不上时这一行显示原因。
+                // 包里放什么按 pipeline 设定(EventSession 开着就全发);连不上时这一行显示原因。
                 premiumRow("Sends", st.problem ?? Self.premiumContentsLine(st.contents), ok: st.healthy)
                 // Premium 要重跑的日子(还没发出去的);结果导入后在 Memory 的 Changelog 里每天一行 Reprocess。
                 if st.redoProblem != nil || !st.redo.isEmpty {

@@ -15,8 +15,7 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 外加 `X-MP-Names`(Personal Info 的名字)和 `X-MP-Device`(`deviceId`):服务器要求其中一个名字
 /// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上;断开 Premium 时 `release` 让服务器解绑
 /// (`POST /v1/unbind`),换一台 Mac 用同一把密钥就能连。
-/// 包里放什么由 Premium 定:`/v1/me` 的 `contents`(`supportedContents` 里的 id)。Detect 和每次打包前都取一次,
-/// 有这个版本发不了的内容就不打包、把原因报出来;收件服务只收 manifest `contents` 和它一致的包。
+/// 包里放什么由用户的 pipeline 设定定(`contents`):EventSession 交给 Premium 时带全部元数据,否则只带 OCR 文字。
 /// 要重跑哪些日子也由 Premium 定(对所有用户):`/v1/me` 的 `redo`(这台还没发包、也没回报的日子),
 /// 每天怎么处理的用 `POST /v1/redo/<请求 id>/<本地日>` 回报(`RedoReport`),见 `PremiumExchangeExporter.exportRedo`。
 ///
@@ -93,22 +92,20 @@ enum PremiumRemote {
 
     struct Me: Codable, Sendable {
         var user: String
-        /// 包里要放的内容;nil = 服务端没说。
-        var contents: [String]?
         /// 要重跑、还没收到包的日子;nil = 服务端没说(没有)。
         var redo: [Redo]? = nil
         var bundles: [BundleStatus]
     }
 
-    /// Premium 要重跑的一批日子(本地日):`chains` ⊂ `supportedRedoChains`,event = 重新聚类事件(连打分),
-    /// impact = 只重新打分,personality = 重跑性格日。
+    /// Premium 要重跑的一批日子(本地日):`chains` ⊂ `supportedRedoChains`,四层从下到上 event_session(带全部元数据)/
+    /// event(聚类、并入已有事件、打分)/ portrait(那天的事件重新蒸馏)/ personality(重跑性格日),重跑一层时它上面的层都在。
     struct Redo: Codable, Sendable, Equatable {
         var id: String
         var days: [String]
         var chains: [String]
     }
 
-    static let supportedRedoChains: Set<String> = ["event", "impact", "personality"]
+    static let supportedRedoChains: Set<String> = ["event_session", "event", "portrait", "personality"]
 
     /// 重跑的一天这台怎么处理的,回报给 Premium(管理端看):`sent` = 打了包;`empty` = 那天没有帧,不发;
     /// `skipped` = 没发的项 → 那条链现在用的 provider(不是 Premium)。
@@ -118,7 +115,7 @@ enum PremiumRemote {
         var skipped: [String: String]
     }
 
-    /// 打包前从 Premium 拿到的:包内容(排好序)和要重跑的日子(这个版本做不了的请求已去掉)。
+    /// 打包前定下的:包内容(`contents`,排好序)和 Premium 要重跑的日子(这个版本做不了的请求已去掉)。
     struct Ask: Sendable {
         var contents: [String]
         var redo: [Redo]
@@ -131,17 +128,13 @@ enum PremiumRemote {
             : "Premium asks to reprocess \(bad.sorted().joined(separator: ", ")), which this version can't — update My Portrait"
     }
 
-    /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字(不要时帧只带时间、app、窗口、URL);`event_session` = 区间的
-    /// 画面(MP4 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录;`audio` = 语音转写。见 `PremiumExchangeExporter.writeBundle`。
+    /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字;`event_session` = 区间的画面(MP4 / JPG)、帧焦点、OCR 词框、
+    /// 击键、鼠标、打字记录(EventSession 要的全部元数据);`audio` = 语音转写。见 `PremiumExchangeExporter.writeBundle`。
     static let supportedContents: Set<String> = ["ocr", "event_session", "audio"]
+    static let eventSessionContents = ["event_session", "ocr"]
 
-    /// Premium 要的内容这台给不给得了:nil = 给得了,否则是原因。
-    static func contentsProblem(_ contents: [String]?) -> String? {
-        guard let contents else { return "Premium did not say what to send" }
-        let missing = contents.filter { !supportedContents.contains($0) }
-        return missing.isEmpty ? nil
-            : "Premium asks for \(missing.joined(separator: ", ")), which this version can't send — update My Portrait"
-    }
+    /// 包内容:EventSession 交给 Premium 时带全部元数据,否则只带 OCR 文字(帧的时间、app、窗口、URL 总是带)。
+    static func contents(_ cfg: PremiumConfig) -> [String] { cfg.eventSession ? eventSessionContents : ["ocr"] }
 
     struct RemoteError: LocalizedError, Sendable {
         let message: String
@@ -260,7 +253,7 @@ enum PremiumRemote {
         }
     }
 
-    /// 打包前的检查:地址通、密钥有效、Premium 要的内容都给得了 → 包内容和要重跑的日子;否则是原因。
+    /// 打包前的检查:地址通、密钥有效 → 包内容和要重跑的日子;否则是原因。
     /// 重跑请求里有这个版本不认识的项时只跳过那个请求。
     static func check(_ cfg: PremiumConfig) async -> Result<Ask, RemoteError> {
         guard let t = transport(cfg) else {
@@ -268,9 +261,7 @@ enum PremiumRemote {
         }
         do {
             let me = try await t.me()
-            if let why = contentsProblem(me.contents) { return .failure(RemoteError(message: why)) }
-            return .success(Ask(contents: (me.contents ?? []).sorted(),
-                                redo: (me.redo ?? []).filter { redoProblem([$0]) == nil }))
+            return .success(Ask(contents: contents(cfg), redo: (me.redo ?? []).filter { redoProblem([$0]) == nil }))
         } catch let e as RemoteError {
             return .failure(e)
         } catch {
@@ -498,8 +489,8 @@ enum PremiumRemote {
         /// nil = 地址通、密钥有效;否则是原因。
         var problem: String?
         var user: String?
-        /// Premium 要的内容(连上时)。
-        var contents: [String]?
+        /// 包内容(`contents`)。
+        var contents: [String]
         /// Premium 要重跑、还没发出去的日子(连上时)。
         var redo: [Redo] = []
         /// 重跑请求这个版本做不了时的原因。
@@ -511,7 +502,8 @@ enum PremiumRemote {
 
     static func probe(_ cfg: PremiumConfig, root: URL = Storage.rootURL) async -> Status {
         let server = serverURL(cfg)?.absoluteString ?? cfg.serverURL
-        var st = Status(server: server, hasKey: key() != nil, problem: nil, user: nil, state: readState(root))
+        var st = Status(server: server, hasKey: key() != nil, problem: nil, user: nil, contents: contents(cfg),
+                        state: readState(root))
         guard let t = transport(cfg) else {
             st.problem = serverURL(cfg) == nil ? "no server address" : "no key"
             return st
@@ -520,8 +512,6 @@ enum PremiumRemote {
             try await t.health()
             let me = try await t.me()
             st.user = me.user
-            st.contents = me.contents
-            st.problem = contentsProblem(me.contents)
             st.redo = me.redo ?? []
             st.redoProblem = redoProblem(me.redo)
         } catch {

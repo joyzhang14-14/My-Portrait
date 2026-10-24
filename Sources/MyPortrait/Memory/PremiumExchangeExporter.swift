@@ -10,8 +10,8 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// app tick(每 15 分钟)跑 `runSealCheck`,helper(用户级 LaunchAgent,见 `PremiumNightlyAgent`)每个 :00 / :30 跑同一个入口
 /// (`MyPortrait --premium-export --seal-check`)。每次都先按 `IntervalSegmenter` 的规则封区间(最后一帧有效记录之后空了
 /// 2 小时就封);有链搬到 Premium 时,上次发包之后又封了区间、或 event 链还有没发出去的区间(`exportDue`)就导出,
-/// Premium 连不上(地址不通、密钥无效)或要了这个版本发不了的内容(`PremiumRemote.check`)时这轮不导出、下一轮再试;
-/// 包里放什么按 Premium 这次说的(`Input.contents`)。`chains` = provider 为 Premium、频率不是 off、且有待处理
+/// Premium 连不上(地址不通、密钥无效,`PremiumRemote.check`)时这轮不导出、下一轮再试;
+/// 包里放什么按用户的 pipeline 设定(`PremiumRemote.contents`,记在 `Input.contents`)。`chains` = provider 为 Premium、频率不是 off、且有待处理
 /// 工作的链。一个包最多装一天的区间(`oneDayOfIntervals`),积压时同一次检查里一包一天地接着打。
 /// 包压缩后超过 `maxBundleBytes` 就对半拆:区间个数对半;只剩一个区间还超就按时间对半切成分片包(`part_from_ms` /
 /// `part_to_ms`),分片还超再对半,Premium 收齐同一区间的分片再合起来处理。
@@ -21,8 +21,8 @@ private let exportLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 前面的包还没处理完也照样发:同一个用户积压的几个包 Premium 合成一份处理,结果挂在最新的那个上,较早的标 merged。
 /// 包在锁里写好、打成 tar.gz、台账记 `pending_upload`,放锁后才上传。
 /// 每次检查还看 Premium 要不要重跑某些日子(`PremiumRemote.Ask.redo`,管理端对所有用户下发):有就一天一个 `redo` 包地发
-/// (`exportRedo`,最多 `maxRedoDaysInFlight` 天在路上;只发 provider 是 Premium 的项,那天没帧不发,都回报给 Premium),
-/// Premium 把那天当新数据重跑、并回已有事件,结果导入时那天的事件与性格日以 Premium 的版本为准(结果 manifest 的 `overwrite`)。
+/// (`exportRedo`,最多 `maxRedoDaysInFlight` 天在路上;只发交给 Premium 的层,那天没帧不发,都回报给 Premium),
+/// Premium 从重跑的那层往上重跑,结果导入时那天的事件、画像条目与性格日以 Premium 的版本为准(结果 manifest 的 `overwrite`)。
 enum PremiumExchangeExporter {
 
     /// 导出需要的全部输入(在主线程上一次性取好,之后的 IO 都在后台)。
@@ -186,7 +186,7 @@ enum PremiumExchangeExporter {
     }
 
     /// 持交换锁(跨进程)+ 三把调度锁打包,台账记 `pending_upload` 和包里的区间(上传由调用方放锁后做)。
-    /// `contents` = 这次 `PremiumRemote.check` 拿到的包内容。`lockWait` nil = 调用方已持交换锁。
+    /// `contents` = 这次 `PremiumRemote.check` 定下的包内容。`lockWait` nil = 调用方已持交换锁。
     @MainActor
     private static func export(dbPool: DatabasePool, contents: [String], lockWait: TimeInterval?) async -> ExportResult {
         let config = ConfigStore.shared.current
@@ -305,12 +305,17 @@ enum PremiumExchangeExporter {
         return Array(todo.sorted { ($0.day, $0.redo.id) < ($1.day, $1.redo.id) }.prefix(max(limit, 0)))
     }
 
-    /// 重跑的项里这台能发的(那条链的 provider 是 Premium:event / impact 看 event 链,personality 看 personality 链)
-    /// 和不发的(项 → 那条链现在用的 provider)。
-    static func redoParts(_ chains: [String], _ s: SchedulerSettings) -> (keep: [String], skipped: [String: String]) {
+    /// 重跑的层里这台能发的(交给 Premium 的:event_session 看 EventSession 开没开,event / portrait / personality 看
+    /// 各自链的 provider)和不发的(层 → 现在用的 provider,EventSession 没开是 off)。
+    static func redoParts(_ chains: [String], _ s: SchedulerSettings,
+                          eventSession: Bool) -> (keep: [String], skipped: [String: String]) {
         var keep: [String] = [], skipped: [String: String] = [:]
         for c in chains {
-            let cfg = c == "personality" ? s.personality : s.event
+            if c == "event_session" {
+                if eventSession { keep.append(c) } else { skipped[c] = "off" }
+                continue
+            }
+            let cfg = c == "personality" ? s.personality : c == "portrait" ? s.portrait : s.event
             if cfg.isOffloaded { keep.append(c) } else {
                 skipped[c] = Provider(rawValue: cfg.providerId)?.displayName ?? "no provider"
             }
@@ -318,8 +323,8 @@ enum PremiumExchangeExporter {
         return (keep, skipped)
     }
 
-    /// 把 Premium 要重跑的日子打成包(调用方持交换锁,上传由调用方放锁后做):一天一份,只带 provider 是 Premium 的项
-    /// (`redoParts`),都不是或那天没有帧就不打包;每天怎么处理的回报给 Premium。最多 `maxRedoDaysInFlight`
+    /// 把 Premium 要重跑的日子打成包(调用方持交换锁,上传由调用方放锁后做):一天一份,只带交给 Premium 的层
+    /// (`redoParts`;重跑 EventSession 的包带全部元数据),都没交给 Premium 或那天没有帧就不打包;每天怎么处理的回报给 Premium。最多 `maxRedoDaysInFlight`
     /// 天在路上;台账记 `redo`(在路上时不再打)。返回打出来的包 id。
     @MainActor
     static func exportRedo(dbPool: DatabasePool, ask: PremiumRemote.Ask) async -> [String] {
@@ -335,7 +340,8 @@ enum PremiumExchangeExporter {
         guard scheduler.acquireAllLocks() else { return [] }
         defer { scheduler.releaseAllLocks() }
         let sched = ConfigStore.shared.current.scheduler
-        let transport = PremiumRemote.transport(ConfigStore.shared.current.premium)
+        let premium = ConfigStore.shared.current.premium
+        let transport = PremiumRemote.transport(premium)
         func report(_ redo: PremiumRemote.Redo, _ day: String, _ r: PremiumRemote.RedoReport) async {
             do { try await transport?.reportRedo(id: redo.id, day: day, report: r) } catch {
                 exportLog.notice("reprocess \(day, privacy: .public): report failed, retry next check: \(error.localizedDescription, privacy: .public)")
@@ -343,7 +349,7 @@ enum PremiumExchangeExporter {
         }
         var all: [String] = []
         for (redo, day) in todo {
-            let (keep, skipped) = redoParts(redo.chains, sched)
+            let (keep, skipped) = redoParts(redo.chains, sched, eventSession: premium.eventSession)
             let input: Input
             do {
                 guard !keep.isEmpty else {
@@ -358,7 +364,8 @@ enum PremiumExchangeExporter {
                 }
                 var mine = redo
                 mine.chains = keep
-                input = try gatherRedoInput(dbPool: dbPool, contents: ask.contents, redo: mine, day: day)
+                input = try gatherRedoInput(dbPool: dbPool, redo: mine, day: day,
+                                            contents: keep.contains("event_session") ? PremiumRemote.eventSessionContents : ask.contents)
             } catch {
                 exportLog.error("reprocess \(day, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 continue
@@ -403,23 +410,22 @@ enum PremiumExchangeExporter {
     /// 区间台账开始(origin)之前的日子没有区间,重跑时临时拼的区间 id 前缀(Premium 不回写台账)。
     static let redoIntervalPrefix = "redo:"
 
-    /// 重跑某个本地日的输入。chains 有 event / impact 时带上碰到这天的全部已封区间(event 置 pending 重新聚类、连打分;
-    /// 只有 impact 时 event 保持 complete、只把 impact 置 pending),这天落在区间台账开始之前的那段拼成一个
-    /// `redo:<起点>` 区间;有 personality 时带上这天的性格日。portrait 搬到 Premium 时,重新聚类后接着蒸馏。
+    /// 重跑某个本地日的输入(chains = 要发的层)。有 event_session / event 时带上碰到这天的全部已封区间(event / impact
+    /// 置 pending:重新聚类、并入、打分),这天落在区间台账开始之前的那段拼成一个 `redo:<起点>` 区间;有 portrait 时
+    /// distill 置 pending(Premium 让那天的事件重新蒸馏);有 personality 时带上这天的性格日。
     @MainActor
-    static func gatherRedoInput(dbPool: DatabasePool, contents: [String], redo: PremiumRemote.Redo,
-                                day: String) throws -> Input {
+    static func gatherRedoInput(dbPool: DatabasePool, redo: PremiumRemote.Redo, day: String,
+                                contents: [String]) throws -> Input {
         let store = EventIntervalStore(dbPool: dbPool)
         let (off, w) = try redoDayWindow(store, day)
-        let ev = redo.chains.contains("event"), pers = redo.chains.contains("personality")
-        let rescore = ev || redo.chains.contains("impact")
+        let ev = redo.chains.contains("event") || redo.chains.contains("event_session")
+        let por = redo.chains.contains("portrait"), pers = redo.chains.contains("personality")
         let pending = ProcessingStatus.pending.rawValue
-        let event = ev ? pending : ProcessingStatus.complete.rawValue
         var ivs: [PremiumIntervalEntry] = []
-        if rescore {
+        if ev {
             ivs = try store.all().filter { $0.startMs < w.end && $0.endMs > w.start }.map {
                 var e = PremiumIntervalEntry($0)
-                e.eventStatus = event
+                e.eventStatus = pending
                 e.impactStatus = pending
                 e.retryCount = 0
                 return e
@@ -436,20 +442,19 @@ enum PremiumExchangeExporter {
                 }
                 ivs.insert(PremiumIntervalEntry(
                     id: "\(redoIntervalPrefix)\(w.start)", startMs: w.start, endMs: end, tzOffsetMin: off,
-                    trigger: PremiumExchange.triggerRedo, eventStatus: event, impactStatus: pending, retryCount: 0,
+                    trigger: PremiumExchange.triggerRedo, eventStatus: pending, impactStatus: pending, retryCount: 0,
                     frameCount: n, afterFrameId: 0, maxFrameId: maxId), at: 0)
             }
         }
         let pday = PremiumPersonalityDayEntry(day: day, tzOffsetMin: off, status: pending, retryCount: 0)
         let p = PremiumPending(
-            eventIntervals: ivs, personalityDays: pers ? [day] : [], distillPending: false, classifyPending: ev,
+            eventIntervals: ivs, personalityDays: pers ? [day] : [], distillPending: por, classifyPending: ev,
             writingStyleEnabled: false, writingRecordsUnprocessed: 0, personalityLog: pers ? [pday] : [])
-        let portrait = ev && ConfigStore.shared.current.scheduler.portrait.isOffloaded
         let chains = PremiumPending.chainOrder.filter {
-            ($0 == "event" && rescore) || ($0 == "portrait" && portrait) || ($0 == "personality" && pers)
+            ($0 == "event" && ev) || ($0 == "portrait" && por) || ($0 == "personality" && pers)
         }
         let store2 = ProcessingLogStore()
-        let da = store2.row(for: ProcessingLogStore.distillAnchorDate)?.distill ?? .idle
+        let da = por ? .pending : store2.row(for: ProcessingLogStore.distillAnchorDate)?.distill ?? .idle
         let ca = store2.row(for: ProcessingLogStore.classifyAnchorDate)?.classify ?? .idle
         var input = makeInput(trigger: PremiumExchange.triggerRedo, chains: chains, contents: contents, pending: p,
                               distill: da.rawValue, classify: ca.rawValue)

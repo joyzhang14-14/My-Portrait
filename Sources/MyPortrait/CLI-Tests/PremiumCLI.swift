@@ -455,7 +455,6 @@ enum PremiumImportSelfTest {
     /// 进程内的假收件服务:记下收到的包、按 `statuses` 回状态、按 `results` 给结果。
     final class FakePremium: PremiumRemote.Transport, @unchecked Sendable {
         var reachable = true
-        var contents: [String]? = ["ocr"]
         var rejectNextUpload: Int?
         var uploads: [String: Data] = [:]
         var statuses: [String: PremiumRemote.BundleStatus] = [:]
@@ -469,7 +468,7 @@ enum PremiumImportSelfTest {
         }
         func me() async throws -> PremiumRemote.Me {
             try await health()
-            return PremiumRemote.Me(user: "Selftest", contents: contents, bundles: Array(statuses.values))
+            return PremiumRemote.Me(user: "Selftest", bundles: Array(statuses.values))
         }
         func upload(bundleId: String, file: URL, sha256: String) async throws -> PremiumRemote.BundleStatus {
             try await health()
@@ -655,17 +654,11 @@ enum PremiumImportSelfTest {
         check(skipped(r1) == "Premium not reachable (offline)" && writes == 0,
               "seal check, Premium not reachable: export skipped with the reason, nothing packed")
         fake.reachable = true
-        fake.contents = ["ocr", "video"]
-        let rVideo = await round(t0 + 14 * h + 2 * m)
-        let probeVideo = await R.probe(cfg, root: root)
-        fake.contents = nil
-        let rNone = await round(t0 + 14 * h + 3 * m)
-        fake.contents = ["ocr"]
-        check(skipped(rVideo)?.contains("asks for video") == true && skipped(rNone)?.contains("did not say") == true
-              && writes == 0 && !probeVideo.healthy && probeVideo.problem?.contains("video") == true,
-              "Premium asks for content this version can't send, or says nothing: no bundle, Detect shows why")
-        check(R.contentsProblem([]) == nil && R.contentsProblem(["ocr"]) == nil,
-              "Premium asks for OCR or for nothing extra: this version can send it")
+        var es = PremiumConfig()
+        es.eventSession = true
+        let probed = await R.probe(cfg, root: root)
+        check(R.contents(cfg) == ["ocr"] && R.contents(es) == ["event_session", "ocr"] && probed.healthy && probed.contents == ["ocr"],
+              "bundle contents follow the pipeline setting: OCR only, everything when EventSession is on")
         let released = await R.release(cfg)
         fake.reachable = false
         let offline = await R.release(cfg)
@@ -870,7 +863,7 @@ enum PremiumImportSelfTest {
         typealias R = PremiumRemote
         print("[premium-selftest] reprocess days")
         let fm = FileManager.default
-        let a = R.Redo(id: "r1", days: ["2026-01-03", "2026-01-01"], chains: ["event", "impact"])
+        let a = R.Redo(id: "r1", days: ["2026-01-03", "2026-01-01"], chains: ["event", "portrait", "personality"])
         let b = R.Redo(id: "r2", days: ["2026-01-02"], chains: ["personality"])
         let next = E.nextRedoDays([a, b], inFlight: ["r1/2026-01-01"], limit: 5).map { "\($0.redo.id)/\($0.day)" }
         check(next == ["r2/2026-01-02", "r1/2026-01-03"] && E.nextRedoDays([a, b], inFlight: [], limit: 1).count == 1
@@ -884,13 +877,16 @@ enum PremiumImportSelfTest {
         check(st.redoInFlight == ["r1/2026-01-01"], "reprocess: in flight = uploads not imported yet")
         var sched = SchedulerSettings()
         sched.event.providerId = Provider.premium.rawValue
+        sched.portrait.providerId = Provider.premium.rawValue
         sched.personality.providerId = Provider.ollama.rawValue
-        let parts = E.redoParts(["event", "impact", "personality"], sched)
+        let layers = ["event_session", "event", "portrait", "personality"]
+        let parts = E.redoParts(layers, sched, eventSession: false)
+        let esOn = E.redoParts(layers, sched, eventSession: true)
         sched.event.providerId = ""
-        let none = E.redoParts(["impact"], sched)
-        check(parts.keep == ["event", "impact"] && parts.skipped == ["personality": Provider.ollama.displayName]
-              && none.keep.isEmpty && none.skipped == ["impact": "no provider"],
-              "reprocess: only items whose chain runs on Premium are sent, the rest reported with the provider they use")
+        let none = E.redoParts(["event"], sched, eventSession: false)
+        check(parts.keep == ["event", "portrait"] && parts.skipped == ["event_session": "off", "personality": Provider.ollama.displayName]
+              && esOn.keep == ["event_session", "event", "portrait"] && none.keep.isEmpty && none.skipped == ["event": "no provider"],
+              "reprocess: only layers handed to Premium are sent, the rest reported with what they use")
 
         // 2026-01-02(偏移 0):区间台账从 10:00 开始,10:00–20:00、20:00–次日 05:00 两个区间,之前有两帧。
         let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo.sqlite").path).dbPool
@@ -918,24 +914,29 @@ enum PremiumImportSelfTest {
         }
         check(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-02") && !(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-05")),
               "reprocess: a day without frames is reported as empty instead of sent")
-        let all = R.Redo(id: "r9", days: ["2026-01-02"], chains: ["event", "impact", "personality"])
-        let full = try await MainActor.run { try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: all, day: "2026-01-02") }
+        let all = R.Redo(id: "r9", days: ["2026-01-02"], chains: ["event_session", "event", "portrait", "personality"])
+        let full = try await MainActor.run {
+            try E.gatherRedoInput(dbPool: pool, redo: all, day: "2026-01-02", contents: R.eventSessionContents)
+        }
         let ivs = full.pending.eventIntervals
         check(ivs.map(\.id) == ["redo:\(day0)", "iv:a", "iv:b"] && ivs[0].endMs == t0 && ivs[0].frameCount == 2
               && ivs.allSatisfy { $0.eventStatus == "pending" && $0.impactStatus == "pending" }
               && full.pending.personalityDays == ["2026-01-02"] && full.pending.personalityLog.first?.status == "pending"
-              && full.chains.contains("event") && full.chains.contains("personality") && full.trigger == "redo"
+              && full.chains == ["event", "portrait", "personality"] && full.pending.distillPending && full.trigger == "redo"
+              && full.processingLog.first?.distillStatus == "pending" && full.contents == ["event_session", "ocr"]
               && full.redo == [PremiumRedoEntry(id: "r9", day: "2026-01-02", chains: all.chains, intervals: ivs.map(\.id))],
               "reprocess a day: every interval touching it re-clustered, the part before the interval ledger as a redo: interval, its personality day")
-        let rescore = try await MainActor.run {
-            try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: R.Redo(id: "r8", days: [], chains: ["impact"]), day: "2026-01-02")
+        let portrait = try await MainActor.run {
+            try E.gatherRedoInput(dbPool: pool, redo: R.Redo(id: "r8", days: [], chains: ["portrait", "personality"]),
+                                  day: "2026-01-02", contents: ["ocr"])
         }
         let pers = try await MainActor.run {
-            try E.gatherRedoInput(dbPool: pool, contents: ["ocr"], redo: R.Redo(id: "r7", days: [], chains: ["personality"]), day: "2026-01-02")
+            try E.gatherRedoInput(dbPool: pool, redo: R.Redo(id: "r7", days: [], chains: ["personality"]), day: "2026-01-02",
+                                  contents: ["ocr"])
         }
-        check(rescore.pending.eventIntervals.allSatisfy { $0.eventStatus == "complete" && $0.impactStatus == "pending" }
-              && rescore.pending.personalityDays.isEmpty && pers.pending.eventIntervals.isEmpty && pers.chains == ["personality"],
-              "reprocess impact only: events kept, scores redone; personality only: no intervals")
+        check(portrait.pending.eventIntervals.isEmpty && portrait.pending.distillPending && portrait.chains == ["portrait", "personality"]
+              && pers.pending.eventIntervals.isEmpty && !pers.pending.distillPending && pers.chains == ["personality"],
+              "reprocess from portrait: no intervals, distill pending; personality only: just the day")
 
         let root = tmp.appendingPathComponent("redo-root", isDirectory: true)
         try fm.createDirectory(at: root.appendingPathComponent("events", isDirectory: true), withIntermediateDirectories: true)

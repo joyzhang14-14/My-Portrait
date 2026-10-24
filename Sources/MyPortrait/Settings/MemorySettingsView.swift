@@ -152,6 +152,7 @@ struct MemorySettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.event)
+                    eventSessionSection
                     reviewSectionFor(.eventProcessing)
                     pipelineFlowSection(.eventsProcessor)
                 case .portraitsDistiller:
@@ -1573,6 +1574,22 @@ struct MemorySettingsView: View {
             info: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
         ) {
             PipelineProviderPicker(pipeline: kp, usesLightModel: usesLightModel)
+        }
+    }
+
+    /// EventSession(事件下面那层:一个个会话先总结)交给 Premium 时,包里除了 OCR 文字再带全部元数据
+    /// (`PremiumRemote.contents`)。还没做好,开关先打不开。
+    private var eventSessionSection: some View {
+        section(
+            title: "EventSession",
+            blurb: "Summarizes each session from everything captured — screen video, focus, keys & mouse, typing and OCR boxes — before events are built. On My Portrait Premium, all of that is sent along with the OCR text.",
+            titleTrailing: {
+                Toggle("", isOn: cfg.binding(\.premium.eventSession)).labelsHidden().toggleStyle(.switch).disabled(true)
+            }
+        ) {
+            Text("Coming soon.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
     }
 

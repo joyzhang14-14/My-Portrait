@@ -1172,17 +1172,21 @@ struct PremiumConfig: Codable, Equatable {
     var serverURL: String = ""
     /// 连上 Premium 前四条链的选择(键 = 链的 config 键名),断开时恢复。
     var previousProviders: [String: ChainProviderChoice] = [:]
+    /// EventSession 交给 Premium:包里除了 OCR 文字再带全部元数据(`PremiumRemote.contents`)。界面上暂时打不开。
+    var eventSession: Bool = false
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case serverURL = "server_url"
         case previousProviders = "previous_providers"
+        case eventSession = "event_session"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         serverURL = c.dflt(String.self, .serverURL, serverURL)
         previousProviders = c.dflt([String: ChainProviderChoice].self, .previousProviders, previousProviders)
+        eventSession = c.dflt(Bool.self, .eventSession, eventSession)
     }
 }
 
