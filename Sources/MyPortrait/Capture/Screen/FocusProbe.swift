@@ -240,20 +240,31 @@ actor FocusProbe {
     /// 只认 accessory:系统替前台 app 跑的打开/存储对话框服务是 prohibited,归前台 app;
     /// 切 app 瞬间 AX 先指到的新 app 是 regular,交给 switching 判读。
     /// 系统级焦点查询单次 p50 0.07ms、最慢 ~20ms;超时设 50ms,卡住也不拖主线程。
+    /// 读失败不等于面板关了:在 Spotlight 里每敲一键它会有 ~50ms 读不到。激活 app 没变且上次成功读数
+    /// 在 1s 内 → 沿用上次结果;激活 app 变了说明面板已关(实测关面板切走时读失败那刻激活 app 已是新 app)。
     @MainActor
     static func focusedPanelApp() -> NSRunningApplication? {
+        let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         let sys = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(sys, 0.05)
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
-              let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
         var pid: pid_t = 0
-        // swiftlint:disable:next force_cast
-        guard AXUIElementGetPid(ref as! AXUIElement, &pid) == .success,
-              let app = NSRunningApplication(processIdentifier: pid),
-              app.activationPolicy == .accessory else { return nil }
-        return app
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
+              let ref, CFGetTypeID(ref) == AXUIElementGetTypeID(),
+              // swiftlint:disable:next force_cast
+              AXUIElementGetPid(ref as! AXUIElement, &pid) == .success else {
+            if let last = lastPanelRead, last.frontPid == frontPid,
+               Date().timeIntervalSince(last.at) < 1 { return last.panel }
+            return nil
+        }
+        let app = NSRunningApplication(processIdentifier: pid)
+        let panel = app?.activationPolicy == .accessory ? app : nil
+        lastPanelRead = (panel, frontPid, Date())
+        return panel
     }
+
+    /// `focusedPanelApp` 上一次读成功的结果、当时的激活 app 和时间。
+    @MainActor private static var lastPanelRead: (panel: NSRunningApplication?, frontPid: pid_t?, at: Date)?
 
     // MARK: - 私有
 
