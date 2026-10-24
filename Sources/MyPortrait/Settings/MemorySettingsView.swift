@@ -198,7 +198,8 @@ struct MemorySettingsView: View {
                         writingStyleComingSoonSection
                     }
                     writingStyleReviewSection
-                    pipelineFlowSection(.writingStyleDistiller)
+                    // 流程图讲的是原来从 writing_records 学的那套,开放时换成 EventSession 的流程再放出来。
+                    if SchedulerSettings.writingStyleAvailable { pipelineFlowSection(.writingStyleDistiller) }
                 case .changelog:
                     attentionSection
                     changelogSection
