@@ -234,10 +234,9 @@ final class CaptureLampState: ObservableObject {
         } else if !granted(\.accessibility) {
             t = Lamp(on: false, reason: "No accessibility permission — keystrokes can't be read.")
         } else if !bundleId.isEmpty,
-                  TypingPrivacyFilter.exclusionReason(bundleId: bundleId) != nil {
+                  TypingPrivacyFilter.exclusionReason(bundleId: bundleId) == .blacklisted {
             // 判据跟 TypingObserver.attach 共用同一个函数,不重写一份。
-            // 终端不单独报一句 —— 它本来就在 defaultBlacklist 里(设置页
-            // 灰显那截),对用户就是"黑名单里的 app",没必要区分两种说法。
+            // 终端只是不读 AX,击键照记,灯照亮。
             t = Lamp(on: false, reason: "\(appName) is on your typing blacklist — nothing you type here is saved.")
         } else if !bundleId.isEmpty, let url = browserUrl,
                   TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url) {

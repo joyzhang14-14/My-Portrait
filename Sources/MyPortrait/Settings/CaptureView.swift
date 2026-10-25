@@ -897,7 +897,7 @@ struct TypingCaptureSettingsView: View {
     private var blacklistSection: some View {
         SettingsCard(
             title: "Typing blacklist",
-            info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet.\n\nPassword managers and terminals are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
+            info: "Nothing you type in these apps — or on pages matching these URLs — is ever saved. Categories match what each app declares itself to be, so picking one covers apps you haven\'t installed yet.\n\nPassword managers are always excluded and can't be removed. URLs match as substrings and ignore case, so \"chase.com\" covers every page on chase.com."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Apps & categories — pick from apps you've typed in, or a whole category…")

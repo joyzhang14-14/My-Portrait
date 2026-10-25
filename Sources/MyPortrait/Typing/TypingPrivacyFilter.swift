@@ -50,10 +50,10 @@ struct TypingPrivacyFilter {
     /// 终端黑名单 app 数量 —— TypingObserver 启动 banner 用。
     static var terminalBlocklistCount: Int { terminalBundleIds.count }
 
-    /// 硬编码「永远黑名单」（密码管理器 + 终端）的 bundle id —— 设置页
-    /// 灰显展示用，不可移除。
-    static let defaultBlacklist: [String] =
-        hardcodedBlacklist.sorted() + terminalBundleIds.sorted()
+    /// 硬编码「永远黑名单」（密码管理器 / 认证界面）的 bundle id —— 设置页
+    /// 灰显展示用，不可移除；击键 / 鼠标 / 剪贴板在这些 app 里只记占位。
+    /// 终端不在这里(10-25 update):击键照记,只是 AX 那条路不订阅(见 `terminalBundleIds`)。
+    static let defaultBlacklist: [String] = hardcodedBlacklist.sorted()
 
     /// bundle id 是否整 app 屏蔽。给 TypingObserver.attach 用(没 URL 信息,
     /// 只能判 app 级)。读 ConfigStore.shared(@MainActor 隔离),故标 @MainActor。
