@@ -1135,6 +1135,11 @@ enum DBSchema {
             try db.execute(sql: "ALTER TABLE frames ADD COLUMN visible_windows TEXT")
         }
 
+        // Claude Code / Codex CLI 的 prompt 导入功能已移除(10-25 update),导入的记录一并删掉。
+        m.registerMigration("v47_drop_cli_import_records") { db in
+            try db.execute(sql: "DELETE FROM writing_records WHERE source = 'cli_import'")
+        }
+
         return m
     }
 }

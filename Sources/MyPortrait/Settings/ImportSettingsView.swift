@@ -7,14 +7,6 @@ import GRDB
 /// 找不到 → 提示"未找到" + Pick folder 兜底。
 ///
 /// 只导比 My-Portrait 最早数据老的部分,从不动当前数据。
-/// CLI 导入进度 —— 读日志阶段 indeterminate,写库阶段 current/total。
-struct CLIImportProgress {
-    var label: String
-    var current: Int
-    var total: Int
-    var indeterminate: Bool
-}
-
 struct ImportSettingsView: View {
 
     @Environment(\.services) private var services
@@ -33,24 +25,6 @@ struct ImportSettingsView: View {
     @State private var overrideDir: URL? = nil
     /// 当前进度(running 时实时更新)。
     @State private var progress: ScreenpipeImporter.Progress? = nil
-
-    // CLI 导入状态 —— Claude Code 与 Codex 各自独立(分开扫描,互不触发)。
-    @State private var ccCount: Int? = nil
-    @State private var ccSessions: Int? = nil
-    @State private var ccScanning: Bool = false
-    @State private var codexCount: Int? = nil
-    @State private var codexSessions: Int? = nil
-    @State private var codexScanning: Bool = false
-    @State private var ccRunning: Bool = false
-    @State private var ccStatus: String? = nil
-    @State private var codexRunning: Bool = false
-    @State private var codexStatus: String? = nil
-    // 上次导入时刻(= 该源已导记录的 MAX(start_ts)),卡片底部加粗显示。
-    @State private var ccLastTs: Int64? = nil
-    @State private var codexLastTs: Int64? = nil
-    // 导入进度(running 时实时更新);indeterminate=读日志阶段。
-    @State private var ccProgress: CLIImportProgress? = nil
-    @State private var codexProgress: CLIImportProgress? = nil
 
     var body: some View {
         // dev mode 整页只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
@@ -88,249 +62,10 @@ struct ImportSettingsView: View {
                     }
                 }
 
-                // 两个 CLI 来源并成一张卡 —— 它们做的是同一件事(把你打给
-                // coding agent 的 prompt 收进写作),各自的说明进各自那行的 ⓘ。
-                SettingsCard(title: "Import from CLI AI tools") {
-                    cliSourceBlock(
-                        icon: "ClaudeCode",
-                        title: "Claude Code CLI",
-                        info: "Brings in the prompts you typed into Claude Code CLI and counts them toward your writing.\n\nOnly your own messages are imported — never the assistant's replies. Importing again won't create duplicates.",
-                        sessions: ccSessions,
-                        count: ccCount,
-                        lastTs: ccLastTs,
-                        running: ccRunning,
-                        progress: ccProgress,
-                        status: ccStatus,
-                        scanning: ccScanning,
-                        rescanAction: { await rescanClaudeCode() },
-                        importAction: { await runImport(app: "claude-code") }
-                    )
-                    SettingsDivider()
-                    cliSourceBlock(
-                        icon: "Codex",
-                        title: "Codex CLI",
-                        info: "Brings in the prompts you typed into Codex CLI and counts them toward your writing.\n\nOnly your own messages are imported. Importing again won't create duplicates.",
-                        sessions: codexSessions,
-                        count: codexCount,
-                        lastTs: codexLastTs,
-                        running: codexRunning,
-                        progress: codexProgress,
-                        status: codexStatus,
-                        scanning: codexScanning,
-                        rescanAction: { await rescanCodex() },
-                        importAction: { await runImport(app: "codex-cli") }
-                    )
-                }
             }
         }
         // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
         // 「未扫描」+ Scan 按钮,用户点了才扫。
-    }
-
-    // MARK: CLI 导入 UI(Claude Code / Codex 各一张卡片,共用此 block)
-
-    @ViewBuilder
-    private func cliSourceBlock(
-        icon: String,
-        title: String,
-        info: String,
-        sessions: Int?,
-        count: Int?,
-        lastTs: Int64?,
-        running: Bool,
-        progress: CLIImportProgress?,
-        status: String?,
-        scanning: Bool,
-        rescanAction: @escaping () async -> Void,
-        importAction: @escaping () async -> Void
-    ) -> some View {
-        // 未扫描(手动模式还没点 Scan):卡片缩到只剩 header + 提示,
-        // 不显示 Import 按钮和 Last imported 时间。
-        let notScanned = sessions == nil && count == nil && !running && !scanning
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                // 走 bundle asset(同 screenpipe 行的 Image("Screenpipe")),
-                // 不再用 SF Symbol —— 跟 Connections 页 tile 视觉对齐,语义也是
-                // 应用品牌 icon 而不是 OS 自带字符图。
-                Image(icon)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                // spacing 0 —— ⓘ 自带 6pt padding 撑点击范围,外面再留 8 就散了
-                // (同 SettingsRow 的做法)。
-                HStack(spacing: 0) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                    SettingsInfoBadge(text: info)
-                }
-                Spacer()
-                Button(count == nil ? "Scan" : "Re-scan") { Task { await rescanAction() } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(running || scanning)
-            }
-            if running, let p = progress {
-                cliProgressBlock(p)              // 导入中:进度条优先
-            } else if scanning {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Scanning session logs …")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-            } else if sessions == nil && count == nil {
-                // 手动模式:还没扫过这个来源。
-                Text("Not scanned — press Scan above.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
-            } else {
-                if let s = sessions {
-                    statRow("Sessions", "\(s.formatted())", mono: false)
-                }
-                if let c = count {
-                    statRow("Typed prompts", "\(c.formatted()) to import", mono: false)
-                }
-            }
-            if let st = status {
-                Text(st)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !notScanned {
-                HStack(spacing: 8) {
-                    Spacer()
-                    Button(running ? "Importing…" : "Import") {
-                        Task { await importAction() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(running || (count ?? 0) == 0)
-                }
-                .padding(.top, 4)
-                Text(lastTs.map { "Last imported: \(Self.dateTimeString($0))" } ?? "Last imported: never")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.top, 2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    @ViewBuilder
-    private func cliProgressBlock(_ p: CLIImportProgress) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text(p.label)
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                if !p.indeterminate, p.total > 0 {
-                    Text("\(p.current.formatted()) / \(p.total.formatted())")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-            }
-            if !p.indeterminate, p.total > 0 {
-                ProgressView(value: Double(p.current), total: Double(p.total))
-                    .progressViewStyle(.linear)
-                    .tint(Color.accentColor)
-            } else {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .tint(Color.accentColor)
-            }
-        }
-    }
-
-    private static func dateTimeString(_ ms: Int64) -> String {
-        let d = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.dateFormat = "yyyy-MM-dd HH:mm"
-        return fmt.string(from: d)
-    }
-
-    private func rescanClaudeCode(quiet: Bool = false) async {
-        if !quiet { ccScanning = true }
-        let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
-        let (count, sessions, since) = await Task.detached(priority: .userInitiated) {
-            var since: Int64? = nil
-            if let dbPool {
-                since = try? WritingCaptureStore(dbPool: dbPool).cliImportLastTs(app: "claude-code")
-            }
-            let r = CLIInputImporter.scanClaudeCode(since: since)
-            return (r.count, r.sessions, since)
-        }.value
-        ccCount = count
-        ccSessions = sessions
-        ccLastTs = since
-        ccScanning = false
-    }
-
-    private func rescanCodex(quiet: Bool = false) async {
-        if !quiet { codexScanning = true }
-        let dbPool = (services?.db as? PortraitDBImpl)?.dbPool
-        let (count, sessions, since) = await Task.detached(priority: .userInitiated) {
-            var since: Int64? = nil
-            if let dbPool {
-                since = try? WritingCaptureStore(dbPool: dbPool).cliImportLastTs(app: "codex-cli")
-            }
-            let r = CLIInputImporter.scanCodex(since: since)
-            return (r.count, r.sessions, since)
-        }.value
-        codexCount = count
-        codexSessions = sessions
-        codexLastTs = since
-        codexScanning = false
-    }
-
-    /// 单源导入 —— app 取 "claude-code" 或 "codex-cli"。
-    private func runImport(app: String) async {
-        let isCC = app == "claude-code"
-        func setStatus(_ s: String?) { if isCC { ccStatus = s } else { codexStatus = s } }
-        func setProgress(_ p: CLIImportProgress?) { if isCC { ccProgress = p } else { codexProgress = p } }
-
-        if isCC { ccRunning = true } else { codexRunning = true }
-        setStatus(nil)
-        setProgress(CLIImportProgress(label: "Reading session logs…", current: 0, total: 0, indeterminate: true))
-        defer {
-            if isCC { ccRunning = false } else { codexRunning = false }
-            setProgress(nil)
-        }
-
-        guard let dbImpl = services?.db as? PortraitDBImpl else {
-            setStatus("Portrait DB not available.")
-            return
-        }
-        let dbPool = dbImpl.dbPool
-        let result: (inserted: Int, skipped: Int)
-        do {
-            result = try await Task.detached(priority: .userInitiated) {
-                let store = WritingCaptureStore(dbPool: dbPool)
-                let since = try? store.cliImportLastTs(app: app)
-                let rows = isCC
-                    ? CLIInputImporter.collectClaudeCode(since: since)
-                    : CLIInputImporter.collectCodex(since: since)
-                // 写库阶段:确定性进度条。回调跳回 MainActor 更新 @State。
-                return try store.insertCLIImported(rows) { current, total in
-                    Task { @MainActor in
-                        let p = CLIImportProgress(
-                            label: "Importing…", current: current, total: total, indeterminate: false)
-                        if isCC { self.ccProgress = p } else { self.codexProgress = p }
-                    }
-                }
-            }.value
-        } catch {
-            setStatus("Failed: \(error.localizedDescription)")
-            return
-        }
-        setStatus("Done. \(result.inserted) imported, \(result.skipped) already present.")
-        // 静默刷新该源的游标/计数,不再闪 scan spinner。只刷新刚导入的那个源。
-        if isCC { await rescanClaudeCode(quiet: true) } else { await rescanCodex(quiet: true) }
     }
 
     // MARK: scan UI
@@ -349,7 +84,6 @@ struct ImportSettingsView: View {
 
     /// 还没扫过 —— 提示 + Scan 按钮。
     private var notScannedBlock: some View {
-        // 跟 Claude Code / Codex 的未扫描卡片一致:绿色 source 图标 + 名 + 灰 Scan 按钮 + 简短提示。
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image("Screenpipe")
