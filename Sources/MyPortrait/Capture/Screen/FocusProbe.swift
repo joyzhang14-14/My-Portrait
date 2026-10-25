@@ -157,6 +157,21 @@ actor FocusProbe {
         cached
     }
 
+    /// 缓存还没跟上激活 app(刚切过来,refresh 在节流或遍历中)时,采集当场读激活 app 的
+    /// 窗口标题 / 浏览器 URL。只读窗口元数据、不遍历 AX 文本,单次调用最多等 0.2s。
+    func quickFocus(_ front: FrontReading) async -> FocusInfo {
+        let pid = front.activePid, bundleId = front.activeBundleId
+        // 前台是自己时不能在主线程同步读自己的 AX tree(见 refresh)。
+        let meta = pid > 0 && pid != getpid() && AXIsProcessTrusted()
+            ? await MainActor.run {
+                Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 0.2).map { ($0.title, $0.url, $0.axId) }
+            }
+            : nil
+        return FocusInfo(appName: front.activeName, bundleId: bundleId,
+                         windowTitle: meta?.0, browserUrl: meta?.1, axText: nil,
+                         axIdentifier: meta?.2, isFocused: true)
+    }
+
     /// 同一时刻读两个前台来源(一次主线程跳转内读完,两边时间尽量贴近):
     ///   - 激活 app:`NSWorkspace.frontmostApplication`,菜单栏显示的就是它;切换时
     ///     比画面晚约 1s
@@ -423,50 +438,9 @@ actor FocusProbe {
     /// AX API 是跨进程同步 XPC，可能 10–50ms（AX text 走到 100ms+ 时降级让出）。
     /// 仅在 refresh() 内调用，不在采集热路径上。
     nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?, axId: String?) {
-        let axApp = AXUIElementCreateApplication(pid)
         // 卡死时单次调用最多等 1.5s —— 共用串行队列,一个慢调用别拖垮全局。
-        AXUIElementSetMessagingTimeout(axApp, 1.5)
-
-        // 1. 焦点窗口
-        var focusedWindowRef: CFTypeRef?
-        let focusedStatus = AXUIElementCopyAttributeValue(
-            axApp,
-            kAXFocusedWindowAttribute as CFString,
-            &focusedWindowRef
-        )
-        guard focusedStatus == .success,
-              let focusedWindowRef,
-              CFGetTypeID(focusedWindowRef) == AXUIElementGetTypeID()
-        else {
-            return (nil, nil, nil, nil)
-        }
-        // swiftlint:disable:next force_cast
-        let focusedWindow = focusedWindowRef as! AXUIElement
-
-        // 2. 窗口标题
-        var title: String?
-        var titleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedWindow, kAXTitleAttribute as CFString, &titleRef) == .success {
-            title = titleRef as? String
-        }
-
-        // 2b. AXIdentifier —— IncognitoGate Tier 1 用(Arc 等无痕窗口含
-        //     "incognito"/"private")。多数 app/窗口为 nil,读不到不影响。
-        var axId: String?
-        var axIdRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focusedWindow, kAXIdentifierAttribute as CFString, &axIdRef) == .success {
-            axId = axIdRef as? String
-        }
-
-        // 3. URL（仅浏览器）。
-        //    - Chrome / Edge / Brave / Chromium 系:window 的 AXDocument 直接是 URL 字符串
-        //    - Safari (macOS 26.x 起):window.AXDocument = nil。URL 改放在
-        //      AXWebArea 的 AXURL 属性,或 toolbar 地址栏 AXTextField 的 AXValue
-        //    - Firefox 不支持,Arc 需 AppleScript(P2)
-        var url: String?
-        if let bid = bundleId, Self.browserBundleIds.contains(bid) {
-            url = Self.extractBrowserURL(focusedWindow: focusedWindow)
-        }
+        guard let (focusedWindow, title, url, axId) = Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 1.5)
+        else { return (nil, nil, nil, nil) }
 
         // 4. AX tree 文本子树。终端类 app 跳过（拿到的是脏数据，OCR 更准）。
         var axText: String?
@@ -496,6 +470,55 @@ actor FocusProbe {
         }
 
         return (title, url, axText, axId)
+    }
+
+    /// 焦点窗口 + 标题 / AXIdentifier / 浏览器 URL,不读 AX 文本。主线程调。
+    nonisolated static func readWindowMeta(pid: pid_t, bundleId: String?, timeout: Float)
+        -> (window: AXUIElement, title: String?, url: String?, axId: String?)? {
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, timeout)
+
+        // 1. 焦点窗口
+        var focusedWindowRef: CFTypeRef?
+        let focusedStatus = AXUIElementCopyAttributeValue(
+            axApp,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedWindowRef
+        )
+        guard focusedStatus == .success,
+              let focusedWindowRef,
+              CFGetTypeID(focusedWindowRef) == AXUIElementGetTypeID()
+        else {
+            return nil
+        }
+        // swiftlint:disable:next force_cast
+        let focusedWindow = focusedWindowRef as! AXUIElement
+
+        // 2. 窗口标题
+        var title: String?
+        var titleRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedWindow, kAXTitleAttribute as CFString, &titleRef) == .success {
+            title = titleRef as? String
+        }
+
+        // 2b. AXIdentifier —— IncognitoGate Tier 1 用(Arc 等无痕窗口含
+        //     "incognito"/"private")。多数 app/窗口为 nil,读不到不影响。
+        var axId: String?
+        var axIdRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focusedWindow, kAXIdentifierAttribute as CFString, &axIdRef) == .success {
+            axId = axIdRef as? String
+        }
+
+        // 3. URL（仅浏览器）。
+        //    - Chrome / Edge / Brave / Chromium 系:window 的 AXDocument 直接是 URL 字符串
+        //    - Safari (macOS 26.x 起):window.AXDocument = nil。URL 改放在
+        //      AXWebArea 的 AXURL 属性,或 toolbar 地址栏 AXTextField 的 AXValue
+        //    - Firefox 不支持,Arc 需 AppleScript(P2)
+        var url: String?
+        if let bid = bundleId, Self.browserBundleIds.contains(bid) {
+            url = Self.extractBrowserURL(focusedWindow: focusedWindow)
+        }
+        return (focusedWindow, title, url, axId)
     }
 
     /// 浏览器 URL 抽取。fallback 链:

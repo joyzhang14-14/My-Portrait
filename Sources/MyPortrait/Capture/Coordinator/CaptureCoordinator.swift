@@ -332,13 +332,15 @@ actor CaptureCoordinator {
         lastCaptureAt = now
 
         // 5b. app 名取截图后的激活 app。focusInfo 是 FocusProbe 缓存(通知刷新,有节流),
-        //     会落后于激活 app;名字对不上或正在切换时,缓存里的 windowTitle/url/axText
-        //     不属于这帧,一并作废(宁可空也别张冠李戴)。
+        //     会落后于激活 app。正在切换时 windowTitle/url/axText 一并作废(宁可空也别
+        //     张冠李戴);画面已稳定、只是缓存还是上一个 app 的,当场补读标题和 URL。
         var recordFocus = focusInfo
-        if front.activeName != focusInfo.appName || focusState == .switching {
+        if focusState == .switching {
             recordFocus = FocusInfo(appName: front.activeName, bundleId: front.activeBundleId,
                                     windowTitle: nil, browserUrl: nil, axText: nil,
                                     axIdentifier: nil, isFocused: true)
+        } else if front.activeName != focusInfo.appName {
+            recordFocus = await focus.quickFocus(front)
         }
 
         // 6. JPG 路径（同步纯计算，立即可用）。
