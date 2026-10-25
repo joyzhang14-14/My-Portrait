@@ -283,6 +283,28 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// Memory → Input 左列:各 app 记下了字符的击键数,最近打字的排前面。
+    /// 字符全被抹掉的 app(密码类 / 黑名单)自然不出现。
+    func keystrokeAppSummaries() throws -> [InputAppSummary] {
+        try dbPool.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT bundle_id, COUNT(*) AS n, MAX(ts_ms) AS last FROM keystroke_log
+                WHERE char IS NOT NULL GROUP BY bundle_id ORDER BY last DESC
+                """).map { InputAppSummary(app: $0["bundle_id"], keys: $0["n"], lastMs: $0["last"]) }
+        }
+    }
+
+    /// 某 app 在 `beforeMs` 之前最近的 `limit` 次击键,按时间升序返回。
+    func keystrokesForApp(_ app: String, beforeMs: Int64, limit: Int) throws -> [KeystrokeEntry] {
+        try dbPool.read { db in
+            try KeystrokeEntry.fetchAll(db, sql: """
+                SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
+                WHERE bundle_id = :app AND ts_ms < :before
+                ORDER BY ts_ms DESC LIMIT :n
+                """, arguments: ["app": app, "before": beforeMs, "n": Int64(limit)]).reversed()
+        }
+    }
+
     func framesInRange(startMs: Int64, endMs: Int64) throws -> [WritingCaptureRawOcr] {
         let normalizer = AppIdentifierNormalizer.snapshot()
         return try dbPool.read { db in
@@ -613,75 +635,6 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
-    /// Input 图谱面板:时间窗内**全部 app** 的 writing_records,start_ts 升序
-    /// (跟面积图 x 轴同向,晨→夜)。窗口按本地日算,调用方传好边界。
-    func writingRecordsInRange(startMs: Int64, endMs: Int64) throws -> [WritingRecordViewRow] {
-        try dbPool.read { db in
-            try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT id, start_ts, end_ts, app, url, location, text, edit_log, confidence,
-                           context_summary, source, kind, worker_run_id, created_at
-                    FROM writing_records
-                    WHERE start_ts >= :s AND start_ts < :e
-                    ORDER BY start_ts ASC
-                    """,
-                arguments: ["s": startMs, "e": endMs]
-            ).map { Self.rowToView($0) }
-        }
-    }
-
-    /// InputCaptureView 左列:writing_records 按 (app, url) 聚合。
-    /// COALESCE(url, '') —— 跟 TypingAppSummary.url 语义一致(空 = 非浏览器)。
-    func writingRecordAppSummaries() throws -> [WritingCaptureAppSummary] {
-        try dbPool.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT app, COALESCE(url, '') AS url,
-                           COUNT(*) AS n, MAX(end_ts) AS last
-                    FROM writing_records
-                    GROUP BY app, url
-                    ORDER BY last DESC
-                    """
-            )
-            return rows.map { r in
-                WritingCaptureAppSummary(
-                    app: r["app"],
-                    url: r["url"],
-                    recordCount: r["n"],
-                    lastEndedAt: r["last"]
-                )
-            }
-        }
-    }
-
-    /// 某 (app, url) 分组的全部 writing_records,start_ts 倒序。
-    /// url 传 "" 匹配 url IS NULL OR url = ''(跟 TypingEventStore 一致)。
-    func writingRecordsForGroup(app: String, url: String) throws -> [WritingRecordViewRow] {
-        try dbPool.read { db in
-            let urlMatch: String
-            if url.isEmpty {
-                urlMatch = "AND (url IS NULL OR url = '')"
-            } else {
-                urlMatch = "AND url = :url"
-            }
-            var args: [String: DatabaseValueConvertible] = ["app": app]
-            if !url.isEmpty { args["url"] = url }
-            return try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT id, start_ts, end_ts, app, url, location, text, edit_log, confidence,
-                           context_summary, source, kind, worker_run_id, created_at
-                    FROM writing_records
-                    WHERE app = :app \(urlMatch)
-                    ORDER BY start_ts DESC
-                    """,
-                arguments: StatementArguments(args)
-            ).map { Self.rowToView($0) }
-        }
-    }
-
     /// 按 record id 反查它所属的 (app, url) 分组 —— writing-style chip 跳转用。
     func groupForRecord(id: Int64) -> (app: String, url: String)? {
         try? dbPool.read { db -> (String, String)? in
@@ -715,33 +668,6 @@ struct WritingCaptureStore: Sendable {
             }
             return out
         }) ?? [:]
-    }
-
-    /// 删除某 (app, url) 分组的全部 writing_records(用户手动清除)。
-    func deleteWritingRecordsForGroup(app: String, url: String) throws {
-        try dbPool.write { db in
-            if url.isEmpty {
-                try db.execute(
-                    sql: "DELETE FROM writing_records WHERE app = :app AND (url IS NULL OR url = '')",
-                    arguments: ["app": app]
-                )
-            } else {
-                try db.execute(
-                    sql: "DELETE FROM writing_records WHERE app = :app AND url = :url",
-                    arguments: ["app": app, "url": url]
-                )
-            }
-        }
-    }
-
-    /// 删除单条 writing_record。
-    func deleteWritingRecord(id: Int64) throws {
-        try dbPool.write { db in
-            try db.execute(
-                sql: "DELETE FROM writing_records WHERE id = :id",
-                arguments: ["id": id]
-            )
-        }
     }
 
     /// 给定时间戳所在 UTC 日的 writing_capture_runs 状态。未跑过返回 nil。
@@ -874,14 +800,12 @@ struct WritingCaptureStore: Sendable {
     }
 }
 
-/// 给 InputCaptureView 左列用 —— writing_records 按 (app, url) 聚合的一个分组。
-/// url 空字符串表示非浏览器 app(跟 TypingAppSummary 同语义)。
-struct WritingCaptureAppSummary: Identifiable, Sendable {
+/// Memory → Input 左列的一个 app:记下了字符的击键数 + 最近一次打字时刻。
+struct InputAppSummary: Identifiable, Sendable {
     let app: String
-    let url: String                 // "" = 非浏览器
-    let recordCount: Int
-    let lastEndedAt: Int64          // ms
-    var id: String { app + "\u{1}" + url }
+    let keys: Int
+    let lastMs: Int64
+    var id: String { app }
 }
 
 /// 给 UI 展示用的 writing_record 行投影。staged 和 committed 共用同一个字段集。

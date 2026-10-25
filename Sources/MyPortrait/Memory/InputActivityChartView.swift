@@ -11,7 +11,7 @@ private struct WindowDragBlocker: NSViewRepresentable {
     }
 }
 
-/// 一次选中的结果:[lo, hi] = 选中的分钟窗口(高亮带 + records 过滤共用)。
+/// 一次选中的结果:[lo, hi] = 选中的分钟窗口(高亮带 + 段列表过滤共用)。
 /// click = 点击点(画蓝线);拖拽框选无点击点 → nil,只画带不画线。
 private struct InputSelection: Equatable {
     let lo: Int
@@ -28,35 +28,33 @@ private struct InputSelection: Equatable {
 /// (和 timeline 一致的 `AppColor`);数据做移动平均平滑,曲线更顺。
 /// 顶部日期切换栏复用 timeline 的 `TimelineControlsBar`(日历弹窗切天)。
 ///
-/// 图例下方接当天 writing_records 卡片流:收起态只显 app 名 / start 时间 /
-/// 内容预览,点开下拉显示全文 + 元数据 + 编辑记录。
+/// 图例下方接当天的元输入卡片流(10-25 update):同一批击键经 `InputSegments`
+/// 切段拼字,收起态只显 app 名 / 开始时间 / 内容预览,点开显示全文 + 时间。
 ///
 /// 数据源:`keystroke_log`(raw 每次击键),按本地某天 [00:00, +24h) 查
-/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶后取活动段;
-/// records 走 `writingRecordsInRange` 同窗口。
+/// `WritingCaptureStore.keystrokesInRange`,后台聚合成 1440 个分钟桶后取活动段,
+/// 同时切段。
 @MainActor
 struct InputActivityChartView: View {
     /// writing-style wr chip 跳转目标(ContentView 传入)。非 nil 时:切到该
-    /// record 所在天 → 滚动到并高亮/展开那张卡片。消费后置回 nil。
+    /// record 所在天 → 定位到那时那个 app 的段并高亮/展开。消费后置回 nil。
     var jumpToRecordId: Binding<Int64?>? = nil
-    /// 待定位的 record id —— 换天要等 reload 完成才能滚,先挂在这。
-    @State private var pendingJumpId: Int64? = nil
-    /// 当前高亮的 record(定位后 ~2s 淡出)。
+    /// 待定位的 (app, 时刻) —— 换天要等 reload 完成才能定位,先挂在这。
+    @State private var pendingJump: (app: String, ts: Int64)? = nil
+    /// 当前高亮的段(定位后 ~2s 淡出)。
     @State private var highlightedId: Int64? = nil
-    /// wr chip 跳转的独占展示:非 nil 时 records 列表只显示这一条(07-10 update)。
+    /// wr chip 跳转的独占展示:非 nil 时段列表只显示这一段(07-10 update)。
     /// 用户任何选中操作/切天即清除恢复。
     @State private var focusId: Int64? = nil
     @State private var selectedDay: Date = Date()
     @State private var buckets: MinuteBuckets = .empty
-    @State private var records: [WritingRecordViewRow] = []
-    /// 展开的 record id 集合(可多开)。切天清空。
+    @State private var segments: [InputSegment] = []
+    /// 展开的段 id 集合(可多开)。切天清空。
     @State private var expandedIds: Set<Int64> = []
-    /// 待确认删除的 record id(非 nil → 弹确认框)。
-    @State private var confirmingDeleteId: Int64? = nil
     /// 已提交的选中(点击自动丛 or 拖拽框选)。nil = 未选、显示全天。
     /// 点图表空白处取消。
     @State private var selection: InputSelection? = nil
-    /// 拖拽框选进行中的实时预览窗口(只驱动高亮带,不动 records,松手才提交)。
+    /// 拖拽框选进行中的实时预览窗口(只驱动高亮带,不动段列表,松手才提交)。
     @State private var dragPreview: (lo: Int, hi: Int)? = nil
     @State private var loading = false
     /// 代际 token —— 快速切天时慢查询晚归不能盖掉新一天的结果。
@@ -98,30 +96,33 @@ struct InputActivityChartView: View {
     private func handleJump() async {
         guard let target = jumpToRecordId?.wrappedValue else { return }
         jumpToRecordId?.wrappedValue = nil
-        guard let ts = WritingCaptureBrowse.startTs(forRecord: target) else { return }   // record 不存在(可能已删)→ 放弃
-        let day = Date(timeIntervalSince1970: TimeInterval(ts) / 1000)
-        pendingJumpId = target
+        guard let t = WritingCaptureBrowse.jumpTarget(forRecord: target) else { return }   // record 不存在(可能已删)→ 放弃
+        let day = Date(timeIntervalSince1970: TimeInterval(t.startMs) / 1000)
+        pendingJump = (t.app, t.startMs)
         if Calendar.current.isDate(day, inSameDayAs: selectedDay) {
-            performPendingJump()       // 同一天:records 已加载,直接定位
+            performPendingJump()       // 同一天:段已加载,直接定位
         } else {
             selectedDay = day          // 换天:触发 .task(id:selectedDay) → reload 末尾定位
         }
     }
 
-    /// records 就绪后:把目标 record 的时间段设为图表选中窗口(07-10 update),
-    /// records 列表随之过滤到该窗口,目标卡片直接可见,不依赖 LazyVStack 的
-    /// scrollTo(懒加载下不可靠)。再展开 + 高亮。
-    /// 目标不在当前 records(天没对上/reload 未完)则不动,留待下一次 reload
-    /// 末尾重试(pendingJumpId 不清)。
+    /// 段就绪后:取同 app 里包含(或最靠近)目标时刻的那段,设为图表选中窗口
+    /// (07-10 update),段列表随之过滤到该窗口,目标卡片直接可见,不依赖
+    /// LazyVStack 的 scrollTo(懒加载下不可靠)。再展开 + 高亮。
+    /// 当天没有该 app 的段(天没对上/reload 未完)则不动,留待下一次 reload
+    /// 末尾重试(pendingJump 不清)。
     @MainActor
     private func performPendingJump() {
-        guard let pid = pendingJumpId,
-              let rec = records.first(where: { $0.id == pid }) else { return }
-        pendingJumpId = nil
+        guard let j = pendingJump,
+              let seg = segments.filter({ $0.app == j.app }).min(by: {
+                  Self.distance($0, to: j.ts) < Self.distance($1, to: j.ts)
+              }) else { return }
+        let pid = seg.id
+        pendingJump = nil
         dragPreview = nil
         // 目标段 → 分钟窗口(与图表 [lo,hi] 含端点语义一致),夹回当天。
-        let lo = min(max(Int((rec.startTs - dayStartMs) / 60_000), 0), 1439)
-        let hi = min(max(Int((rec.endTs - dayStartMs) / 60_000), lo), 1439)
+        let lo = min(max(Int((seg.startMs - dayStartMs) / 60_000), 0), 1439)
+        let hi = min(max(Int((seg.endMs - dayStartMs) / 60_000), lo), 1439)
         withAnimation(.easeOut(duration: 0.15)) {
             selection = InputSelection(lo: lo, hi: hi, click: nil)
         }
@@ -136,6 +137,10 @@ struct InputActivityChartView: View {
         }
     }
 
+    private static func distance(_ s: InputSegment, to ts: Int64) -> Int64 {
+        ts < s.startMs ? s.startMs - ts : (ts > s.endMs ? ts - s.endMs : 0)
+    }
+
     // MARK: - 选中窗口派生
 
     /// 本地当天 00:00 的 ms —— 分钟↔时间戳换算基准(与 reload 同源)。
@@ -143,7 +148,7 @@ struct InputActivityChartView: View {
         Int64(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970 * 1000)
     }
 
-    /// records 过滤用的**已提交**窗口(拖拽中不动 records,只看提交值)。
+    /// 段列表过滤用的**已提交**窗口(拖拽中不动列表,只看提交值)。
     private var windowMinutes: (lo: Int, hi: Int)? {
         guard let s = selection else { return nil }
         return (s.lo, s.hi)
@@ -162,24 +167,24 @@ struct InputActivityChartView: View {
                 dayStartMs + Int64(w.hi + 1) * 60_000)
     }
 
-    /// records 联动:wr chip 跳转独占期只显示目标那一条;否则选中时只留与
+    /// 段列表联动:wr chip 跳转独占期只显示目标那一段;否则选中时只留与
     /// 窗口时间重叠的,再否则全天。
-    private var visibleRecords: [WritingRecordViewRow] {
-        if let f = focusId, let rec = records.first(where: { $0.id == f }) {
-            return [rec]
+    private var visibleSegments: [InputSegment] {
+        if let f = focusId, let seg = segments.first(where: { $0.id == f }) {
+            return [seg]
         }
-        guard let w = windowMs else { return records }
-        return records.filter { $0.startTs < w.end && $0.endTs > w.start }
+        guard let w = windowMs else { return segments }
+        return segments.filter { $0.startMs < w.end && $0.endMs >= w.start }
     }
 
-    /// 表头文字。拖拽中(dragPreview 非空)**不显 records 数**——列表还是旧提交
+    /// 表头文字。拖拽中(dragPreview 非空)**不显段数**——列表还是旧提交
     /// 选区,数目和实时时间/keys 不同源会误导;松手提交后才出现。点击选丛撞 cap
     /// 截断时标 "capped",解释为何比拖拽/整段小。
     private func headerLabel(_ w: (lo: Int, hi: Int)) -> String {
         var s = "\(Self.hm(w.lo))–\(Self.hm(w.hi)) · \(buckets.keystrokes(in: w.lo, w.hi)) keys"
         if dragPreview == nil {
             if selection?.capped == true { s += " · capped" }
-            s += " · \(visibleRecords.count)"
+            s += " · \(visibleSegments.count)"
         }
         return s
     }
@@ -192,7 +197,7 @@ struct InputActivityChartView: View {
 
     @ViewBuilder
     private var chartArea: some View {
-        if buckets.maxTotal == 0 && records.isEmpty {
+        if buckets.maxTotal == 0 {
             VStack(spacing: 8) {
                 Image(systemName: "keyboard")
                     .font(.system(size: 30, weight: .light))
@@ -204,65 +209,56 @@ struct InputActivityChartView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             // 图 + 图例**固定在顶部**(不进 ScrollView):在图上拖动就不会带动内容/
-            // 窗口漂移;records 卡片流在下方独立滚动。图占面板高度的 1/3。
+            // 窗口漂移;段卡片流在下方独立滚动。图占面板高度的 1/3。
             GeometryReader { geo in
                 VStack(alignment: .leading, spacing: 14) {
-                    if buckets.maxTotal > 0 {
-                        InputActivityCanvas(buckets: buckets,
-                                            colorScheme: colorScheme,
-                                            selection: selection,
-                                            dragPreview: dragPreview,
-                                            onTapSelect: { m in
-                                                dragPreview = nil
-                                                focusId = nil   // 用户自己选 → 退出跳转独占
-                                                withAnimation(.easeOut(duration: 0.15)) {
-                                                    // 蓝线永远画在**用户点击处**(click: m),吸附只决定带子范围。
-                                                    // 不用吸附点:①线跳走不跟手;②点同一 session 附近不同空白,
-                                                    // 吸附结果相同 → selection 相等 → 无任何重绘,"点了没反应"。
-                                                    if let w = buckets.burstWindow(around: m) {
-                                                        // ±snapRange 内有 session → 吸附整段。
-                                                        selection = InputSelection(lo: w.lo, hi: w.hi,
-                                                                                   click: m, capped: w.capped)
-                                                    } else {
-                                                        // 附近确实空 → ±3h 兜底盒,盒边碰到的 session 补全不拦腰切。
-                                                        let w = buckets.fallbackWindow(around: m)
-                                                        selection = InputSelection(lo: w.lo, hi: w.hi, click: m)
-                                                    }
+                    InputActivityCanvas(buckets: buckets,
+                                        colorScheme: colorScheme,
+                                        selection: selection,
+                                        dragPreview: dragPreview,
+                                        onTapSelect: { m in
+                                            dragPreview = nil
+                                            focusId = nil   // 用户自己选 → 退出跳转独占
+                                            withAnimation(.easeOut(duration: 0.15)) {
+                                                // 蓝线永远画在**用户点击处**(click: m),吸附只决定带子范围。
+                                                // 不用吸附点:①线跳走不跟手;②点同一 session 附近不同空白,
+                                                // 吸附结果相同 → selection 相等 → 无任何重绘,"点了没反应"。
+                                                if let w = buckets.burstWindow(around: m) {
+                                                    // ±snapRange 内有 session → 吸附整段。
+                                                    selection = InputSelection(lo: w.lo, hi: w.hi,
+                                                                               click: m, capped: w.capped)
+                                                } else {
+                                                    // 附近确实空 → ±3h 兜底盒,盒边碰到的 session 补全不拦腰切。
+                                                    let w = buckets.fallbackWindow(around: m)
+                                                    selection = InputSelection(lo: w.lo, hi: w.hi, click: m)
                                                 }
-                                            },
-                                            onDragChange: { lo, hi in
-                                                dragPreview = (lo, hi)   // 实时预览,不动 records
-                                            },
-                                            onDragEnd: { lo, hi in
-                                                dragPreview = nil
-                                                focusId = nil   // 同上
-                                                withAnimation(.easeOut(duration: 0.15)) {
-                                                    // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
-                                                    selection = InputSelection(lo: lo, hi: hi, click: nil)
-                                                }
-                                            },
-                                            onDragCancel: {
-                                                // 竖向为主的拖拽(想滚页)→ 不改选中,只清途中预览。
-                                                dragPreview = nil
-                                            })
-                            .frame(height: geo.size.height / 3)
-                            .background(WindowDragBlocker())   // 禁止图上拖动带动窗口
-                        legend
-                    } else {
-                        // 有 records 但无击键图(纯粘贴/OCR 来源那天):说明为何没图,
-                        // 也点不了选窗口(没有时间轴可点)。
-                        Text("No keystroke activity to chart on this day")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 4)
-                    }
+                                            }
+                                        },
+                                        onDragChange: { lo, hi in
+                                            dragPreview = (lo, hi)   // 实时预览,不动段列表
+                                        },
+                                        onDragEnd: { lo, hi in
+                                            dragPreview = nil
+                                            focusId = nil   // 同上
+                                            withAnimation(.easeOut(duration: 0.15)) {
+                                                // 拖拽框选:精确用拖出的范围,不夹 cap(你手动定的)。
+                                                selection = InputSelection(lo: lo, hi: hi, click: nil)
+                                            }
+                                        },
+                                        onDragCancel: {
+                                            // 竖向为主的拖拽(想滚页)→ 不改选中,只清途中预览。
+                                            dragPreview = nil
+                                        })
+                        .frame(height: geo.size.height / 3)
+                        .background(WindowDragBlocker())   // 禁止图上拖动带动窗口
+                    legend
 
-                    // records 独立滚动区(图不动、只这里滚)。
+                    // 段列表独立滚动区(图不动、只这里滚)。
                     // ⚠️ 不用程序 scrollTo 定位:与用户手动滑动抢同一 ScrollView 会卡死滚动。
                     // 靠 ScrollView 天然从顶部起 + focusId 独占让列表只显示目标那一张卡定位。
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
-                            recordsSection
+                            segmentsSection
                         }
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(.bottom, 24)
@@ -285,16 +281,16 @@ struct InputActivityChartView: View {
         }
     }
 
-    // MARK: - Records 卡片流
+    // MARK: - 段卡片流
 
     @ViewBuilder
-    private var recordsSection: some View {
-        // 选中/拖拽中:表头显 "09:30–13:04 · 8421 keys · N";否则 "RECORDS · N"。
+    private var segmentsSection: some View {
+        // 选中/拖拽中:表头显 "09:30–13:04 · 8421 keys · N";否则 "INPUT · N"。
         Group {
             if let w = displayWindow {
                 Text(headerLabel(w)).foregroundStyle(.blue)
             } else {
-                Text("RECORDS · \(records.count)")
+                Text("INPUT · \(segments.count)")
                     .foregroundStyle(Theme.textTertiary)
             }
         }
@@ -302,57 +298,36 @@ struct InputActivityChartView: View {
         .tracking(0.8)
         .padding(.top, 10)
 
-        if visibleRecords.isEmpty {
+        if visibleSegments.isEmpty {
             Text(selection == nil
-                 ? "No writing records this day"
-                 : "No writing records in this selection")
+                 ? "No input this day"
+                 : "No input in this selection")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         } else {
             LazyVStack(spacing: 8) {
-                ForEach(visibleRecords) { rec in
-                    InputRecordCard(
-                        record: rec,
-                        expanded: expandedIds.contains(rec.id),
+                ForEach(visibleSegments) { seg in
+                    InputSegmentCard(
+                        segment: seg,
+                        expanded: expandedIds.contains(seg.id),
                         onToggle: {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                if expandedIds.contains(rec.id) {
-                                    expandedIds.remove(rec.id)
+                                if expandedIds.contains(seg.id) {
+                                    expandedIds.remove(seg.id)
                                 } else {
-                                    expandedIds.insert(rec.id)
+                                    expandedIds.insert(seg.id)
                                 }
                             }
-                        },
-                        onDelete: { confirmingDeleteId = rec.id })
+                        })
                     .overlay(     // wr chip 跳转命中的卡片高亮描边(~2s 淡出)
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Theme.accent,
-                                          lineWidth: highlightedId == rec.id ? 2 : 0)
+                                          lineWidth: highlightedId == seg.id ? 2 : 0)
                             .animation(.easeInOut(duration: 0.3), value: highlightedId)
                     )
                 }
             }
-            .confirmationDialog("Delete this writing record?",
-                                isPresented: Binding(get: { confirmingDeleteId != nil },
-                                                     set: { if !$0 { confirmingDeleteId = nil } }),
-                                titleVisibility: .visible) {
-                Button("Delete", role: .destructive) {
-                    if let id = confirmingDeleteId { Task { await deleteRecord(id) } }
-                }
-                Button("Cancel", role: .cancel) { confirmingDeleteId = nil }
-            } message: {
-                Text("This permanently removes this one record.")
-            }
         }
-    }
-
-    /// 删一条 writing_record → 从内存列表移除(不整表 reload,省得列表跳)。
-    @MainActor
-    private func deleteRecord(_ id: Int64) async {
-        confirmingDeleteId = nil
-        await WritingCaptureBrowse.deleteRecord(id: id)
-        records.removeAll { $0.id == id }
-        expandedIds.remove(id)
     }
 
     /// 图例:每个 app 一个色块 + 名称,和堆叠层同一套 AppColor;按活跃度从高到低
@@ -392,16 +367,15 @@ struct InputActivityChartView: View {
 
         let ks = await WritingCaptureBrowse.keystrokes(
             startMs: startMs, endMs: endMs, excludeBundleIds: [])
-        let recs = await WritingCaptureBrowse.records(startMs: startMs, endMs: endMs)
-        let agg = await Task.detached(priority: .userInitiated) {
-            MinuteBuckets.aggregate(ks, dayStartMs: startMs)
+        let (agg, segs) = await Task.detached(priority: .userInitiated) {
+            (MinuteBuckets.aggregate(ks, dayStartMs: startMs), InputSegments.build(ks))
         }.value
 
         guard gen == reloadGen else { return }   // 期间切到别的天 → 丢弃
         buckets = agg
-        records = recs
+        segments = segs
         loading = false
-        if pendingJumpId != nil { performPendingJump() }   // 换天 reload 完成 → 定位
+        if pendingJump != nil { performPendingJump() }   // 换天 reload 完成 → 定位
     }
 }
 
@@ -661,7 +635,7 @@ private struct InputActivityCanvas: View {
             }
             .contentShape(Rectangle())
             // 一个手势兼顾轻点与拖拽:minimumDistance:0 立即起手;松手时按位移判定。
-            // highPriority 让"图上拖拽"胜过 ScrollView 竖滚(图只占 1/3,竖滚从下方 records 起)。
+            // highPriority 让"图上拖拽"胜过 ScrollView 竖滚(图只占 1/3,竖滚从下方段列表起)。
             .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { v in
@@ -863,28 +837,26 @@ private struct InputActivityCanvas: View {
     }
 }
 
-// MARK: - Record 卡片
+// MARK: - 段卡片
 
-/// 一条 writing_record 的可展开卡片。
-/// 收起:app 色条 + app 名 + start 时间 + 内容预览(2 行)。
-/// 点开:内容展全(可选中)+ 元数据(显示全)+ 编辑记录,spring 下拉展开。
-private struct InputRecordCard: View {
-    let record: WritingRecordViewRow
+/// 一段元输入的可展开卡片。
+/// 收起:app 色条 + app 名 + 开始时间 + 内容预览(3 行)。
+/// 点开:内容展全(可选中)+ 起止时间和击键数,spring 下拉展开。
+private struct InputSegmentCard: View {
+    let segment: InputSegment
     let expanded: Bool
     let onToggle: () -> Void
-    let onDelete: () -> Void
     @State private var hovering = false
-    @State private var deleteHover = false
     @Environment(\.colorScheme) private var colorScheme
 
-    private var appLabel: String { InputCaptureView.appLabel(record.app) }
+    private var appLabel: String { InputCaptureView.appLabel(segment.app) }
     private var accent: Color { AppColor.color(for: appLabel) }
     /// ⚠️ 不用 GeometryReader + PreferenceKey 反向写 @State 判断截断:会让
     /// LazyVStack 在部分 Release 构建里反复重新布局。改用稳定的内容特征判断。
     private var logicalLineCount: Int {
-        record.text.split(separator: "\n", omittingEmptySubsequences: false).count
+        segment.text.split(separator: "\n", omittingEmptySubsequences: false).count
     }
-    private var isTruncated: Bool { logicalLineCount > 3 || record.text.count > 180 }
+    private var isTruncated: Bool { logicalLineCount > 3 || segment.text.count > 180 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -921,9 +893,7 @@ private struct InputRecordCard: View {
             : Color.white.opacity(base + 0.015)
     }
 
-    // MARK: 收起态
-
-    /// app 色条 + app 名 + (截断徽标) + start 时间 + 旋转 chevron。展开态点这行收起。
+    /// app 色条 + app 名 + 开始时间 + (截断标记) + 旋转 chevron。
     private var headerRow: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 1.5)
@@ -933,23 +903,18 @@ private struct InputRecordCard: View {
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
             Text(Self.hmFmt.string(from: Date(
-                timeIntervalSince1970: TimeInterval(record.startTs) / 1000)))
+                timeIntervalSince1970: TimeInterval(segment.startMs) / 1000)))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-            // app、时间、标签依次靠左排。徽标超 3 行没显示全才有:
-            // 特别长=article / 短一点=paragraph。
-            if !expanded, isTruncated { lengthBadge }
-            Spacer()
-            // 删除:复用 text 区的 trash 图标,hover 变红。放展开箭头左边。
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(deleteHover ? Color.red : Color.secondary)
-                    .contentShape(Rectangle())
+            if !expanded, isTruncated {
+                Text("\(segment.text.count) chars")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(accent.opacity(0.14)))
             }
-            .buttonStyle(.plain)
-            .onHover { deleteHover = $0 }
-            .help("Delete this record")
+            Spacer()
             Image(systemName: "chevron.right")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -960,15 +925,12 @@ private struct InputRecordCard: View {
         .onTapGesture { onToggle() }
     }
 
-    /// 内容:收起 3 行预览(截断标 article 徽标),展开显全 + 可选中。
+    /// 内容:收起 3 行预览,展开显全 + 可选中。
     @ViewBuilder
     private var contentText: some View {
-        let empty = record.text.isEmpty
-        let display = empty ? "(empty content)" : record.text
-        let base = Text(display)
-            .font(.system(size: 12))
-            .foregroundStyle(empty ? Color.secondary : Color.primary.opacity(0.88))
-
+        let base = Text(segment.text)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Color.primary.opacity(0.88))
         if expanded {
             base
                 .textSelection(.enabled)
@@ -982,124 +944,33 @@ private struct InputRecordCard: View {
         }
     }
 
-    /// 按稳定内容特征分档，不参与布局测量。
-    private var isArticle: Bool { logicalLineCount > 9 || record.text.count > 600 }
-
-    /// 截断徽标,比暗淡的「…」显眼。用 app 色系;article / paragraph 分档。
-    private var lengthBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: isArticle ? "text.justify" : "paragraph")
-                .font(.system(size: 8, weight: .semibold))
-            Text(isArticle ? "article" : "paragraph")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-        }
-        .foregroundStyle(accent)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(accent.opacity(0.14)))
-    }
-
-    // MARK: 展开态
-
     private var details: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 3) {
             Divider().background(Color.primary.opacity(0.08))
                 .padding(.top, 8)
-
-            // 元数据:显示全。有值才列,不占空行。
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(metadataRows, id: \.0) { row in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(row.0)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 80, alignment: .leading)
-                        Text(row.1)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-
-            let entries = Self.decodeEditLog(record.editLog)
-            if !entries.isEmpty {
-                Text("EDIT LOG · \(entries.count)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textTertiary)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(entries.enumerated()), id: \.offset) { _, e in
-                        editEntryRow(e)
-                    }
+                .padding(.bottom, 7)
+            ForEach([("start", InputCaptureView.timeString(segment.startMs)),
+                     ("end", InputCaptureView.timeString(segment.endMs)),
+                     ("keys", "\(segment.keys)")], id: \.0) { row in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(row.0)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 80, alignment: .leading)
+                    Text(row.1)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
                 }
             }
         }
-    }
-
-    private var metadataRows: [(String, String)] {
-        var rows: [(String, String)] = []
-        rows.append(("start", InputCaptureView.timeString(record.startTs)))
-        rows.append(("end", InputCaptureView.timeString(record.endTs)))
-        rows.append(("source", record.source))
-        rows.append(("kind", record.kind))
-        rows.append(("confidence", String(format: "%.2f", record.confidence)))
-        rows.append(("chars", "\(record.text.count)"))
-        if let u = record.url, !u.isEmpty { rows.append(("url", u)) }
-        if let loc = record.location, !loc.isEmpty { rows.append(("location", loc)) }
-        if let cs = record.contextSummary, !cs.isEmpty { rows.append(("context", cs)) }
-        return rows
-    }
-
-    /// 单条编辑记录:[kind tag] text … 时刻。tag 按操作类型分色。
-    private func editEntryRow(_ e: EditEntry) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Text(e.kind)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .padding(.horizontal, 5).padding(.vertical, 2)
-                .background(Self.tagColor(e.kind))
-                .cornerRadius(3)
-            Text(e.text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
-            Text(Self.hmsFmt.string(from: Date(
-                timeIntervalSince1970: TimeInterval(e.ts) / 1000)))
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private static func tagColor(_ kind: String) -> Color {
-        switch kind {
-        case "delete":        return Color.red.opacity(0.20)
-        case "paste", "cut":  return Color.orange.opacity(0.20)
-        case "undo", "redo":  return Color.secondary.opacity(0.15)
-        default:              return Color.green.opacity(0.20)
-        }
-    }
-
-    private static func decodeEditLog(_ json: String) -> [EditEntry] {
-        guard let data = json.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([EditEntry].self, from: data)) ?? []
     }
 
     nonisolated(unsafe) private static let hmFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    nonisolated(unsafe) private static let hmsFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm:ss"
         return f
     }()
 }
