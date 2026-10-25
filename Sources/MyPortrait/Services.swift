@@ -125,7 +125,8 @@ final class Services {
         self.typingStore = typingStore
         self.typingObserver = TypingObserver(
             store: typingStore,
-            keystrokeStore: keystrokeStore
+            keystrokeStore: keystrokeStore,
+            clipboardLogger: ClipboardLogger()
         )
 
         // 写作采集 worker(共用同一 DatabasePool)。注册到 WritingCaptureWorker.shared

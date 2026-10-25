@@ -17,6 +17,9 @@ final class PasteboardMonitor {
     /// 当前剪贴板纯文本镜像。nil = 剪贴板非文本 / 空。
     private(set) var currentText: String?
 
+    /// 生产模式注入:每次换内容记一行 clipboard_log。dev 模式 nil。
+    var logger: ClipboardLogger?
+
     private var lastChangeCount: Int
     private var timer: Timer?
 
@@ -59,5 +62,6 @@ final class PasteboardMonitor {
         guard cc != lastChangeCount else { return }   // 没复制过，不读内容
         lastChangeCount = cc
         currentText = pb.string(forType: .string)
+        logger?.record(pb)
     }
 }

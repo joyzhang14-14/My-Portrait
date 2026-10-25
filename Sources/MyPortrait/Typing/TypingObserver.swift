@@ -83,9 +83,11 @@ final class TypingObserver {
     init(
         store: TypingEventStore? = nil,
         keystrokeStore: KeystrokeStore? = nil,
+        clipboardLogger: ClipboardLogger? = nil,
         modeLabel: String = "production"
     ) {
         self.modeLabel = modeLabel
+        pasteboardMonitor.logger = clipboardLogger
         self.writer = TypingRecordWriter(store: store, ledger: ledger, pasteboard: pasteboardMonitor)
         self.keystrokeCharLogger = keystrokeStore.map { KeystrokeCharLogger(store: $0) }
         // 鼠标 logger 跟击键 logger 同生命周期、同 dbPool —— 都是「原始输入采集」。
