@@ -1,6 +1,6 @@
 import Foundation
 
-/// Memories → Input 两个视图(按 app 浏览 + 打字活动图)的**读取门面**。
+/// Data → Input 两个视图(按 app 浏览 + 打字活动图)的**读取门面**。
 ///
 /// 两个视图都只显示元输入:`keystroke_log` 经 `InputSegments` 切段拼字,不显示
 /// 整理过的 writing_records(10-25 update)。库永远是真实的

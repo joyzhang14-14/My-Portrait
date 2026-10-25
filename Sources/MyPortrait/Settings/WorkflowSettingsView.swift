@@ -4,7 +4,7 @@ import SwiftUI
 /// via ConfigStore. MemoryBudget / WeightCalculator / Archiver each pull
 /// `.fromConfig` so changes take effect on the next rebalance / weight pass /
 /// archive run.
-struct MemorySettingsView: View {
+struct WorkflowSettingsView: View {
     private let cfg = ConfigStore.shared
     // provider/model 选择器已抽到 PipelineProviderPicker(自带 AppState /
     // OllamaModelStore),本 View 不再直接持有。
@@ -2318,8 +2318,8 @@ private struct PortraitCategoryTag: View {
         if let cat = category {
             let c = color(cat)
             HStack(spacing: 4) {
-                // 小标志跟侧栏 / 流程图同一套图标(MemoryScope.systemImage)
-                Image(systemName: MemoryScope.portrait(category: cat).systemImage)
+                // 小标志跟侧栏 / 流程图同一套图标(DataScope.systemImage)
+                Image(systemName: DataScope.portrait(category: cat).systemImage)
                     .font(.system(size: 8.5))
                 Text((prefixed ? "in " : "") + cat.replacingOccurrences(of: "_", with: " "))
                     .font(.system(size: 9.5, weight: .medium))
@@ -2377,7 +2377,7 @@ private struct FlowChips: View {
 // MARK: - Writing capture(挂在 Settings → Typing Capture 页)
 
 /// Writing capture 链路的设置区块(auto-run 开关 + Run now + Pending
-/// review)。数据源是 typing capture —— 从 MemorySettingsView 的 Scheduler
+/// review)。数据源是 typing capture —— 从 WorkflowSettingsView 的 Scheduler
 /// 页搬来,之后单独重设计。Writing style **不在这里**:它是 portrait 侧
 /// pipeline(typing 的下游),留在 Memory → Scheduler 页。
 /// 必须留在本文件:依赖 file-private 的 WritingCapturePreview /
@@ -2988,7 +2988,7 @@ private struct WritingStyleDraftDetail: View {
     }
 
     private func bodyColumn(label: String, color: Color, text: String) -> some View {
-        // 跟 MemoriesView.markdownBody 同套路 —— 逐段 AttributedString 解析,
+        // 跟 DataView.markdownBody 同套路 —— 逐段 AttributedString 解析,
         // bold / 引用 / link 都渲染。Text(.init(markdown:)) 一段跨多行用
         // `\n` 保留,跨段 `\n\n` 强制分段(否则 SwiftUI 把空行也吞了)。
         let paragraphs = text

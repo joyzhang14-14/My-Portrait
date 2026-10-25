@@ -45,7 +45,7 @@ final class WritingCaptureUIState: ObservableObject {
 @MainActor
 final class WritingCaptureWorker {
 
-    /// 全局单例,Services init 时填上。UI(MemorySettingsView)用这个引用。
+    /// 全局单例,Services init 时填上。UI(WorkflowSettingsView)用这个引用。
     /// 同 MemoryScheduler.shared 模式,但延迟到 Services 初始化时才赋值
     /// (因为 worker 需要外部 DatabasePool)。
     static var shared: WritingCaptureWorker?

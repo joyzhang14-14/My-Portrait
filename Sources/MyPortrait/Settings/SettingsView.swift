@@ -17,11 +17,11 @@ struct SettingsPane: View {
             case .capture(.audio):     AudioCaptureSettingsView()
             case .capture(.typing):    TypingCaptureSettingsView()
             case .app(.health):        CaptureHealthView()
-            case .memory(.eventsProcessor):       MemorySettingsView(tab: .eventsProcessor)
-            case .memory(.portraitsDistiller):    MemorySettingsView(tab: .portraitsDistiller)
-            case .memory(.personalityRefresher):  MemorySettingsView(tab: .personalityRefresher)
-            case .memory(.writingStyleDistiller): MemorySettingsView(tab: .writingStyleDistiller)
-            case .memory(.changelog):             MemorySettingsView(tab: .changelog)
+            case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
+            case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
+            case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
+            case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
+            case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
             case .data(.storage):      StorageSettingsView()
             case .data(.imports):      ImportSettingsView()
             }
@@ -78,7 +78,7 @@ struct SettingsScene: View {
                 .padding(.top, 18)
                 .padding(.bottom, 16)
 
-            ForEach([SettingsSubsection.Group.app, .capture, .memory, .dataPrivacy], id: \.self) { grp in
+            ForEach([SettingsSubsection.Group.app, .capture, .workflow, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)
@@ -126,11 +126,11 @@ struct SettingsScene: View {
         case .capture(.audio):     AudioCaptureSettingsView()
         case .capture(.typing):    TypingCaptureSettingsView()
         case .app(.health):        CaptureHealthView()
-        case .memory(.eventsProcessor):       MemorySettingsView(tab: .eventsProcessor)
-        case .memory(.portraitsDistiller):    MemorySettingsView(tab: .portraitsDistiller)
-        case .memory(.personalityRefresher):  MemorySettingsView(tab: .personalityRefresher)
-        case .memory(.writingStyleDistiller): MemorySettingsView(tab: .writingStyleDistiller)
-        case .memory(.changelog):             MemorySettingsView(tab: .changelog)
+        case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
+        case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
+        case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
+        case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
+        case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
         case .data(.storage):      StorageSettingsView()
         case .data(.imports):      ImportSettingsView()
         }

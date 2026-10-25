@@ -339,7 +339,7 @@ final class PersonalityMerger {
             file.aliases = aliases.isEmpty ? nil : aliases
             file.body = body.render(title: primaryLabel, description: pickedDescription)
             file.eventTitle = primaryLabel
-            // 存一句话定义到 eventSummary —— MemoriesView 顶部 / Draft sheet
+            // 存一句话定义到 eventSummary —— DataView 顶部 / Draft sheet
             // 都能直接读这字段渲染副标题。空串保留旧行为(skipCluster 群组)。
             file.eventSummary = pickedDescription ?? ""
             let evIds = ConceptBody.capList(body.events)

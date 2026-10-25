@@ -3,9 +3,9 @@ import SwiftUI
 import Observation
 
 /// Shared selection state for the Memories tab. Lives in ContentView so the
-/// outer TimelineSidebar (left rail) and MemoriesView (detail) can both
+/// outer TimelineSidebar (left rail) and DataView (detail) can both
 /// read/write the same selection.
-enum MemoryScope: Hashable, Identifiable {
+enum DataScope: Hashable, Identifiable {
     case personalInfo
     case events
     case input
@@ -75,13 +75,13 @@ enum MemoryScope: Hashable, Identifiable {
 }
 
 /// Memories 区的查看模式:text = 列表视图,neuralGraph = Neural Graph 图谱视图。
-/// 状态与 memoryScope 一样住在 ContentView,侧栏(切换钮)与主面板共享。
-enum MemoryViewMode: String, Hashable {
+/// 状态与 dataScope 一样住在 ContentView,侧栏(切换钮)与主面板共享。
+enum DataViewMode: String, Hashable {
     case text, neuralGraph
 
     /// personalInfo 没有 Neural Graph 形态。
     /// input 的 Neural Graph 形态 = 打字活动面积图(InputActivityChartView)。
-    static func supportsNeuralGraph(_ scope: MemoryScope) -> Bool {
+    static func supportsNeuralGraph(_ scope: DataScope) -> Bool {
         switch scope {
         case .events, .portrait, .input:  return true
         // 两种 settings scope 由 ContentView 显式路由到各自设置视图。
@@ -91,14 +91,14 @@ enum MemoryViewMode: String, Hashable {
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case home, cronJobs, timeline, memories, settings
+    case home, cronJobs, timeline, data, settings
     var id: String { rawValue }
     var label: String {
         switch self {
         case .home: return "AI helper"
         case .cronJobs: return "Cron Jobs"
         case .timeline: return "Timeline"
-        case .memories: return "Memories"
+        case .data: return "Data"
         case .settings: return "Settings"
         }
     }
@@ -107,7 +107,7 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
         case .home: return "plus.message"
         case .cronJobs: return "puzzlepiece.extension"
         case .timeline: return "clock.arrow.circlepath"
-        case .memories: return "sparkles"
+        case .data: return "sparkles"
         case .settings: return "gearshape"
         }
     }

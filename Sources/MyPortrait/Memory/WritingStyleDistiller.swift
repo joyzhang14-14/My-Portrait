@@ -31,7 +31,7 @@ final class WritingStyleUIState: ObservableObject {
 @MainActor
 final class WritingStyleDistiller {
 
-    /// 全局单例,Services init 时填上。UI(MemorySettingsView)+ scheduler 用。
+    /// 全局单例,Services init 时填上。UI(WorkflowSettingsView)+ scheduler 用。
     /// 同 WritingCaptureWorker.shared 模式。
     static var shared: WritingStyleDistiller?
 

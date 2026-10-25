@@ -26,7 +26,7 @@ struct GraphFloatWindow: View {
     @State private var proseBlocks: [AttributedString] = []
     /// personality 概念 `## events` 之后的小节(照旧渲染,非 chip)。
     @State private var afterBlocks: [AttributedString] = []
-    @State private var derivedRefs: [MemoriesView.DerivedRef] = []
+    @State private var derivedRefs: [DataView.DerivedRef] = []
     @State private var wrIds: [Int64] = []
 
     var body: some View {
@@ -219,17 +219,17 @@ struct GraphFloatWindow: View {
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let loaded = await Task.detached(priority: .userInitiated) {
             () -> (PortraitFile, Double, [AttributedString], [AttributedString],
-                   [MemoriesView.DerivedRef], [Int64])? in
+                   [DataView.DerivedRef], [Int64])? in
             guard let f = try? PortraitFileIO.read(from: url) else { return nil }
             let w = WeightEMA(halfLifeDays: halfLife)
                 .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
             // writing_style 记录来源 → wr chips;其它 → event chips(同 text 模式)。
-            let wr = MemoriesView.splitWritingRecords(f.body)
+            let wr = DataView.splitWritingRecords(f.body)
             if !wr.wrIds.isEmpty {
                 return (f, w, Self.parseBlocks(wr.before), [], [], wr.wrIds)
             }
-            let parsed = MemoriesView.splitDerivedSections(f.body)
-            let refs = parsed.eventRels.map { MemoriesView.resolveDerivedRef($0) }
+            let parsed = DataView.splitDerivedSections(f.body)
+            let refs = parsed.eventRels.map { DataView.resolveDerivedRef($0) }
             return (f, w, Self.parseBlocks(parsed.before),
                     Self.parseBlocks(parsed.after), refs, [])
         }.value

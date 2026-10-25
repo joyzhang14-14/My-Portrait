@@ -33,7 +33,7 @@ struct ImportSettingsView: View {
             Group {
                 SettingsCard(
                     title: "Import from screenpipe",
-                    info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Memory settings to turn it into memories."
+                    info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Workflow settings to turn it into memories."
                 ) {
                     if scanning {
                         scanningRow
@@ -281,7 +281,7 @@ struct ImportSettingsView: View {
             statRow("Audio chunks",      "\(r.audioChunksImported) imported", mono: false)
             statRow("Audio transcripts", "\(r.audioTranscriptsImported) imported", mono: false)
             statRow("Cutoff",            Self.cutoffDescription(r.cutoffMs), mono: false)
-            Text("Next: run Process events in Memory settings to turn this into memories.")
+            Text("Next: run Process events in Workflow settings to turn this into memories.")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 4)

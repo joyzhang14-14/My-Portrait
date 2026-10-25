@@ -511,7 +511,7 @@ extension PipelineFlow {
                 id: "archive",
                 title: "Archive faded entries",
                 kind: .deterministic,
-                detail: "No AI. A sweep right after the update: weight below the archive threshold **and** untouched long enough → archived.\n\n**Nothing is deleted.** Archived entries stay on disk, just out of your portrait. Pinned entries are never archived. Both limits are in Settings → Memory.",
+                detail: "No AI. A sweep right after the update: weight below the archive threshold **and** untouched long enough → archived.\n\n**Nothing is deleted.** Archived entries stay on disk, just out of your portrait. Pinned entries are never archived. Both limits are in Settings → Workflow.",
                 pos: CGPoint(x: 0.30, y: 0.88)
             ),
         ],

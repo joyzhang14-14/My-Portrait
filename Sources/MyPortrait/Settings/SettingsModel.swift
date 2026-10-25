@@ -12,7 +12,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
 
     case app(App)
     case capture(Capture)
-    case memory(Memory)
+    case workflow(Workflow)
     case data(DataPrivacy)
 
     enum App: String, Hashable, CaseIterable {
@@ -23,7 +23,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum Capture: String, Hashable, CaseIterable {
         case screen, audio, typing
     }
-    enum Memory: String, Hashable, CaseIterable {
+    enum Workflow: String, Hashable, CaseIterable {
         // 4 个 pipeline 各一页(provider 配置在各自页面里)+ Changelog(含 Needs attention)。
         case eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
     }
@@ -37,7 +37,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         switch self {
         case .app(let s):     return "app.\(s.rawValue)"
         case .capture(let s): return "capture.\(s.rawValue)"
-        case .memory(let s):  return "memory.\(s.rawValue)"
+        case .workflow(let s): return "workflow.\(s.rawValue)"
         case .data(let s):    return "data.\(s.rawValue)"
         }
     }
@@ -45,7 +45,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     static var allCases: [SettingsSubsection] {
         App.allCases.map(SettingsSubsection.app)
         + Capture.allCases.map(SettingsSubsection.capture)
-        + Memory.allCases.map(SettingsSubsection.memory)
+        + Workflow.allCases.map(SettingsSubsection.workflow)
         + DataPrivacy.allCases.map(SettingsSubsection.data)
     }
 
@@ -60,11 +60,11 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture & Timeline"
         case .capture(.audio):         return "Audio Capture & Transcript"
         case .capture(.typing):        return "Typing Capture"
-        case .memory(.eventsProcessor):       return "Events Processor"
-        case .memory(.portraitsDistiller):    return "Portraits Distiller"
-        case .memory(.personalityRefresher):  return "Personality Refresher"
-        case .memory(.writingStyleDistiller): return "Writing Style Distiller"
-        case .memory(.changelog):             return "Changelog"
+        case .workflow(.eventsProcessor):       return "Events Processor"
+        case .workflow(.portraitsDistiller):    return "Portraits Distiller"
+        case .workflow(.personalityRefresher):  return "Personality Refresher"
+        case .workflow(.writingStyleDistiller): return "Writing Style Distiller"
+        case .workflow(.changelog):             return "Changelog"
         case .data(.storage):          return "Storage"
         case .data(.imports):          return "Import"
         }
@@ -81,11 +81,11 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
-        case .memory(.eventsProcessor):       return "calendar.badge.clock"
-        case .memory(.portraitsDistiller):    return "person.text.rectangle"
-        case .memory(.personalityRefresher):  return "brain.head.profile"
-        case .memory(.writingStyleDistiller): return "pencil.line"
-        case .memory(.changelog):             return "list.bullet.rectangle"
+        case .workflow(.eventsProcessor):       return "calendar.badge.clock"
+        case .workflow(.portraitsDistiller):    return "person.text.rectangle"
+        case .workflow(.personalityRefresher):  return "brain.head.profile"
+        case .workflow(.writingStyleDistiller): return "pencil.line"
+        case .workflow(.changelog):             return "list.bullet.rectangle"
         case .data(.storage):          return "externaldrive"
         case .data(.imports):          return "tray.and.arrow.down"
         }
@@ -94,7 +94,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum Group: String, Hashable, CaseIterable {
         case app         = "APP"
         case capture     = "CAPTURE"
-        case memory      = "MEMORY"
+        case workflow    = "WORKFLOW"
         // case 名保留 dataPrivacy(改名要动一堆调用),只把展示文字改成 DATA。
         case dataPrivacy = "DATA"
     }
@@ -103,7 +103,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         switch self {
         case .app:     return .app
         case .capture: return .capture
-        case .memory:  return .memory
+        case .workflow: return .workflow
         case .data:    return .dataPrivacy
         }
     }

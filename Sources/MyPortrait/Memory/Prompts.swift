@@ -11,7 +11,7 @@ enum MemoryPrompts {
 
     // MARK: - About the user(用户手填的基础画像,顶部 prefix)
 
-    /// 用户在 Memories → Personal Info 填的基础画像,拼成一段
+    /// 用户在 Data → Personal Info 填的基础画像,拼成一段
     /// "About the user:" 文本,放在所有 memory pipeline prompt 的最顶部。
     /// 没填的字段不进 prompt;全空 → 返回 ""(调用方判空跳过)。
     ///

@@ -47,9 +47,9 @@ struct ContentView: View {
     @State private var chatStore = ChatStore.shared
     /// Memories 上次停在哪 —— 从 config 恢复,切换时写回(见
     /// `persistMemoryLanding`)。切走再切回不会被扔回 Events。
-    @State private var memoryScope: MemoryScope = MemoryLanding.restoredScope()
+    @State private var dataScope: DataScope = MemoryLanding.restoredScope()
     /// Memories 区 text/Neural Graph 查看模式(切换钮在侧栏,内容在 mainPane)。
-    @State private var memoryViewMode: MemoryViewMode = MemoryLanding.restoredViewMode()
+    @State private var dataViewMode: DataViewMode = MemoryLanding.restoredViewMode()
     /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
     @State private var memoryInputJump: Int64? = nil
     @State private var cronJobSelection: UUID? = nil
@@ -64,11 +64,11 @@ struct ContentView: View {
     /// theme = "system" 时用它把系统外观解析成具体的 light/dark。
     @State private var systemAppearance = SystemAppearanceMonitor.shared
 
-    /// health.log 内存采样行用的页面名。memories 再分图谱/文字 ——
+    /// health.log 内存采样行用的页面名。data 再分图谱/文字 ——
     /// 排查「停在图谱页内存涨」这类问题时粒度刚好。
     private var pageName: String {
         guard let sel = selection else { return "none" }
-        if sel == .memories { return "memories(\(String(describing: memoryViewMode)))" }
+        if sel == .data { return "data(\(String(describing: dataViewMode)))" }
         return sel.rawValue
     }
 
@@ -111,7 +111,7 @@ struct ContentView: View {
         .onChange(of: settingsSubsection) { _, sub in
             if let sub { ConfigStore.shared.mutate { $0.display.lastSettingsPage = sub.id } }
         }
-        .onChange(of: memoryViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
+        .onChange(of: dataViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
             selection = .home
         }
@@ -119,9 +119,9 @@ struct ContentView: View {
         // 并定位该 record。
         .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
             guard let id = notif.object as? Int64 else { return }
-            selection = .memories
-            memoryViewMode = .neuralGraph
-            memoryScope = .input
+            selection = .data
+            dataViewMode = .neuralGraph
+            dataScope = .input
             memoryInputJump = id
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
@@ -132,11 +132,11 @@ struct ContentView: View {
         // Memories 停在哪就记在哪。**两个都要监听** —— 只记 scope 的话,
         // 用户在 Events 上切到图谱视图,下次回来又是文字视图。
         // ConfigStore 的写盘本来就是 debounce 的,切标签的频率不用担心。
-        .onChange(of: memoryScope) { _, s in
-            MemoryLanding.persist(scope: s, mode: memoryViewMode)
+        .onChange(of: dataScope) { _, s in
+            MemoryLanding.persist(scope: s, mode: dataViewMode)
         }
-        .onChange(of: memoryViewMode) { _, m in
-            MemoryLanding.persist(scope: memoryScope, mode: m)
+        .onChange(of: dataViewMode) { _, m in
+            MemoryLanding.persist(scope: dataScope, mode: m)
         }
     }
 
@@ -329,8 +329,8 @@ struct ContentView: View {
             TimelineSidebar(state: timeline,
                             selection: $selection,
                             chat: chat,
-                            memoryScope: $memoryScope,
-                            memoryViewMode: $memoryViewMode,
+                            dataScope: $dataScope,
+                            dataViewMode: $dataViewMode,
                             cronJobSelection: $cronJobSelection,
                             settingsSubsection: $settingsSubsection)
                 .frame(width: 300)
@@ -370,23 +370,23 @@ struct ContentView: View {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
         case .cronJobs:         CronJobsView(selection: $cronJobSelection)
-        case .memories:
+        case .data:
             // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
-            if memoryViewMode == .text, memoryScope == .textSettings {
-                MemoryTextSettingsView()
-            } else if memoryViewMode == .neuralGraph, memoryScope == .neuralGraphSettings {
+            if dataViewMode == .text, dataScope == .textSettings {
+                DataTextSettingsView()
+            } else if dataViewMode == .neuralGraph, dataScope == .neuralGraphSettings {
                 // Neural Graph 侧栏 GRAPH 下的设置入口(主球照片等)。
                 NeuralGraphSettingsView()
-            } else if memoryViewMode == .neuralGraph,
-                      MemoryViewMode.supportsNeuralGraph(memoryScope) {
+            } else if dataViewMode == .neuralGraph,
+                      DataViewMode.supportsNeuralGraph(dataScope) {
                 // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
-                if memoryScope == .input {
+                if dataScope == .input {
                     InputActivityChartView(jumpToRecordId: $memoryInputJump)
                 } else {
-                    GraphRootView(scope: $memoryScope)
+                    GraphRootView(scope: $dataScope)
                 }
             } else {
-                MemoriesView(scope: $memoryScope,
+                DataView(scope: $dataScope,
                              onEditEntity: { url in
                                  chat.startEditConversation(originalURL: url)
                                  selection = .home

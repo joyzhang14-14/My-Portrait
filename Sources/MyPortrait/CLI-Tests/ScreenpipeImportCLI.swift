@@ -49,6 +49,6 @@ enum ScreenpipeImportCLI {
         print("  audio transcripts:     \(r.audioTranscriptsImported)")
         if let err = r.errorMessage { print("  ERROR: \(err)") }
         print("")
-        print("Next:  Settings → Memory → Scheduler → Process events (will pick up new data).")
+        print("Next:  Settings → Workflow → Scheduler → Process events (will pick up new data).")
     }
 }

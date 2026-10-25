@@ -45,10 +45,10 @@ private struct WindowDragBlocker: NSViewRepresentable {
 
 /// 图谱模式的根视图:按 scope 决定画布(Events → event 图,portrait → portrait
 /// 图),负责数据加载、物理引擎生命周期、浮窗与神经脉冲、HUD。
-/// 渲染在主窗口右侧内容区(与 MemoriesView 同位置),不开新窗口。
+/// 渲染在主窗口右侧内容区(与 DataView 同位置),不开新窗口。
 /// 非图谱 scope(personalInfo/input)不会路由进来 —— ContentView 保证。
 struct GraphRootView: View {
-    @Binding var scope: MemoryScope
+    @Binding var scope: DataScope
 
     @State private var scene: GraphScene = .empty
     @State private var engine: GraphPhysicsEngine? = nil
@@ -61,7 +61,7 @@ struct GraphRootView: View {
     /// 右键菜单当前作用的 folder / portrait 分区球；渲染器据此画蓝圈。
     @State private var contextNodeId: Int? = nil
     @State private var loading = false
-    /// 加载代际 token:快速切 zone 时丢弃过期结果(同 MemoriesView.reload 模式)。
+    /// 加载代际 token:快速切 zone 时丢弃过期结果(同 DataView.reload 模式)。
     @State private var loadGen = 0
     @State private var renameFolder: FolderMenuTarget? = nil
     @State private var renameDraft = ""

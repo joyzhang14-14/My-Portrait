@@ -408,7 +408,7 @@ private struct PersonalInfoStep: View {
                 // ⓘ 回答"填了会怎样、不填会怎样"(细节)。
                 StepHeader(
                     title: "About you",
-                    info: "Filled fields are passed to the analysis pipeline as extra context. Empty fields are skipped — all of this is optional. You can edit any of it later in Memories → Personal Info."
+                    info: "Filled fields are passed to the analysis pipeline as extra context. Empty fields are skipped — all of this is optional. You can edit any of it later in Data → Personal Info."
                 )
                 Text(Markdown.inline("Adding personal info makes your portrait and memory **more accurate**."))
                     .font(.system(size: 13))
@@ -661,7 +661,7 @@ private struct MemoryProviderStep: View {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "info.circle")
                             .foregroundStyle(.orange)
-                        Text("No connected AI provider yet. Go back to the previous step to connect one — or skip this and set it later in Settings → Memory → Parameter.")
+                        Text("No connected AI provider yet. Go back to the previous step to connect one — or skip this and set it later in Settings → Workflow → Parameter.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -740,7 +740,7 @@ private struct MemoryProviderStep: View {
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            row("Provider", info: "Which AI service to use. Applies to all memory pipelines — tune each later in Settings → Memory.") {
+            row("Provider", info: "Which AI service to use. Applies to all memory pipelines — tune each later in Settings → Workflow.") {
                 Picker("", selection: providerBinding) {
                     ForEach(availableProviders, id: \.rawValue) { p in
                         Text(Self.providerDisplayName(p)).tag(p.rawValue)
@@ -979,7 +979,7 @@ private struct FinishStep: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 FinishHint(icon: "bubble.left.and.bubble.right", text: "Open the **chat** from the sidebar to ask anything.")
-                FinishHint(icon: "person.text.rectangle", text: "**Edit your portrait** under Memories at any time.")
+                FinishHint(icon: "person.text.rectangle", text: "**Edit your portrait** under Data at any time.")
                 FinishHint(icon: "lock.shield", text: "All captured data and analysis are **stored locally**.")
             }
             .padding(.top, 8)

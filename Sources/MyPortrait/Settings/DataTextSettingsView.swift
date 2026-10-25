@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Memories 的 Text 视图设置。与 Neural Graph 设置页一样从 Memories
 /// 侧栏进入，不在全局 Settings 里重复出现。
-struct MemoryTextSettingsView: View {
+struct DataTextSettingsView: View {
     @State private var config = ConfigStore.shared
 
     var body: some View {
@@ -12,7 +12,7 @@ struct MemoryTextSettingsView: View {
                 // ("Memory sort order")重复,同 Neural Graph 设置页。
                 SettingsCard {
                     SettingsRow("Memory sort order",
-                                info: "How entries in Memories are ordered — and the events inside each folder.\n\nWeight ranks by importance; Created and Last occurrence sort newest first.",
+                                info: "How entries in Data are ordered — and the events inside each folder.\n\nWeight ranks by importance; Created and Last occurrence sort newest first.",
                                 icon: "arrow.up.arrow.down") {
                         Picker("", selection: config.binding(\.display.memorySortOrder)) {
                             ForEach(MemorySortOrder.allCases) { order in

@@ -479,7 +479,7 @@ enum GraphSceneBuilder {
         return GraphScene(zone: zone, nodes: nodes, edges: edges)
     }
 
-    // MARK: - 目录扫描(与 MemoriesView.scan 同口径:跳 INDEX/_archive/_quarantine)
+    // MARK: - 目录扫描(与 DataView.scan 同口径:跳 INDEX/_archive/_quarantine)
 
     private static func scanDir(_ root: URL, halfLifeDays: Double) -> [ScannedFile] {
         let fm = FileManager.default

@@ -560,7 +560,7 @@ and last import, plus an "Offloaded: …" line listing the chains whose provider
 Disconnect deletes the key; to replace a key, disconnect and connect again. Connecting moves all
 four chains to **My Portrait Premium** (`SchedulerSettings.moveAllToPremium`) and saves
 each chain's previous provider and models in `[premium] previous_providers`; switching a chain
-to any other provider in Memory settings returns it to this process. Disconnect
+to any other provider in Workflow settings returns it to this process. Disconnect
 (`restoreFromPremium`) puts every chain still on Premium back on its saved provider when that
 provider is connected, and leaves it unselected otherwise; chains changed by hand stay as they are.
 
@@ -667,7 +667,7 @@ a valid empty day.
 
 **Dates in the UI.** Event dates are calendar dates. The Neural Graph timeline
 (`EventTimeline.calendarDay`) maps them to the same day in the local calendar without a time-zone
-conversion; Memories prints them as stored.
+conversion; Data prints them as stored.
 
 **When bundles are sent.**
 
@@ -730,7 +730,7 @@ conversion; Memories prints them as stored.
   `Support/Signing.local.xcconfig`, name + certificate SHA-1) are unchanged (the sleep helper's
   mechanism), so the CDHash stays the same across releases and updates do not re-register.
 - *No Run now on Premium* — a chain whose provider is Premium has no Run now button and no manual
-  row (Memory settings): Premium processes every user's bundles at 03:00, so an upload cannot run
+  row (Workflow settings): Premium processes every user's bundles at 03:00, so an upload cannot run
   sooner.
 - *Run now (local)* — for an event chain on a local provider, Run now first seals a Run now
   interval (`MemoryScheduler.sealRunNow`, under the exchange lock), then runs the event job.

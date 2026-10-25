@@ -1850,7 +1850,7 @@ final class MemoryScheduler {
     /// dead_letter / budget_deferred。processing_log 的日期行是区间台账之前的历史,
     /// 不再处理,不列。
     /// nonisolated:纯 DB 读 + 数据变换,不碰 MainActor 状态,可在后台调用
-    /// 避免阻塞 UI(被 MemorySettingsView.reload 从 detached task 调)。
+    /// 避免阻塞 UI(被 WorkflowSettingsView.reload 从 detached task 调)。
     nonisolated func attentionDays() -> [AttentionItem] {
         var rows = store.allRows().filter(\.isAnchor)
         rows += ((try? Self.ledger?.all()) ?? []).compactMap { ledgerRow($0.id) }

@@ -230,7 +230,7 @@ enum WritingCaptureCLI {
             }
         }
         print("")
-        print("Approve / Reject via UI(Settings → Memory → Scheduler → Pending review)")
+        print("Approve / Reject via UI(Settings → Workflow → Scheduler → Pending review)")
         print("或者 CLI:swift run MyPortrait --writing-capture-{approve,reject} \(dates.first ?? "<date>")")
     }
 }

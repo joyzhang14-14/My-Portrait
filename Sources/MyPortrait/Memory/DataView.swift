@@ -10,9 +10,9 @@ import GraphPhysics
 ///
 /// Toolbar at the top of the middle column has a single action: reload from
 /// disk. The pipeline triggers (Backfill / Rescore / Distill) live in
-/// Settings → Memory → Scheduler.
-struct MemoriesView: View {
-    @Binding var scope: MemoryScope
+/// Settings → Workflow → Scheduler.
+struct DataView: View {
+    @Binding var scope: DataScope
     /// writing-style chip → Input 跳转目标 record id;writing record 文本预览缓存。
     @State private var pendingInputRecordId: Int64? = nil
     @State private var wrPreviews: [Int64: String] = [:]
@@ -65,7 +65,7 @@ struct MemoriesView: View {
         let id: URL
         let title: String
         let category: String
-        let scope: MemoryScope
+        let scope: DataScope
         let file: PortraitFile
         let modified: Date
         /// EMA lazy-decayed weight at scan time. List 排序 / 渲染都用这个，
@@ -800,7 +800,7 @@ struct MemoriesView: View {
     }
 
     @ViewBuilder
-    private func metadataBlock(_ f: PortraitFile, category: String, scope: MemoryScope) -> some View {
+    private func metadataBlock(_ f: PortraitFile, category: String, scope: DataScope) -> some View {
         let facetStr = f.portraitFacets.isEmpty
             ? "—"
             : f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
@@ -1104,7 +1104,7 @@ struct MemoriesView: View {
 
     /// Walks the appropriate root (events/ or portrait/<cat>/) for the
     /// current scope. Off the main actor.
-    nonisolated private static func scan(scope: MemoryScope, halfLifeDays: Double, order: MemorySortOrder) -> [Entry] {
+    nonisolated private static func scan(scope: DataScope, halfLifeDays: Double, order: MemorySortOrder) -> [Entry] {
         let fm = FileManager.default
         let root: URL
         switch scope {
@@ -1363,17 +1363,17 @@ private struct FolderDisclosureRow: View {
     let title: String
     let count: Int
     let colorHex: String?
-    let entries: [MemoriesView.Entry]
+    let entries: [DataView.Entry]
     let selected: URL?
-    let onSelect: (MemoriesView.Entry) -> Void
+    let onSelect: (DataView.Entry) -> Void
     /// 点删除按钮 + 确认后调。只取消分组(删 _folders json),不删事件。
     let onDelete: () -> Void
     /// 右键 Rename → 拿到新名字回调。
     let onRename: (String) -> Void
     /// 右键 Change color → 选了预设色(hex)回调;nil = 恢复默认色。
     let onSetColor: (String?) -> Void
-    /// 展开后每个 event 行的右键菜单(分 folder / 删除)。由 MemoriesView 构造。
-    @ViewBuilder let eventMenu: (MemoriesView.Entry) -> AnyView
+    /// 展开后每个 event 行的右键菜单(分 folder / 删除)。由 DataView 构造。
+    @ViewBuilder let eventMenu: (DataView.Entry) -> AnyView
     /// 伪 folder(Unclassified):磁盘上没有对应的 _folders json,所以删除 /
     /// 改名 / 改色全部不适用 —— 连按钮带右键菜单一起藏掉。灰色 + 加粗标题。
     var pseudo: Bool = false
@@ -1518,7 +1518,7 @@ private struct FolderDisclosureRow: View {
 }
 
 private struct EntryRow: View {
-    let entry: MemoriesView.Entry
+    let entry: DataView.Entry
     let selected: Bool
 
     nonisolated(unsafe) private static let dayFmt: DateFormatter = {
@@ -1585,7 +1585,7 @@ private struct EntryRow: View {
 }
 
 private struct EmptyHint: View {
-    let scope: MemoryScope
+    let scope: DataScope
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "tray")
@@ -1618,7 +1618,7 @@ private struct EmptyHint: View {
 /// Refresh / icon-only Button + 即时 hover label。系统 .help() 要停留 ~2 秒,
 /// 跟 sidebar NavIconButton 同款做法:hover 时立刻在 button 下方浮一个小气泡 label,
 /// .help 留作 VoiceOver / 系统层 fallback。本地 struct 持有自己的 hover state
-/// 避免触发外层 MemoriesView body 重新 render。
+/// 避免触发外层 DataView body 重新 render。
 private struct IconHoverButton: View {
     let systemImage: String
     let tooltip: String

@@ -371,7 +371,7 @@ struct ConnectionsView: View {
         VStack(alignment: .leading, spacing: 6) {
             // 哪条链搬到 Premium 在 Memory 各条链的 provider picker 里选,这里只显示。
             Text(offloaded.isEmpty
-                 ? "No pipeline offloaded — pick My Portrait Premium as a pipeline's provider in Memory settings."
+                 ? "No pipeline offloaded — pick My Portrait Premium as a pipeline's provider in Workflow settings."
                  : "Offloaded: " + offloaded.map { Self.premiumChainTitles[$0] ?? $0 }.joined(separator: ", "))
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textPrimary.opacity(0.7))

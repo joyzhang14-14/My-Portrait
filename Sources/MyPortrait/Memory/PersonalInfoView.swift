@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Memories → Personal Info 卡片。用户自填的基础画像,**全部可选**。
+/// Data → Personal Info 卡片。用户自填的基础画像,**全部可选**。
 ///
 /// 填好的字段会被 `MemoryPrompts.aboutUserBlock(_:)` 拼成
 /// "About the user:" 段落,塞到 memory pipeline(event / portrait /

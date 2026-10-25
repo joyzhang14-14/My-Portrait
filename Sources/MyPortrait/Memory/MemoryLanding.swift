@@ -9,23 +9,23 @@ import Foundation
 @MainActor
 enum MemoryLanding {
 
-    static func restoredScope() -> MemoryScope {
+    static func restoredScope() -> DataScope {
         let raw = ConfigStore.shared.current.display.memoryLastScope
-        return MemoryScope(id: raw) ?? .events
+        return DataScope(id: raw) ?? .events
     }
 
-    static func restoredViewMode() -> MemoryViewMode {
+    static func restoredViewMode() -> DataViewMode {
         let scope = restoredScope()
         let raw = ConfigStore.shared.current.display.memoryLastViewMode
-        let mode = MemoryViewMode(rawValue: raw) ?? .text
+        let mode = DataViewMode(rawValue: raw) ?? .text
         // 图谱设置页只在图谱模式下路由得到,单独放行(它不是"图谱形态")。
         if scope == .neuralGraphSettings { return .neuralGraph }
         if scope == .textSettings { return .text }
         guard mode == .neuralGraph else { return .text }
-        return MemoryViewMode.supportsNeuralGraph(scope) ? .neuralGraph : .text
+        return DataViewMode.supportsNeuralGraph(scope) ? .neuralGraph : .text
     }
 
-    static func persist(scope: MemoryScope, mode: MemoryViewMode) {
+    static func persist(scope: DataScope, mode: DataViewMode) {
         ConfigStore.shared.mutate {
             $0.display.memoryLastScope = scope.id
             $0.display.memoryLastViewMode = mode.rawValue

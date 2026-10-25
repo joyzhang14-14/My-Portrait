@@ -107,7 +107,7 @@ public enum GraphConstants {
     ///
     /// ⚠️ 三处共用这一个门,改这里三处一起变:
     ///   1. Neural Graph —— GraphSceneBuilder.buildEvents(不上画布)
-    ///   2. Text 列表   —— MemoriesView.makeFolderSplit(不成组)
+    ///   2. Text 列表   —— DataView.makeFolderSplit(不成组)
     ///   3. 生产 pipeline —— EventClassifier(不创建新 folder)
     public static let folderMinCoreEvents: Int = 5
     /// Unclassified 成区门 —— **Text 列表专用**(08-09 update:三档):

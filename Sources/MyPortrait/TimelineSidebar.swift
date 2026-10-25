@@ -14,8 +14,8 @@ struct TimelineSidebar: View {
     let state: TimelineState
     @Binding var selection: SidebarSection?
     let chat: ChatController
-    @Binding var memoryScope: MemoryScope
-    @Binding var memoryViewMode: MemoryViewMode
+    @Binding var dataScope: DataScope
+    @Binding var dataViewMode: DataViewMode
     @Binding var cronJobSelection: UUID?
     @Binding var settingsSubsection: SettingsSubsection?
 
@@ -75,11 +75,11 @@ struct TimelineSidebar: View {
                         cronJobsSection
                         cronJobHistorySection
                         recentsSection
-                    } else if selection == .memories {
+                    } else if selection == .data {
                         // text/Neural Graph 模式切换钮:独立小卡,放 scope 卡上方。
                         // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 update),钮本身不变。
                         memoryViewModeCard
-                        memoryScopeSection
+                        dataScopeSection
                     } else if selection == .settings {
                         settingsListSection
                     } else {
@@ -127,7 +127,7 @@ struct TimelineSidebar: View {
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .home, .memories, .settings], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .home, .data, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
                         // ⚠️ 这里曾经每次点开 Memory 都强制回 Neural Graph +
                         // Events。**别加回来** —— Memories 现在记住你上次停在
@@ -393,12 +393,12 @@ struct TimelineSidebar: View {
     private var memoryViewModeCard: some View {
         let fill   = colorScheme == .light ? Color.black.opacity(0.04) : Color.white.opacity(0.05)
         let stroke = colorScheme == .light ? Color.black.opacity(0.10) : Color.white.opacity(0.08)
-        return MemoryViewModeToggle(mode: $memoryViewMode)
-            .onChange(of: memoryViewMode) {
-                if memoryViewMode == .text, memoryScope == .neuralGraphSettings {
-                    memoryScope = .textSettings
-                } else if memoryViewMode == .neuralGraph, memoryScope == .textSettings {
-                    memoryScope = .neuralGraphSettings
+        return DataViewModeToggle(mode: $dataViewMode)
+            .onChange(of: dataViewMode) {
+                if dataViewMode == .text, dataScope == .neuralGraphSettings {
+                    dataScope = .textSettings
+                } else if dataViewMode == .neuralGraph, dataScope == .textSettings {
+                    dataScope = .neuralGraphSettings
                 }
             }
             .padding(6)
@@ -413,11 +413,11 @@ struct TimelineSidebar: View {
             )
     }
 
-    // MARK: Memories scope picker (shown when selection == .memories)
+    // MARK: Memories scope picker (shown when selection == .data)
 
-    private var memoryScopeSection: some View {
+    private var dataScopeSection: some View {
         sectionCard {
-            if memoryViewMode == .neuralGraph {
+            if dataViewMode == .neuralGraph {
                 // Neural Graph 模式列:PROFILE 小分区(Personal Info,跟 text 模式对齐)
                 // + GRAPH(Portrait 整图 / Events / Input 打字活动面积图)。
                 scopeHeader("PROFILE")
@@ -431,7 +431,7 @@ struct TimelineSidebar: View {
                                    icon: "person.fill",
                                    title: "Portrait") {
                         if !isPortraitScope {
-                            memoryScope = .portrait(category: PortraitPaths.seedCategories[0])
+                            dataScope = .portrait(category: PortraitPaths.seedCategories[0])
                         }
                     }
                     scopeRow(.events)
@@ -474,7 +474,7 @@ struct TimelineSidebar: View {
     }
 
     private var isPortraitScope: Bool {
-        if case .portrait = memoryScope { return true }
+        if case .portrait = dataScope { return true }
         return false
     }
 
@@ -486,9 +486,9 @@ struct TimelineSidebar: View {
             .padding(.bottom, 2)
     }
 
-    private func scopeRow(_ s: MemoryScope) -> some View {
-        scopeRowCustom(isOn: memoryScope == s, icon: s.systemImage, title: s.displayName) {
-            memoryScope = s
+    private func scopeRow(_ s: DataScope) -> some View {
+        scopeRowCustom(isOn: dataScope == s, icon: s.systemImage, title: s.displayName) {
+            dataScope = s
             // Neural Graph 模式下点 Personal Info **不**切回 text:
             // toggle 保持 Neural Graph,主面板由 ContentView 按「该 scope 无
             // 图谱形态」自动落到表单;再点 Portrait/Events 直接回图谱。
@@ -715,7 +715,7 @@ struct TimelineSidebar: View {
 
     private var settingsListSection: some View {
         sectionCard {
-            ForEach([SettingsSubsection.Group.app, .capture, .memory, .dataPrivacy], id: \.self) { grp in
+            ForEach([SettingsSubsection.Group.app, .capture, .workflow, .dataPrivacy], id: \.self) { grp in
                 Text(grp.rawValue)
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
                     .tracking(0.8)

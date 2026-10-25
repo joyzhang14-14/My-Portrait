@@ -133,7 +133,7 @@ final class Services {
         )
 
         // 写作采集 worker(共用同一 DatabasePool)。注册到 WritingCaptureWorker.shared
-        // 给 UI(MemorySettingsView)用。
+        // 给 UI(WorkflowSettingsView)用。
         let writingStore = WritingCaptureStore(dbPool: dbImpl.dbPool)
         let writingWorker = WritingCaptureWorker(store: writingStore)
         WritingCaptureWorker.shared = writingWorker

@@ -3,8 +3,8 @@ import SwiftUI
 /// Memories 区 text ⇄ Neural Graph 模式切换钮。
 /// 自绘:两段各为「图标 + 文字」,选中段被一个圆角长方形框住,
 /// 切换时用 spring 动画滑到另一段(matchedGeometryEffect)。
-struct MemoryViewModeToggle: View {
-    @Binding var mode: MemoryViewMode
+struct DataViewModeToggle: View {
+    @Binding var mode: DataViewMode
     @Namespace private var selectionNS
 
     var body: some View {
@@ -14,7 +14,7 @@ struct MemoryViewModeToggle: View {
         }
     }
 
-    private func segment(_ m: MemoryViewMode, icon: String, label: String) -> some View {
+    private func segment(_ m: DataViewMode, icon: String, label: String) -> some View {
         let isOn = mode == m
         return Button {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) { mode = m }

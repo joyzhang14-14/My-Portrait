@@ -207,7 +207,7 @@ enum DevMode {
 
     // MARK: - Input(打字记录)演示数据
 
-    /// Memories → Input 那两页的素材。跟 writing style 同理:`writing_records`
+    /// Data → Input 那两页的素材。跟 writing style 同理:`writing_records`
     /// / `keystroke_log` 在真实 sqlite 里,dev mode 不切库,只能顶替查询结果。
     /// 演示环境里显示真实击键是最不能接受的一种泄漏。
     ///
