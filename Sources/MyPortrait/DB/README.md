@@ -95,6 +95,8 @@ query
 4. **`StubPortraitDB` 已删** —— 仅在未来的 Tests target 中重建。Sources/ 永远是真 DB
 5. **screenpipe 历史数据直接 import 进 `portrait.sqlite` 的 `frames` 表** —— 用
    `device_name='imported'` 标记区分（不复制媒体文件），写盘只动 `portrait.sqlite` / `raw_data/`
+6. **词框坐标只留 5 位小数** —— `ocr_words_json` / `ocr_backfill_words` 写库前截短，旧帧由
+   `OCRWordsSlimmer` 后台改写一遍（进度在 `ocr_words_slim_state`）。0–1 比例坐标，5 位 ≈ 0.02 px
 
 ## 调用方进入点
 

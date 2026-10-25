@@ -841,7 +841,7 @@ actor PortraitDBImpl: PortraitDB {
         if ocr.words.isEmpty {
             wordsJson = nil   // 空数组省一行 JSON ("[]")，让 NULL 表示"无 bbox"
         } else {
-            let data = try Self.ocrWordsEncoder.encode(ocr.words)
+            let data = try Self.ocrWordsEncoder.encode(ocr.words.map(OCRWordsSlimmer.rounded))
             wordsJson = String(data: data, encoding: .utf8)
         }
         return OCRFields(
