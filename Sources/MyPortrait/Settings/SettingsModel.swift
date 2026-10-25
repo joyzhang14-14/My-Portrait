@@ -24,8 +24,9 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case screen, audio, typing
     }
     enum Workflow: String, Hashable, CaseIterable {
-        // 4 个 pipeline 各一页(provider 配置在各自页面里)+ Changelog(含 Needs attention)。
-        case eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
+        // Local Optimization(第 1 层 OCR)在最前;4 个 pipeline 各一页(provider 配置在
+        // 各自页面里)+ Changelog(含 Needs attention)。
+        case localOptimization, eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
@@ -60,6 +61,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture & Timeline"
         case .capture(.audio):         return "Audio Capture & Transcript"
         case .capture(.typing):        return "Typing Capture"
+        case .workflow(.localOptimization):     return "Local Optimization"
         case .workflow(.eventsProcessor):       return "Events Processor"
         case .workflow(.portraitsDistiller):    return "Portraits Distiller"
         case .workflow(.personalityRefresher):  return "Personality Refresher"
@@ -81,6 +83,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
+        case .workflow(.localOptimization):     return "cpu"
         case .workflow(.eventsProcessor):       return "calendar.badge.clock"
         case .workflow(.portraitsDistiller):    return "person.text.rectangle"
         case .workflow(.personalityRefresher):  return "brain.head.profile"

@@ -31,6 +31,9 @@ actor CaptureCoordinator {
     private var pauseWhenLocked: Bool = true
     /// 亮度最低时跳帧。Services 在 config 变化时推。
     private var pauseAtMinBrightness: Bool = true
+    /// 采集时不做 OCR,帧存全分辨率 HEIC 进 `ocr_pending`,由 DeferredOCRWorker 补。
+    /// Services 在 config 变化时推。
+    private var deferOCR: Bool = false
     private let ignore: IgnoreGate
     private let events: EventSources
     private let drmWatcher: DRMWatcher
@@ -112,6 +115,10 @@ actor CaptureCoordinator {
     func setCaptureGates(pauseWhenLocked locked: Bool, pauseAtMinBrightness dim: Bool) {
         pauseWhenLocked = locked
         pauseAtMinBrightness = dim
+    }
+
+    func setDeferOCR(_ on: Bool) {
+        deferOCR = on
     }
 
     /// Services 在功耗档位变化时调(电源/低电量/热状态/用户改 powerMode)。
@@ -343,8 +350,9 @@ actor CaptureCoordinator {
             recordFocus = await focus.quickFocus(front)
         }
 
-        // 6. JPG 路径（同步纯计算，立即可用）。
-        let url = snapshot.predictURL(timestamp: now)
+        // 6. JPG 路径（同步纯计算，立即可用）。延后 OCR 时存全分辨率 HEIC,OCR 做完再换成 JPG。
+        let deferred = deferOCR
+        let url = snapshot.predictURL(timestamp: now, ext: deferred ? SnapshotWriter.pendingOCRExt : "jpg")
 
         // 7. JPG 落盘（actor 串行；不等 IO 完成，与 OCR/DB 并行）。
         let snapshotActor = snapshot
@@ -357,18 +365,20 @@ actor CaptureCoordinator {
             }
         }
 
-        // 8. OCR（同步，主路径）。失败只 log，不阻塞入库。
+        // 8. OCR（同步，主路径）。失败只 log，不阻塞入库。延后 OCR 时跳过。
         var ocrResult: OCRResult?
-        do {
-            ocrResult = try await ocr.recognize(image: image, focus: recordFocus)
-        } catch {
-            logger.warning("OCR failed: \(String(describing: error), privacy: .public)")
-            ocrResult = nil
+        if !deferred {
+            do {
+                ocrResult = try await ocr.recognize(image: image, focus: recordFocus)
+            } catch {
+                logger.warning("OCR failed: \(String(describing: error), privacy: .public)")
+                ocrResult = nil
+            }
+            // 全分辨率 OCR 一帧要开几份十几 MB 的工作缓冲,用完 malloc 会把这些
+            // 空闲大块攒着不还系统,后台进程等不到内存压力信号,footprint 就一直
+            // 挂在 300-600MB。每帧干完主动交还,只动空闲块,不影响 OCR 本身。
+            malloc_zone_pressure_relief(nil, 0)
         }
-        // 全分辨率 OCR 一帧要开几份十几 MB 的工作缓冲,用完 malloc 会把这些
-        // 空闲大块攒着不还系统,后台进程等不到内存压力信号,footprint 就一直
-        // 挂在 300-600MB。每帧干完主动交还,只动空闲块,不影响 OCR 本身。
-        malloc_zone_pressure_relief(nil, 0)
 
         // 9. 入库。
         let record = FrameRecord(
@@ -387,7 +397,8 @@ actor CaptureCoordinator {
 
         let frameId: Int64
         do {
-            frameId = try await db.insertFrameWithOCR(record, ocr: ocrResult)
+            frameId = deferred ? try await db.insertFramePendingOCR(record)
+                               : try await db.insertFrameWithOCR(record, ocr: ocrResult)
         } catch {
             // DB 写失败 → 静默丢弃这帧的事件（避免下游收到无效 frameId）。
             // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。

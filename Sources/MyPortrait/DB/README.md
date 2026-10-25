@@ -97,6 +97,9 @@ query
    `device_name='imported'` 标记区分（不复制媒体文件），写盘只动 `portrait.sqlite` / `raw_data/`
 6. **词框坐标只留 5 位小数** —— `ocr_words_json` / `ocr_backfill_words` 写库前截短，旧帧由
    `OCRWordsSlimmer` 后台改写一遍（进度在 `ocr_words_slim_state`）。0–1 比例坐标，5 位 ≈ 0.02 px
+7. **`full_text` 为空不一定是没字** —— 延后 OCR 开着时，新帧先进 `ocr_pending`（图是全分辨率
+   HEIC），`DeferredOCRWorker` 补完才有文字、换成 JPG、出队。要判断「这帧的 OCR 做没做」看
+   `ocr_pending`，事件区间封口也不越过它最旧的一帧
 
 ## 调用方进入点
 

@@ -1140,6 +1140,18 @@ enum DBSchema {
             try db.execute(sql: "DELETE FROM writing_records WHERE source = 'cli_import'")
         }
 
+        // 延后 OCR 的队列(10-25 update):采集时不做 OCR 的帧登记在这里,DeferredOCRWorker
+        // 做完一帧删一行。事件区间封口不越过这里最旧的一帧(workflow 第 1 层做完才进第 2 层)。
+        m.registerMigration("v48_ocr_pending") { db in
+            try db.execute(sql: """
+                CREATE TABLE ocr_pending (
+                    frame_id INTEGER PRIMARY KEY,
+                    timestamp_ms INTEGER NOT NULL
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX idx_ocr_pending_ts ON ocr_pending(timestamp_ms)")
+        }
+
         return m
     }
 }

@@ -34,6 +34,21 @@ protocol PortraitDB: Sendable {
     /// 调用方应允许失败 —— OCR 不是关键路径，失败只 log。
     func updateFrameOCR(frameId: Int64, ocr: OCRResult) async throws
 
+    // MARK: - 延后 OCR(workflow 第 1 层,见 DeferredOCRWorker)
+
+    /// 插一帧(OCR 字段空)并登记进 `ocr_pending`,同一事务。
+    func insertFramePendingOCR(_ record: FrameRecord) async throws -> Int64
+
+    /// `beforeMs` 之前等 OCR 的帧,最旧的在前。`snapshotPath` 是绝对路径;文件已不在的帧 path 为 nil。
+    func pendingOCRFrames(beforeMs: Int64, limit: Int) async throws -> [PendingOCRFrame]
+
+    /// 一帧 OCR 做完:写 OCR 字段(`ocr` nil = 图读不到,不写)、`snapshotPath` 非 nil 时
+    /// 换成新图路径,并移出 `ocr_pending`,同一事务。
+    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws
+
+    /// 积压概况:帧数 / 最旧帧时间 / 各帧图片的绝对路径(算占用用)。
+    func pendingOCRSummary() async throws -> PendingOCRSummary
+
     // MARK: - P3: MP4 压缩
 
     /// 找出需要压缩的 JPG 帧（>10 分钟前、还有 snapshot_path）。
@@ -324,4 +339,18 @@ struct TranscriptionRecord: Sendable {
         self.engine = engine
         self.transcribedAtMs = transcribedAtMs
     }
+}
+
+/// `ocr_pending` 里的一帧。
+struct PendingOCRFrame: Sendable {
+    let id: Int64
+    let timestampMs: Int64
+    let snapshotPath: String?
+}
+
+/// OCR 积压概况。
+struct PendingOCRSummary: Sendable {
+    let count: Int
+    let oldestMs: Int64?
+    let snapshotPaths: [String]
 }

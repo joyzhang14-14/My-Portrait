@@ -93,6 +93,65 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    // MARK: - 延后 OCR
+
+    func insertFramePendingOCR(_ record: FrameRecord) async throws -> Int64 {
+        try await dbPool.write { db in
+            var row = FrameRow.fromRecord(record)
+            try row.insert(db)
+            let id = row.id ?? 0
+            try db.execute(sql: "INSERT INTO ocr_pending (frame_id, timestamp_ms) VALUES (:id, :ts)",
+                           arguments: ["id": id, "ts": record.timestampMs])
+            return id
+        }
+    }
+
+    func pendingOCRFrames(beforeMs: Int64, limit: Int) async throws -> [PendingOCRFrame] {
+        try await dbPool.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT p.frame_id, p.timestamp_ms, f.snapshot_path FROM ocr_pending p
+                LEFT JOIN frames f ON f.id = p.frame_id
+                WHERE p.timestamp_ms < :before
+                ORDER BY p.timestamp_ms LIMIT :n
+                """, arguments: ["before": beforeMs, "n": Int64(limit)]).map {
+                PendingOCRFrame(id: $0["frame_id"], timestampMs: $0["timestamp_ms"],
+                                snapshotPath: AssetPath.resolve($0["snapshot_path"]))
+            }
+        }
+    }
+
+    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws {
+        let ocrFields = try Self.encodeOCRFields(ocr)
+        try await dbPool.write { db in
+            if let ocrFields {
+                try db.execute(sql: """
+                    UPDATE frames
+                    SET full_text = :fullText, ocr_words_json = :wordsJson,
+                        ocr_confidence = :confidence, text_source = :textSource
+                    WHERE id = :id
+                    """, arguments: ["fullText": ocrFields.fullText, "wordsJson": ocrFields.wordsJson,
+                                     "confidence": ocrFields.confidence, "textSource": ocrFields.textSource,
+                                     "id": frameId])
+            }
+            if let snapshotPath {
+                try db.execute(sql: "UPDATE frames SET snapshot_path = :p WHERE id = :id",
+                               arguments: ["p": AssetPath.normalize(snapshotPath), "id": frameId])
+            }
+            try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id = :id", arguments: ["id": frameId])
+        }
+    }
+
+    func pendingOCRSummary() async throws -> PendingOCRSummary {
+        try await dbPool.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT p.timestamp_ms, f.snapshot_path FROM ocr_pending p
+                LEFT JOIN frames f ON f.id = p.frame_id ORDER BY p.timestamp_ms
+                """)
+            return PendingOCRSummary(count: rows.count, oldestMs: rows.first?["timestamp_ms"],
+                                     snapshotPaths: rows.compactMap { AssetPath.resolve($0["snapshot_path"]) })
+        }
+    }
+
     // MARK: - P3: MP4 压缩
 
     func framesToCompact(olderThanMs: Int64, limit: Int) async throws -> [FrameForCompaction] {
@@ -102,6 +161,7 @@ actor PortraitDBImpl: PortraitDB {
             FROM frames
             WHERE snapshot_path IS NOT NULL
               AND timestamp_ms < :olderThanMs
+              AND id NOT IN (SELECT frame_id FROM ocr_pending)
             ORDER BY device_name, timestamp_ms
             LIMIT :limit
             """

@@ -373,6 +373,8 @@ final class MemoryScheduler {
 
     /// 能不能现在起 event job(必须自己空闲 + portrait/personality 都空闲)。
     var canRunEvent: Bool { !eventRunning && !portraitFamilyRunning }
+    // 三个 job 开跑前还要等 workflow 第 1 层:延后 OCR 在跑(DeferredOCRStatus.running)→ .busy,
+    // 下一个 tick 再试。
     /// 能不能现在起 distill(必须 event 空闲 + 自己空闲;personality/classify 不挡)。
     var canRunDistill: Bool { !eventRunning && !distillRunning }
     /// 能不能现在起 personality(必须 event 空闲 + 自己空闲;distill 不挡)。
@@ -955,7 +957,7 @@ final class MemoryScheduler {
     /// 各自记账 + 心跳。手动触发与定时触发走同一个函数。
     @discardableResult
     func runEventJob(trigger: RunTrigger = .scheduler, scope: LocalRunScope = .all) async -> JobOutcome {
-        guard canRunEvent else { return .busy }
+        guard canRunEvent, !DeferredOCRStatus.shared.running else { return .busy }
         eventRunning = true
         refreshKeepAwake()
         defer { eventRunning = false; refreshKeepAwake() }
@@ -1149,7 +1151,7 @@ final class MemoryScheduler {
     /// job 清除，所以盘上事件天然只来自 event 处理成功的日。
     @discardableResult
     func runPortraitJob(trigger: RunTrigger = .scheduler) async -> JobOutcome {
-        guard canRunDistill else { return .busy }
+        guard canRunDistill, !DeferredOCRStatus.shared.running else { return .busy }
         distillRunning = true
         refreshKeepAwake()
         defer { distillRunning = false; refreshKeepAwake() }
@@ -1221,7 +1223,7 @@ final class MemoryScheduler {
     /// 只跑一次,进度落在 personality_days;OCR 闸窗口 = 该本地日 [00:00, 24:00)(钉死偏移)。
     @discardableResult
     func runPersonalityJob(trigger: RunTrigger = .scheduler, scope: LocalRunScope = .all) async -> JobOutcome {
-        guard canRunPersonality else { return .busy }
+        guard canRunPersonality, !DeferredOCRStatus.shared.running else { return .busy }
         personalityRunning = true
         refreshKeepAwake()
         defer { personalityRunning = false; refreshKeepAwake() }

@@ -131,6 +131,12 @@ struct EventIntervalStore: Sendable {
         try Int64.fetchOne(db, sql: "SELECT MAX(end_ms) FROM event_intervals")
     }
 
+    /// 最旧一张还在等 OCR 的帧(`ocr_pending`,DeferredOCRWorker)。封口截止点不越过它:
+    /// workflow 第 1 层(OCR)没做完的帧不进事件链。表还没建(库没迁移过)按没有处理。
+    private static func ocrHold(_ db: Database) -> Int64? {
+        (try? Int64.fetchOne(db, sql: "SELECT MIN(timestamp_ms) FROM ocr_pending")) ?? nil
+    }
+
     /// 需要 event job 处理的区间:event 还有活,或 event 已完成而 impact 还有活,且都已
     /// 过退避窗口(规则同 `MemoryScheduler.backoffMs`)。按 start_ms 升序。
     func needsWork(nowMs: Int64 = EventIntervalStore.nowMs()) throws -> [EventInterval] {
@@ -158,6 +164,7 @@ struct EventIntervalStore: Sendable {
     func unsealedFrameCount(beforeMs: Int64) throws -> Int {
         try dbPool.read { db in
             let from = try Self.lastCut(db) ?? Self.computeOrigin(db, nowMs: beforeMs)
+            let beforeMs = min(beforeMs, Self.ocrHold(db) ?? beforeMs)
             guard beforeMs > from else { return 0 }
             return try Int.fetchOne(db, sql: """
                 SELECT COUNT(*) FROM frames
@@ -237,10 +244,12 @@ struct EventIntervalStore: Sendable {
                 IntervalSegmenter.Frame(id: $0["id"], ts: $0["timestamp_ms"], nonIdle: $0["active"])
             }
         }
-        let cuts = IntervalSegmenter.gapCuts(frames: frames, lastCut: last, nowMs: nowMs)
-        guard !cuts.isEmpty else { return [] }
+        let gapCuts = IntervalSegmenter.gapCuts(frames: frames, lastCut: last, nowMs: nowMs)
+        guard !gapCuts.isEmpty else { return [] }
         return try dbPool.write { db in
             guard try Self.lastCut(db) == last else { return [] }
+            let hold = Self.ocrHold(db)
+            let cuts = gapCuts.filter { $0 <= (hold ?? $0) }
             var out = try Self.sealBackfill(db, lastCut: last, nowMs: nowMs, tzOffsetMin: off).map { [$0] } ?? []
             var start = last
             for cut in cuts {
@@ -263,7 +272,8 @@ struct EventIntervalStore: Sendable {
             _ = try Self.ensureOrigin(db, nowMs: nowMs, tzOffsetMin: off)
             guard let last = try Self.lastCut(db) else { return [] }
             var out = try Self.sealBackfill(db, lastCut: last, nowMs: nowMs, tzOffsetMin: off).map { [$0] } ?? []
-            if let cut = IntervalSegmenter.runNowCut(lastCut: last, nowMs: nowMs),
+            if let raw = IntervalSegmenter.runNowCut(lastCut: last, nowMs: nowMs),
+               case let cut = min(raw, Self.ocrHold(db) ?? raw), cut > last,
                let iv = try Self.insert(db, start: last, end: cut, trigger: Self.triggerRunNow,
                                         nowMs: nowMs, tzOffsetMin: off) {
                 out.append(iv)

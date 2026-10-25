@@ -52,18 +52,24 @@ actor SnapshotWriter {
         currentJpegQuality = q
     }
 
+    /// 等 OCR 的帧(10-25 update):全分辨率 HEIC。实测同一屏 OCR 吻合原图 97%,
+    /// 1920 宽 JPG 只有 93–96%,而且 HEIC 文件(~280KB)比 1920 JPG 还小。
+    /// OCR 做完 DeferredOCRWorker 再按常规写一张 JPG 换掉它。
+    static let pendingOCRExt = "heic"
+    private static let pendingOCRQuality = 0.6
+
     /// 同步计算文件路径。不创建任何目录、不做 IO。
     /// `actor` 之外可直接调（计算纯函数 + 静态 formatter，线程安全）。
-    nonisolated func predictURL(timestamp: Date) -> URL {
+    nonisolated func predictURL(timestamp: Date, ext: String = "jpg") -> URL {
         let day = Self.dayFormatter.string(from: timestamp)
         let tsMs = Int64(timestamp.timeIntervalSince1970 * 1000)
         return config.framesDir
             .appendingPathComponent(day, isDirectory: true)
-            .appendingPathComponent("\(tsMs)_m\(config.monitorId).jpg")
+            .appendingPathComponent("\(tsMs)_m\(config.monitorId).\(ext)")
     }
 
-    /// 编码 JPG 并写入指定 URL。actor 序列化保证同一时刻仅一个编码任务。
-    /// 失败抛错（调用方一般 catch + log，不影响主流程）。
+    /// 编码 JPG 并写入指定 URL(扩展名是 `pendingOCRExt` 时写全分辨率 HEIC)。
+    /// actor 序列化保证同一时刻仅一个编码任务。失败抛错（调用方一般 catch + log，不影响主流程）。
     func write(image: CGImage, to url: URL) async throws {
         // 1. 父目录就绪（按天缓存，免重复 syscall）。
         let parent = url.deletingLastPathComponent()
@@ -74,11 +80,12 @@ actor SnapshotWriter {
             ensuredDayDirs.insert(parent.path)
         }
 
-        // 2. 必要时缩放。
-        let toEncode = resizeIfNeeded(image, maxWidth: config.jpegMaxWidth)
+        // 2. 必要时缩放(等 OCR 的 HEIC 保持原分辨率)。
+        let heic = url.pathExtension == Self.pendingOCRExt
+        let toEncode = heic ? image : resizeIfNeeded(image, maxWidth: config.jpegMaxWidth)
 
         // 3. ImageIO 编码。
-        let utType = UTType.jpeg.identifier as CFString
+        let utType = (heic ? UTType.heic : UTType.jpeg).identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(
             url as CFURL, utType, 1, nil
         ) else {
@@ -86,7 +93,7 @@ actor SnapshotWriter {
         }
 
         let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: currentJpegQuality
+            kCGImageDestinationLossyCompressionQuality: heic ? Self.pendingOCRQuality : currentJpegQuality
         ]
         CGImageDestinationAddImage(dest, toEncode, options as CFDictionary)
 

@@ -7,7 +7,7 @@ import os.log
 ///
 /// 流程（每 5 分钟一轮）：
 ///   1. 电池模式 → 跳过
-///   2. db.framesToCompact(olderThanMs: now - 10min, limit: 5000)
+///   2. db.framesToCompact(olderThanMs: now - 10min, limit: 5000)(还在等 OCR 的帧不压,见 DeferredOCRWorker)
 ///   3. 按 deviceName 分组
 ///   4. 每组按时间排序，切成 ≤ 60s 时长的 chunk（≤ 100 帧为安全帽）
 ///   5. 每个 chunk：
@@ -112,7 +112,11 @@ actor CompactionWorker {
     /// 孤儿本来就只在启动期清一次,不急。
     private func sweepOrphanMedia() async {
         let cutoff = Date().addingTimeInterval(-7 * 24 * 3600)
-        let jpg = await sweepDir(config.framesDir, ext: "jpg", olderThan: cutoff) { [db] paths in
+        var jpg = await sweepDir(config.framesDir, ext: "jpg", olderThan: cutoff) { [db] paths in
+            try await db.referencedSnapshotPaths(in: paths)
+        }
+        // 等 OCR 的 HEIC:OCR 写完库、删 HEIC 之前崩溃会留下没人引用的那张。
+        jpg += await sweepDir(config.framesDir, ext: SnapshotWriter.pendingOCRExt, olderThan: cutoff) { [db] paths in
             try await db.referencedSnapshotPaths(in: paths)
         }
         let mp4 = await sweepDir(config.videoDir, ext: "mp4", olderThan: cutoff) { [db] paths in

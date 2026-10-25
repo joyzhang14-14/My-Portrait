@@ -29,6 +29,7 @@ final class Services {
     let searchEngine: SearchEngine
     let coordinator: CaptureCoordinator
     let compactor: CompactionWorker
+    let deferredOCR: DeferredOCRWorker
     let audio: AudioCaptureService
     let systemAudio: SystemAudioCaptureService
     let transcriber: TranscriptionScheduler
@@ -85,6 +86,8 @@ final class Services {
 
         self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
         self.compactor = CompactionWorker(db: dbImpl, reporter: reporter)
+        self.deferredOCR = DeferredOCRWorker(db: dbImpl, reporter: reporter)
+        DeferredOCRStatus.shared.worker = deferredOCR
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
         self.systemAudio = SystemAudioCaptureService(reporter: reporter)
@@ -241,6 +244,7 @@ final class Services {
             } else {
                 logger.info("CompactionWorker SKIPPED (MYPORTRAIT_NO_COMPACTOR=1)")
             }
+            await self.deferredOCR.start()
             // Whisper 模型 prefetch 必须在 transcriber.start() **之前**串行完成 ——
             // 两者共用同一个 WhisperKitWrapper,其契约要求调用方串行。崩溃恢复刚把
             // chunk 回退成 pending,start() 后转录立刻开跑(power baseline 触发
@@ -547,14 +551,17 @@ final class Services {
         }
     }
 
-    /// 把 ConfigStore.capture.screen 的两个跳帧开关(锁屏/最低亮度)推给
-    /// coordinator。(07-21 update:原 pushOCRBooster 改造 —— booster 开关删除永远开。)
+    /// 把 ConfigStore.capture.screen 的两个跳帧开关(锁屏/最低亮度)和延后 OCR 开关
+    /// (local_optimization.defer_ocr)推给 coordinator。(07-21 update:原 pushOCRBooster 改造 —— booster 开关删除永远开。)
     private func pushCaptureGates() {
         let s = ConfigStore.shared.current.capture.screen
         let locked = s.pauseWhenLocked
         let dim = s.pauseAtMinBrightness
-        Task { await coordinator.setCaptureGates(pauseWhenLocked: locked,
-                                                 pauseAtMinBrightness: dim) }
+        let deferOCR = ConfigStore.shared.current.localOptimization.deferOCR
+        Task {
+            await coordinator.setCaptureGates(pauseWhenLocked: locked, pauseAtMinBrightness: dim)
+            await coordinator.setDeferOCR(deferOCR)
+        }
     }
 
     /// 监听两个跳帧开关(vim 改 TOML / UI 编辑都走它),变化时重推。
@@ -564,15 +571,18 @@ final class Services {
     private func observeCaptureGates() {
         let store = ConfigStore.shared
         let seen = (store.current.capture.screen.pauseWhenLocked,
-                    store.current.capture.screen.pauseAtMinBrightness)
+                    store.current.capture.screen.pauseAtMinBrightness,
+                    store.current.localOptimization.deferOCR)
         withObservationTracking {
             _ = store.capture.screen.pauseWhenLocked
             _ = store.capture.screen.pauseAtMinBrightness
+            _ = store.current.localOptimization.deferOCR
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 let s = ConfigStore.shared.capture.screen
-                if (s.pauseWhenLocked, s.pauseAtMinBrightness) != seen {
+                let d = ConfigStore.shared.current.localOptimization.deferOCR
+                if (s.pauseWhenLocked, s.pauseAtMinBrightness, d) != seen {
                     self.pushCaptureGates()
                 }
                 self.observeCaptureGates()   // 重订阅时重新快照 seen
@@ -699,6 +709,7 @@ final class Services {
         await audio.stop()
         await systemAudio.stop()
         await compactor.stop()
+        await deferredOCR.stop()
         await transcriber.stop()
         await retentionWorker.stop()
     }

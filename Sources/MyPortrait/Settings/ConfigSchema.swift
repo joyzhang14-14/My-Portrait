@@ -33,6 +33,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var personalInfo:  PersonalInfoConfig  = .init()
     var premium:  PremiumConfig  = .init()
     var localModel:    LocalModelConfig    = .init()
+    var localOptimization: LocalOptimizationConfig = .init()
 
     init() {}
 
@@ -43,6 +44,7 @@ struct MyPortraitConfig: Codable, Equatable {
         case personalInfo = "personal_info"
         case premium = "premium"
         case localModel = "local_model"
+        case localOptimization = "local_optimization"
     }
 
     init(from decoder: Decoder) throws {
@@ -63,6 +65,7 @@ struct MyPortraitConfig: Codable, Equatable {
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         premium  = c.dflt(PremiumConfig.self, .premium, premium)
         localModel    = c.dflt(LocalModelConfig.self, .localModel, localModel)
+        localOptimization = c.dflt(LocalOptimizationConfig.self, .localOptimization, localOptimization)
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
@@ -1213,6 +1216,26 @@ struct LocalModelConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         baseURL = c.dflt(String.self, .baseURL, baseURL)
         model = c.dflt(String.self, .model, model)
+    }
+}
+
+/// Settings → Workflow → Local Optimization(10-25 update)。
+struct LocalOptimizationConfig: Codable, Equatable {
+    /// 采集时不做 OCR,等充电且没人在用屏幕时再补(DeferredOCRWorker)。
+    var deferOCR: Bool = true
+    /// 能立刻让出来的内存低于这个数(GB)就不跑 OCR。以后的本地模型共用这道闸。
+    var minFreeMemoryGB: Double = 2
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case deferOCR = "defer_ocr"
+        case minFreeMemoryGB = "min_free_memory_gb"
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        deferOCR = c.dflt(Bool.self, .deferOCR, deferOCR)
+        minFreeMemoryGB = c.dflt(Double.self, .minFreeMemoryGB, minFreeMemoryGB)
     }
 }
 

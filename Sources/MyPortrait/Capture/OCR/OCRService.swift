@@ -75,6 +75,11 @@ struct OCRService: Sendable {
         return result
     }
 
+    /// 不查缓存的 OCR(DeferredOCRWorker 用:补的是硬盘上的旧帧,缓存 key 里的焦点信息已不在)。
+    static func recognizeUncached(image: CGImage, config: CaptureConfig) async throws -> OCRResult {
+        try await performOCR(on: toGrayscale(image) ?? image, config: config)
+    }
+
     // MARK: - 私有
 
     private static func performOCR(
