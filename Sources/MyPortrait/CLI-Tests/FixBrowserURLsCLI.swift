@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-/// 维护 CLI:`--fix-browser-urls [--apply | --rollback]`
+/// 维护 CLI:`--fix-browser-urls [--from-next] [--apply | --rollback]`
 ///
 /// **用 OCR 到的地址栏修正浏览器帧的 URL / 标题。** 焦点缓存原先只在切 app 时刷新,
 /// 同一个浏览器里换标签页,整段帧记的都是上一页的标题和 URL(09-08 已修采集侧,
@@ -19,6 +19,17 @@ import GRDB
 ///      (只对 Safari 生效)。
 ///   5. 「正在播放」浮窗盖住地址栏中段,OCR 只读到候选的前半截(候选右侧紧挨着
 ///      非 URL 的词,或候选以 `/c` 截断)→ 只写域名,不写截断的路径。`file://` 不适用。
+///
+/// `--from-next`:**空 URL 帧沿用紧接着的下一帧的 URL**(10-25 update)。切进浏览器那一瞬
+/// 焦点缓存还是上一个 app 的,帧的 URL / 标题留空,约 0.6s 后的下一帧才有(采集侧 10-25 已修,
+/// 这里洗存量)。从后往前扫,连着几帧空的会一路接上。条件全满足才改:
+///   1. 下一帧同 app、相隔 ≤ 2s、URL 非空;
+///   2. 下一帧 URL 的标识(http(s) 取域名去 www.,别的取去掉协议的前 30 个字符;小写、去空格)
+///      出现在本帧 OCR 全文里 —— 地址栏对得上,防止切过来时停在另一个标签页、下一帧才换页;
+///   3. 本帧 URL 为空;或本帧 URL 是上面那次 OCR 清洗补的(清洗前为空)、是网页(http(s)),
+///      和下一帧同域名但不完全一样(OCR 读的地址栏常被截断),且下一帧的 URL 是采集时 AX 读到的
+///      (没被那次清洗改过,或本轮刚从 AX 读到的帧接过来)→ 换成下一帧的完整 URL。
+/// 标题原本为空的一并取下一帧的标题。备份表 `frames_url_fill_backup`,`--from-next --rollback` 还原。
 ///
 /// 默认 **dry-run**:打印统计 + 样例,完整清单写到
 /// `~/.portrait/logs/fix-browser-urls-dryrun.tsv`。`--apply` 前把受影响行的旧值存进
@@ -42,9 +53,9 @@ enum FixBrowserURLsCLI {
         pattern: #"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(/\S*)?$"#, options: [.caseInsensitive])
     private static let fileRegex = try! NSRegularExpression(pattern: #"^file:/"#, options: [.caseInsensitive])
 
-    static func run(apply: Bool, rollback: Bool) {
+    static func run(apply: Bool, rollback: Bool, fromNext: Bool = false) {
         let state = ExitState()
-        print("=== fix-browser-urls (\(rollback ? "ROLLBACK" : apply ? "APPLY" : "dry-run")) ===")
+        print("=== fix-browser-urls\(fromNext ? " --from-next" : "") (\(rollback ? "ROLLBACK" : apply ? "APPLY" : "dry-run")) ===")
         fflush(stdout)
 
         let dbImpl: PortraitDBImpl
@@ -54,10 +65,11 @@ enum FixBrowserURLsCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                if rollback { try await doRollback(pool); return }
-                let proposals = try await scan(pool)
-                report(proposals)
-                if apply { try await doApply(pool, proposals) }
+                let table = fromNext ? "frames_url_fill_backup" : "frames_url_fix_backup"
+                if rollback { try await doRollback(pool, table: table); return }
+                let proposals = try await (fromNext ? scanFromNext(pool) : scan(pool))
+                report(proposals, kinds: fromNext ? ["refine_cleaned", "fill_from_next"] : ["host_mismatch", "fill_empty"])
+                if apply { try await doApply(pool, proposals, table: table) }
             } catch {
                 print("ERROR: \(error)"); state.code = 1
             }
@@ -135,6 +147,78 @@ enum FixBrowserURLsCLI {
         for k in stats.keys.sorted() { print("\(pad(k, 30))\(stats[k]!)") }
         print("吸附了 \(snapped) 帧(OCR 域名读错,靠已知域名词表纠正)")
         return proposals
+    }
+
+    private static let fillGapMs: Int64 = 2000
+
+    private static func scanFromNext(_ pool: DatabasePool) async throws -> [Proposal] {
+        let (proposals, stats): ([Proposal], [String: Int]) = try await pool.read { db in
+            // 上面那次 OCR 清洗改过的帧(备份表在才有);清洗前 URL 为空的另记下它们清洗前的标题。
+            var touched: Set<Int64> = []
+            var cleanedTitle: [Int64: String?] = [:]
+            if try db.tableExists("frames_url_fix_backup") {
+                for r in try Row.fetchAll(db, sql: "SELECT frame_id, window_name, browser_url FROM frames_url_fix_backup") {
+                    let id: Int64 = r["frame_id"]
+                    touched.insert(id)
+                    if ((r["browser_url"] as String?) ?? "").isEmpty { cleanedTitle[id] = r["window_name"] as String? }
+                }
+            }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, timestamp_ms, app_name, window_name, browser_url FROM frames ORDER BY timestamp_ms, id
+                """)
+            let ids: [Int64] = rows.map { $0["id"] }
+            let ts: [Int64] = rows.map { $0["timestamp_ms"] }
+            let apps: [String?] = rows.map { $0["app_name"] }
+            var urls: [String] = rows.map { ($0["browser_url"] as String?) ?? "" }
+            var titles: [String?] = rows.map { $0["window_name"] }
+            var fromAX: [Bool] = ids.map { !touched.contains($0) }
+            var proposals: [Proposal] = []
+            var stats: [String: Int] = [:]
+            for i in stride(from: rows.count - 2, through: 0, by: -1) {
+                let next = urls[i + 1], cur = urls[i]
+                guard !next.isEmpty, next != cur, let app = apps[i], app == apps[i + 1],
+                      ts[i + 1] - ts[i] <= fillGapMs else { continue }
+                let cleaned = cleanedTitle[ids[i]]
+                let kind: String
+                if cur.isEmpty { kind = "fill_from_next" }
+                else if cleaned != nil, fromAX[i + 1], next.lowercased().hasPrefix("http"), host(cur) == host(next) {
+                    kind = "refine_cleaned"
+                }
+                else { continue }
+                let text = try String.fetchOne(db, sql: """
+                    SELECT COALESCE(full_text, ocr_backfill_text, '') FROM frames WHERE id = :id
+                    """, arguments: ["id": ids[i]]) ?? ""
+                guard text.lowercased().replacingOccurrences(of: " ", with: "").contains(urlMark(next)) else {
+                    stats["\(app)|\(kind)|ocr_mismatch", default: 0] += 1; continue
+                }
+                let titleWasEmpty = (titles[i] ?? "").isEmpty || (cleaned.map { ($0 ?? "").isEmpty } ?? false)
+                let newTitle = titleWasEmpty ? titles[i + 1] : titles[i]
+                proposals.append(Proposal(id: ids[i], app: app, oldTitle: titles[i], oldUrl: urls[i],
+                                          newTitle: newTitle, newUrl: next, kind: kind))
+                stats["\(app)|\(kind)", default: 0] += 1
+                urls[i] = next
+                titles[i] = newTitle
+                fromAX[i] = fromAX[i + 1]
+            }
+            return (proposals, stats)
+        }
+        print("\n结果                                    帧数")
+        for k in stats.keys.sorted() { print("\(pad(k, 44))\(stats[k]!)") }
+        return proposals
+    }
+
+    /// 地址栏里认得出这个 URL 的那段字:http(s) 取域名(去 www.),别的(file:// 等)取去掉
+    /// 协议、解码后的前 30 个字符;小写、去空格。
+    private static func urlMark(_ u: String) -> String {
+        let lower = u.lowercased()
+        let m: String
+        if let r = lower.range(of: #"^https?://(www\.)?[^/:?#]+"#, options: .regularExpression) {
+            m = String(lower[r]).replacingOccurrences(of: #"^https?://(www\.)?"#, with: "", options: .regularExpression)
+        } else {
+            let rest = u.replacingOccurrences(of: #"^[a-zA-Z]+://"#, with: "", options: .regularExpression)
+            m = String((rest.removingPercentEncoding ?? rest).prefix(30)).lowercased()
+        }
+        return m.replacingOccurrences(of: " ", with: "")
     }
 
     /// OCR 域名不在已知词表里时,找一个词表里的域名吸附过去:去点相等(如
@@ -286,9 +370,9 @@ enum FixBrowserURLsCLI {
 
     // MARK: - 报告 / 写库
 
-    private static func report(_ proposals: [Proposal]) {
+    private static func report(_ proposals: [Proposal], kinds: [String]) {
         print("\n拟改 \(proposals.count) 帧。样例(每类前 8 条):")
-        for kind in ["host_mismatch", "fill_empty"] {
+        for kind in kinds {
             for p in proposals.filter({ $0.kind == kind }).prefix(8) {
                 print("  #\(p.id) \(p.app) \(kind)\n     \(p.oldUrl ?? "∅")  →  \(p.newUrl)\n     \(p.oldTitle ?? "∅")  →  \(p.newTitle ?? "∅")")
             }
@@ -304,11 +388,11 @@ enum FixBrowserURLsCLI {
         print("\n完整清单:\(out.path)")
     }
 
-    private static func doApply(_ pool: DatabasePool, _ proposals: [Proposal]) async throws {
+    private static func doApply(_ pool: DatabasePool, _ proposals: [Proposal], table: String) async throws {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         try await pool.write { db in
             try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS frames_url_fix_backup (
+                CREATE TABLE IF NOT EXISTS \(table) (
                     frame_id INTEGER PRIMARY KEY, window_name TEXT, browser_url TEXT, fixed_at_ms INTEGER NOT NULL)
                 """)
         }
@@ -317,7 +401,7 @@ enum FixBrowserURLsCLI {
             try await pool.write { db in
                 for p in chunk {
                     try db.execute(sql: """
-                        INSERT OR IGNORE INTO frames_url_fix_backup (frame_id, window_name, browser_url, fixed_at_ms)
+                        INSERT OR IGNORE INTO \(table) (frame_id, window_name, browser_url, fixed_at_ms)
                         VALUES (:id, :title, :url, :now)
                         """, arguments: ["id": p.id, "title": p.oldTitle, "url": p.oldUrl, "now": nowMs])
                     try db.execute(sql: "UPDATE frames SET browser_url = :url, window_name = :title WHERE id = :id",
@@ -327,18 +411,18 @@ enum FixBrowserURLsCLI {
             done += chunk.count
             print("  已改 \(done)/\(proposals.count)"); fflush(stdout)
         }
-        print("完成。回滚:--fix-browser-urls --rollback")
+        print("完成。回滚:--fix-browser-urls\(table == "frames_url_fill_backup" ? " --from-next" : "") --rollback")
     }
 
-    private static func doRollback(_ pool: DatabasePool) async throws {
+    private static func doRollback(_ pool: DatabasePool, table: String) async throws {
         let n = try await pool.write { db -> Int in
-            let rows = try Row.fetchAll(db, sql: "SELECT frame_id, window_name, browser_url FROM frames_url_fix_backup")
+            let rows = try Row.fetchAll(db, sql: "SELECT frame_id, window_name, browser_url FROM \(table)")
             for r in rows {
                 let id: Int64 = r["frame_id"]
                 try db.execute(sql: "UPDATE frames SET browser_url = :url, window_name = :title WHERE id = :id",
                                arguments: ["url": r["browser_url"] as String?, "title": r["window_name"] as String?, "id": id])
             }
-            try db.execute(sql: "DROP TABLE frames_url_fix_backup")
+            try db.execute(sql: "DROP TABLE \(table)")
             return rows.count
         }
         print("已从备份还原 \(n) 帧,备份表已删。")
