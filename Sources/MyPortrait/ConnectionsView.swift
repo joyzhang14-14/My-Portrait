@@ -766,7 +766,7 @@ struct ConnectionsView: View {
         case "deepseek":    return "The **cheapest** pay-per-use option. Paste a key from your DeepSeek account."
         case "ollama":      return "Run models **on this Mac** — free, and nothing goes online. Needs the Ollama app installed."
         case "local-model": return "Use a model server **you run yourself** — LM Studio, llama.cpp, vLLM or anything OpenAI-compatible. Enter its address and model name."
-        case "premium":   return "**Free compute provided by Joy**, with early access to many of My Portrait's advanced features; your data is used only to train better models, nothing else."
+        case "premium":   return "**Free compute provided by Joy**, with early access to many of My Portrait's advanced features."
         default: return "Connect this integration to your AI."
         }
     }
