@@ -1128,6 +1128,13 @@ enum DBSchema {
             try db.execute(sql: "ALTER TABLE frames ADD COLUMN focus_state TEXT")
         }
 
+        // 画面上露出来的普通窗口(10-24 update):JSON 数组,前 → 后,每项
+        //   {app, left, top, width, height, visible};坐标归一化、原点左上,和 ocr_words_json 同口径。
+        //   分屏 / 并排时 OCR 文字按坐标归到所在窗口的 app。存量帧为 NULL。
+        m.registerMigration("v46_frames_visible_windows") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN visible_windows TEXT")
+        }
+
         return m
     }
 }

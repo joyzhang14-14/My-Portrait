@@ -379,7 +379,8 @@ actor CaptureCoordinator {
             snapshotPath: url.path,
             captureTrigger: trigger.rawValue,
             visibleApp: front.visibleName,
-            focusState: focusState.rawValue
+            focusState: focusState.rawValue,
+            visibleWindows: front.visibleWindowsJSON
         )
 
         let frameId: Int64

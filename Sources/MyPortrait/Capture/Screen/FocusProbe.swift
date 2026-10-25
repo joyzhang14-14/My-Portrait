@@ -170,6 +170,8 @@ actor FocusProbe {
     /// 此时两个来源都不可信。
     /// Dock 有一个 layer 18 的全屏窗口 → 调度中心(Mission Control)或显示桌面开着:画面是 Dock 画的总览,
     /// 两个来源都还报总览前的 app。Dock 常驻的那个全屏窗口在 layer 20,不算。
+    /// 顺带记主屏上露出来的普通窗口(`visibleWindows`):从前往后叠,被前面窗口盖住的部分不算,
+    /// 分屏 / 平铺 / 并排时画面上同时有几个 app,OCR 文字按坐标落进哪个窗口就归哪个 app。
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
@@ -192,6 +194,8 @@ actor FocusProbe {
             var activeHasOverlay = false
             var frontOffscreen = false
             var overviewOpen = false
+            var occupancy = ScreenOccupancy()
+            var visibleWindows: [VisibleWindow] = []
             for w in windows {   // 前 → 后排序
                 guard let pid = w[kCGWindowOwnerPID as String] as? pid_t,
                       (w[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01 else { continue }
@@ -215,6 +219,25 @@ actor FocusProbe {
                     }
                 }
                 if pid == activePid { activeHasWindow = true }
+                if screenArea > 0, let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
+                    let rect = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
+                                      width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+                        .intersection(screen)
+                    let share = rect.isNull ? 0 : occupancy.cover(
+                        CGRect(x: (rect.minX - screen.minX) / screen.width,
+                               y: (rect.minY - screen.minY) / screen.height,
+                               width: rect.width / screen.width, height: rect.height / screen.height))
+                    if share >= VisibleWindow.minShare {
+                        let name = NSRunningApplication(processIdentifier: pid)?.localizedName
+                            ?? w[kCGWindowOwnerName as String] as? String ?? "?"
+                        visibleWindows.append(VisibleWindow(
+                            app: name,
+                            left: (rect.minX - screen.minX) / screen.width,
+                            top: (rect.minY - screen.minY) / screen.height,
+                            width: rect.width / screen.width, height: rect.height / screen.height,
+                            visible: share))
+                    }
+                }
             }
             if activeHasOverlay {
                 visiblePid = activePid
@@ -234,7 +257,8 @@ actor FocusProbe {
                 visiblePid: visiblePid,
                 activeHasWindow: activeHasWindow,
                 frontOffscreen: frontOffscreen,
-                overviewOpen: overviewOpen
+                overviewOpen: overviewOpen,
+                visibleWindows: visibleWindows
             )
         }
     }
@@ -643,11 +667,62 @@ struct FrontReading: Sendable {
     let frontOffscreen: Bool
     /// 调度中心 / 显示桌面开着(Dock 的 layer 18 全屏窗口在屏上)。
     let overviewOpen: Bool
+    /// 主屏上露出来的普通窗口,前 → 后。
+    let visibleWindows: [VisibleWindow]
+
+    /// 写进 `frames.visible_windows` 的 JSON。
+    var visibleWindowsJSON: String? {
+        (try? JSONEncoder().encode(visibleWindows)).flatMap { String(data: $0, encoding: .utf8) }
+    }
 
     /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换)。
     /// 激活 app 屏上有窗口却和画面最前不是同一个 → 正在切换,两边都不可信。
     /// 最前窗口在屏幕外 → 正在切桌面;调度中心开着 → 画面是总览。这两种两边一致也不算稳定。
     var isSettled: Bool { !frontOffscreen && !overviewOpen && (visiblePid == activePid || !activeHasWindow) }
+}
+
+/// 主屏上露出来的一个普通窗口。坐标是窗口在主屏内的部分,按屏宽高归一化、原点左上,
+/// 和 `ocr_words_json` 的词框同一口径;`visible` = 没被前面窗口盖住的面积占整屏的比例。
+struct VisibleWindow: Codable, Sendable {
+    /// 露出不到屏幕 10% 的窗口不记(被盖住的、贴边的小窗)。
+    static let minShare: CGFloat = 0.1
+
+    let app: String
+    let left: CGFloat
+    let top: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    let visible: CGFloat
+
+    init(app: String, left: CGFloat, top: CGFloat, width: CGFloat, height: CGFloat, visible: CGFloat) {
+        func r(_ v: CGFloat) -> CGFloat { (v * 1000).rounded() / 1000 }
+        self.app = app
+        self.left = r(left); self.top = r(top); self.width = r(width); self.height = r(height)
+        self.visible = r(visible)
+    }
+}
+
+/// 从前往后叠窗口时记哪些地方已被盖住:把屏幕切成 64×40 格,格子中心落在窗口里就算盖住。
+private struct ScreenOccupancy {
+    private static let cols = 64, rows = 40
+    private var covered = [Bool](repeating: false, count: cols * rows)
+
+    /// 盖上一个窗口(归一化坐标),返回它新盖住(即露出来)的面积占整屏的比例。
+    mutating func cover(_ r: CGRect) -> CGFloat {
+        let c0 = max(0, Int((r.minX * CGFloat(Self.cols)).rounded()))
+        let c1 = min(Self.cols, Int((r.maxX * CGFloat(Self.cols)).rounded()))
+        let r0 = max(0, Int((r.minY * CGFloat(Self.rows)).rounded()))
+        let r1 = min(Self.rows, Int((r.maxY * CGFloat(Self.rows)).rounded()))
+        guard c0 < c1, r0 < r1 else { return 0 }
+        var fresh = 0
+        for row in r0..<r1 {
+            for col in c0..<c1 where !covered[row * Self.cols + col] {
+                covered[row * Self.cols + col] = true
+                fresh += 1
+            }
+        }
+        return CGFloat(fresh) / CGFloat(Self.cols * Self.rows)
+    }
 }
 
 /// 帧的焦点状态,写进 `frames.focus_state`。

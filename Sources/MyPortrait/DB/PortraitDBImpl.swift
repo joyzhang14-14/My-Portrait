@@ -888,7 +888,8 @@ private extension FrameRow {
             textSource: nil,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
             visibleApp: record.visibleApp,
-            focusState: record.focusState
+            focusState: record.focusState,
+            visibleWindows: record.visibleWindows
         )
     }
 
@@ -912,7 +913,8 @@ private extension FrameRow {
             textSource: ocr?.textSource,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
             visibleApp: record.visibleApp,
-            focusState: record.focusState
+            focusState: record.focusState,
+            visibleWindows: record.visibleWindows
         )
     }
 }
