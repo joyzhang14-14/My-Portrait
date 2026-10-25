@@ -172,6 +172,9 @@ actor FocusProbe {
     /// 两个来源都还报总览前的 app。Dock 常驻的那个全屏窗口在 layer 20,不算。
     /// 顺带记主屏上露出来的普通窗口(`visibleWindows`):从前往后叠,被前面窗口盖住的部分不算,
     /// 分屏 / 平铺 / 并排时画面上同时有几个 app,OCR 文字按坐标落进哪个窗口就归哪个 app。
+    /// 不到屏幕 10% 的窗口(全屏 Chrome 的工具栏条这类)不参与遮挡计算。
+    /// 激活 app 的窗口没被别的 app 盖住(`activeUnoccluded`)时,窗口前后顺序不影响画面:分屏里点左边一格,
+    /// 右边那格仍排在最前,但两格都完整露着。
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
@@ -191,6 +194,7 @@ actor FocusProbe {
             var visiblePid: pid_t?
             var visibleOwner: String?
             var activeHasWindow = false
+            var activeUnoccluded = false
             var activeHasOverlay = false
             var frontOffscreen = false
             var overviewOpen = false
@@ -223,10 +227,15 @@ actor FocusProbe {
                     let rect = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
                                       width: b["Width"] ?? 0, height: b["Height"] ?? 0)
                         .intersection(screen)
-                    let share = rect.isNull ? 0 : occupancy.cover(
+                    let area = rect.isNull ? 0 : rect.width * rect.height / screenArea
+                    guard area >= VisibleWindow.minShare else { continue }
+                    let cover = occupancy.cover(
                         CGRect(x: (rect.minX - screen.minX) / screen.width,
                                y: (rect.minY - screen.minY) / screen.height,
-                               width: rect.width / screen.width, height: rect.height / screen.height))
+                               width: rect.width / screen.width, height: rect.height / screen.height),
+                        pid: pid)
+                    if pid == activePid, cover.byOthers <= 0.05 * cover.area { activeUnoccluded = true }
+                    let share = cover.fresh
                     if share >= VisibleWindow.minShare {
                         let name = NSRunningApplication(processIdentifier: pid)?.localizedName
                             ?? w[kCGWindowOwnerName as String] as? String ?? "?"
@@ -256,6 +265,7 @@ actor FocusProbe {
                 visibleName: visibleName,
                 visiblePid: visiblePid,
                 activeHasWindow: activeHasWindow,
+                activeUnoccluded: activeUnoccluded,
                 frontOffscreen: frontOffscreen,
                 overviewOpen: overviewOpen,
                 visibleWindows: visibleWindows
@@ -663,6 +673,8 @@ struct FrontReading: Sendable {
     let visiblePid: pid_t?
     /// 激活 app 在屏上有没有自己的普通窗口。最小化 / 关窗 / Finder 无窗口时为 false。
     let activeHasWindow: Bool
+    /// 激活 app 有一个 ≥10% 屏的窗口几乎没被别的 app 盖住(≤5%)。分屏 / 并排时它不在最前也完整露着。
+    let activeUnoccluded: Bool
     /// 最前面的普通窗口不在任何显示器上(正在切桌面)。
     let frontOffscreen: Bool
     /// 调度中心 / 显示桌面开着(Dock 的 layer 18 全屏窗口在屏上)。
@@ -675,10 +687,13 @@ struct FrontReading: Sendable {
         (try? JSONEncoder().encode(visibleWindows)).flatMap { String(data: $0, encoding: .utf8) }
     }
 
-    /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换)。
-    /// 激活 app 屏上有窗口却和画面最前不是同一个 → 正在切换,两边都不可信。
+    /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换),
+    /// 或激活 app 的窗口没被别的 app 盖住(分屏 / 并排,顺序不影响画面)。
+    /// 激活 app 的窗口被别的 app 盖着、而那个 app 在最前 → 正在切换,两边都不可信。
     /// 最前窗口在屏幕外 → 正在切桌面;调度中心开着 → 画面是总览。这两种两边一致也不算稳定。
-    var isSettled: Bool { !frontOffscreen && !overviewOpen && (visiblePid == activePid || !activeHasWindow) }
+    var isSettled: Bool {
+        !frontOffscreen && !overviewOpen && (visiblePid == activePid || activeUnoccluded || !activeHasWindow)
+    }
 }
 
 /// 主屏上露出来的一个普通窗口。坐标是窗口在主屏内的部分,按屏宽高归一化、原点左上,
@@ -702,26 +717,33 @@ struct VisibleWindow: Codable, Sendable {
     }
 }
 
-/// 从前往后叠窗口时记哪些地方已被盖住:把屏幕切成 64×40 格,格子中心落在窗口里就算盖住。
+/// 从前往后叠窗口时记哪些地方已被哪个进程的窗口盖住:把屏幕切成 64×40 格,格子中心落在窗口里就算盖住。
 private struct ScreenOccupancy {
     private static let cols = 64, rows = 40
-    private var covered = [Bool](repeating: false, count: cols * rows)
+    private var owner = [pid_t](repeating: 0, count: cols * rows)
 
-    /// 盖上一个窗口(归一化坐标),返回它新盖住(即露出来)的面积占整屏的比例。
-    mutating func cover(_ r: CGRect) -> CGFloat {
+    /// 盖上一个窗口(归一化坐标)。面积都是占整屏的比例:
+    /// fresh = 新盖住(即露出来)的部分,area = 窗口本身,byOthers = 已被别的进程的窗口盖住的部分。
+    mutating func cover(_ r: CGRect, pid: pid_t) -> (fresh: CGFloat, area: CGFloat, byOthers: CGFloat) {
         let c0 = max(0, Int((r.minX * CGFloat(Self.cols)).rounded()))
         let c1 = min(Self.cols, Int((r.maxX * CGFloat(Self.cols)).rounded()))
         let r0 = max(0, Int((r.minY * CGFloat(Self.rows)).rounded()))
         let r1 = min(Self.rows, Int((r.maxY * CGFloat(Self.rows)).rounded()))
-        guard c0 < c1, r0 < r1 else { return 0 }
-        var fresh = 0
+        guard c0 < c1, r0 < r1 else { return (0, 0, 0) }
+        var fresh = 0, others = 0
         for row in r0..<r1 {
-            for col in c0..<c1 where !covered[row * Self.cols + col] {
-                covered[row * Self.cols + col] = true
-                fresh += 1
+            for col in c0..<c1 {
+                let i = row * Self.cols + col
+                if owner[i] == 0 {
+                    owner[i] = pid
+                    fresh += 1
+                } else if owner[i] != pid {
+                    others += 1
+                }
             }
         }
-        return CGFloat(fresh) / CGFloat(Self.cols * Self.rows)
+        let total = CGFloat(Self.cols * Self.rows)
+        return (CGFloat(fresh) / total, CGFloat((c1 - c0) * (r1 - r0)) / total, CGFloat(others) / total)
     }
 }
 
@@ -729,7 +751,7 @@ private struct ScreenOccupancy {
 enum FrameFocusState: String, Sendable {
     /// 激活 app = 画面最前 app。
     case normal
-    /// 截图时前台正在切换(激活 app 屏上有窗口却不是画面最前,或最前窗口在屏幕外,或调度中心开着)。
+    /// 截图时前台正在切换(激活 app 的窗口被画面最前的 app 盖着,或最前窗口在屏幕外,或调度中心开着)。
     /// app_name 不可信。
     case switching
     /// 激活 app 没有窗口,画面内容属于 `visible_app`。app_name 仍是激活 app(菜单栏)。
@@ -738,7 +760,7 @@ enum FrameFocusState: String, Sendable {
     /// 只看截图后那次读数:截图前再读一次只会多报(实测 44 帧里 42 帧画面已是新 app)。
     static func classify(_ r: FrontReading) -> FrameFocusState {
         if r.frontOffscreen || r.overviewOpen { return .switching }
-        if r.visiblePid == r.activePid { return .normal }
+        if r.visiblePid == r.activePid || r.activeUnoccluded { return .normal }
         return r.activeHasWindow ? .switching : .noWindow
     }
 }
