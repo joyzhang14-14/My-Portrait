@@ -168,6 +168,8 @@ actor FocusProbe {
     /// 最前面的 layer-0 窗口不和任何显示器相交 → 它属于别的桌面(Space),说明正在切桌面:
     /// 滑动全屏桌面时全屏 Chrome 的工具栏条、切桌面时被提前激活的 app 的窗口都会这样排在最前,
     /// 此时两个来源都不可信。
+    /// Dock 有一个 layer 18 的全屏窗口 → 调度中心(Mission Control)或显示桌面开着:画面是 Dock 画的总览,
+    /// 两个来源都还报总览前的 app。Dock 常驻的那个全屏窗口在 layer 20,不算。
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
     func liveFront() async -> FrontReading {
         await MainActor.run {
@@ -189,15 +191,17 @@ actor FocusProbe {
             var activeHasWindow = false
             var activeHasOverlay = false
             var frontOffscreen = false
+            var overviewOpen = false
             for w in windows {   // 前 → 后排序
                 guard let pid = w[kCGWindowOwnerPID as String] as? pid_t,
                       (w[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01 else { continue }
                 let layer = w[kCGWindowLayer as String] as? Int ?? 0
                 if layer != 0 {
-                    if pid == activePid, screenArea > 0,
+                    if screenArea > 0,
                        let b = w[kCGWindowBounds as String] as? [String: CGFloat],
                        (b["Width"] ?? 0) * (b["Height"] ?? 0) >= screenArea * 0.9 {
-                        activeHasOverlay = true
+                        if pid == activePid { activeHasOverlay = true }
+                        if layer == 18, w[kCGWindowOwnerName as String] as? String == "Dock" { overviewOpen = true }
                     }
                     continue
                 }
@@ -229,7 +233,8 @@ actor FocusProbe {
                 visibleName: visibleName,
                 visiblePid: visiblePid,
                 activeHasWindow: activeHasWindow,
-                frontOffscreen: frontOffscreen
+                frontOffscreen: frontOffscreen,
+                overviewOpen: overviewOpen
             )
         }
     }
@@ -636,18 +641,20 @@ struct FrontReading: Sendable {
     let activeHasWindow: Bool
     /// 最前面的普通窗口不在任何显示器上(正在切桌面)。
     let frontOffscreen: Bool
+    /// 调度中心 / 显示桌面开着(Dock 的 layer 18 全屏窗口在屏上)。
+    let overviewOpen: Bool
 
     /// 两边一致,或激活 app 本来就没有窗口(这种分歧会一直持续,不是切换)。
     /// 激活 app 屏上有窗口却和画面最前不是同一个 → 正在切换,两边都不可信。
-    /// 最前窗口在屏幕外 → 正在切桌面,两边一致也不算稳定。
-    var isSettled: Bool { !frontOffscreen && (visiblePid == activePid || !activeHasWindow) }
+    /// 最前窗口在屏幕外 → 正在切桌面;调度中心开着 → 画面是总览。这两种两边一致也不算稳定。
+    var isSettled: Bool { !frontOffscreen && !overviewOpen && (visiblePid == activePid || !activeHasWindow) }
 }
 
 /// 帧的焦点状态,写进 `frames.focus_state`。
 enum FrameFocusState: String, Sendable {
     /// 激活 app = 画面最前 app。
     case normal
-    /// 截图时前台正在切换(激活 app 屏上有窗口却不是画面最前,或最前窗口在屏幕外)。
+    /// 截图时前台正在切换(激活 app 屏上有窗口却不是画面最前,或最前窗口在屏幕外,或调度中心开着)。
     /// app_name 不可信。
     case switching
     /// 激活 app 没有窗口,画面内容属于 `visible_app`。app_name 仍是激活 app(菜单栏)。
@@ -655,7 +662,7 @@ enum FrameFocusState: String, Sendable {
 
     /// 只看截图后那次读数:截图前再读一次只会多报(实测 44 帧里 42 帧画面已是新 app)。
     static func classify(_ r: FrontReading) -> FrameFocusState {
-        if r.frontOffscreen { return .switching }
+        if r.frontOffscreen || r.overviewOpen { return .switching }
         if r.visiblePid == r.activePid { return .normal }
         return r.activeHasWindow ? .switching : .noWindow
     }
