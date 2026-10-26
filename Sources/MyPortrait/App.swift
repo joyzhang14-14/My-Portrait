@@ -112,11 +112,11 @@ struct MyPortraitApp: App {
             CleanVoiceprintsCLI.run(apply: args.contains("--apply"), threshold: thr)
             // run() exits the process internally.
         }
-        // 维护 CLI: `--fix-browser-urls [--from-next] [--apply | --rollback]` 用 OCR 到的地址栏
-        // (--from-next:下一帧的 URL)修正浏览器帧的 URL / 标题。默认 dry-run。
+        // 维护 CLI: `--fix-browser-urls [--from-next | --from-similar] [--apply | --rollback]` 用 OCR 到的地址栏
+        // (--from-next:下一帧的 URL;--from-similar:画面几乎一样的后续帧的 URL)修正浏览器帧的 URL / 标题。默认 dry-run。
         if args.contains("--fix-browser-urls") {
             FixBrowserURLsCLI.run(apply: args.contains("--apply"), rollback: args.contains("--rollback"),
-                                  fromNext: args.contains("--from-next"))
+                                  fromNext: args.contains("--from-next"), fromSimilar: args.contains("--from-similar"))
             // run() exits the process internally.
         }
         // 一次性数据修复:按声纹 cosine 整理被 bug 版本打乱的说话人簇。

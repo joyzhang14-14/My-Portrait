@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-/// 维护 CLI:`--fix-browser-urls [--from-next] [--apply | --rollback]`
+/// 维护 CLI:`--fix-browser-urls [--from-next | --from-similar] [--apply | --rollback]`
 ///
 /// **用 OCR 到的地址栏修正浏览器帧的 URL / 标题。** 焦点缓存原先只在切 app 时刷新,
 /// 同一个浏览器里换标签页,整段帧记的都是上一页的标题和 URL(09-08 已修采集侧,
@@ -31,6 +31,15 @@ import GRDB
 ///      (没被那次清洗改过,或本轮刚从 AX 读到的帧接过来)→ 换成下一帧的完整 URL。
 /// 标题原本为空的一并取下一帧的标题。备份表 `frames_url_fill_backup`,`--from-next --rollback` 还原。
 ///
+/// `--from-similar`:**空 URL 帧沿用画面几乎一样的后续帧的 URL**(10-26 update,`--from-next` 之后跑)。
+/// 切进浏览器后停在同一页、隔了几秒下一帧才有 URL 的那些帧,`--from-next` 的 2s 接不上。条件:
+///   1. 往后 60s 内、中间不隔别的 app,同 app 第一张 URL 非空的帧;
+///   2. 两帧 OCR 全文的词集(≥2 个字符的词,小写)Jaccard ≥ 0.8;
+///   3. 那一帧的 URL 是采集时 AX 读到的;是上面那次 OCR 清洗补的,就要它的标识(同 `--from-next`)出现在本帧
+///      OCR 全文里 —— 清洗读错的地址栏(例:历史页被读成别的站)不往前传。
+/// 从后往前扫,接上的帧可以再接给更早的帧。标题原本为空的一并取那一帧的标题。
+/// 备份表 `frames_url_sim_backup`,`--from-similar --rollback` 还原。
+///
 /// 默认 **dry-run**:打印统计 + 样例,完整清单写到
 /// `~/.portrait/logs/fix-browser-urls-dryrun.tsv`。`--apply` 前把受影响行的旧值存进
 /// `frames_url_fix_backup`,`--rollback` 从那张表整体还原。frames 有 FTS 触发器
@@ -53,9 +62,10 @@ enum FixBrowserURLsCLI {
         pattern: #"^(https?://)?([a-z0-9-]+\.)+[a-z]{2,}(:\d+)?(/\S*)?$"#, options: [.caseInsensitive])
     private static let fileRegex = try! NSRegularExpression(pattern: #"^file:/"#, options: [.caseInsensitive])
 
-    static func run(apply: Bool, rollback: Bool, fromNext: Bool = false) {
+    static func run(apply: Bool, rollback: Bool, fromNext: Bool = false, fromSimilar: Bool = false) {
         let state = ExitState()
-        print("=== fix-browser-urls\(fromNext ? " --from-next" : "") (\(rollback ? "ROLLBACK" : apply ? "APPLY" : "dry-run")) ===")
+        let flag = fromSimilar ? " --from-similar" : fromNext ? " --from-next" : ""
+        print("=== fix-browser-urls\(flag) (\(rollback ? "ROLLBACK" : apply ? "APPLY" : "dry-run")) ===")
         fflush(stdout)
 
         let dbImpl: PortraitDBImpl
@@ -65,11 +75,12 @@ enum FixBrowserURLsCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                let table = fromNext ? "frames_url_fill_backup" : "frames_url_fix_backup"
+                let table = fromSimilar ? "frames_url_sim_backup" : fromNext ? "frames_url_fill_backup" : "frames_url_fix_backup"
                 if rollback { try await doRollback(pool, table: table); return }
-                let proposals = try await (fromNext ? scanFromNext(pool) : scan(pool))
-                report(proposals, kinds: fromNext ? ["refine_cleaned", "fill_from_next"] : ["host_mismatch", "fill_empty"])
-                if apply { try await doApply(pool, proposals, table: table) }
+                let proposals = try await (fromSimilar ? scanFromSimilar(pool) : fromNext ? scanFromNext(pool) : scan(pool))
+                report(proposals, kinds: fromSimilar ? ["fill_from_similar"]
+                       : fromNext ? ["refine_cleaned", "fill_from_next"] : ["host_mismatch", "fill_empty"])
+                if apply { try await doApply(pool, proposals, table: table, flag: flag) }
             } catch {
                 print("ERROR: \(error)"); state.code = 1
             }
@@ -199,6 +210,67 @@ enum FixBrowserURLsCLI {
                 urls[i] = next
                 titles[i] = newTitle
                 fromAX[i] = fromAX[i + 1]
+            }
+            return (proposals, stats)
+        }
+        print("\n结果                                    帧数")
+        for k in stats.keys.sorted() { print("\(pad(k, 44))\(stats[k]!)") }
+        return proposals
+    }
+
+    private static let similarWindowMs: Int64 = 60_000
+    private static let similarMin = 0.8
+    private static let wordRegex = try! NSRegularExpression(pattern: #"\w{2,}"#)
+
+    private static func scanFromSimilar(_ pool: DatabasePool) async throws -> [Proposal] {
+        let (proposals, stats): ([Proposal], [String: Int]) = try await pool.read { db in
+            var touched: Set<Int64> = []
+            if try db.tableExists("frames_url_fix_backup") {
+                touched = Set(try Int64.fetchAll(db, sql: "SELECT frame_id FROM frames_url_fix_backup"))
+            }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, timestamp_ms, app_name, window_name, browser_url FROM frames ORDER BY timestamp_ms, id
+                """)
+            let ids: [Int64] = rows.map { $0["id"] }
+            let ts: [Int64] = rows.map { $0["timestamp_ms"] }
+            let apps: [String?] = rows.map { $0["app_name"] }
+            var urls: [String] = rows.map { ($0["browser_url"] as String?) ?? "" }
+            var titles: [String?] = rows.map { $0["window_name"] }
+            var fromAX: [Bool] = ids.map { !touched.contains($0) }
+            var cache: [Int: String] = [:]
+            func text(_ i: Int) throws -> String {
+                if let t = cache[i] { return t }
+                let t = (try String.fetchOne(db, sql: """
+                    SELECT COALESCE(full_text, ocr_backfill_text, '') FROM frames WHERE id = :id
+                    """, arguments: ["id": ids[i]]) ?? "").lowercased()
+                cache[i] = t
+                return t
+            }
+            func words(_ i: Int) throws -> Set<String> {
+                let t = try text(i)
+                return Set(wordRegex.matches(in: t, range: NSRange(t.startIndex..., in: t))
+                    .compactMap { Range($0.range, in: t).map { String(t[$0]) } })
+            }
+            var proposals: [Proposal] = []
+            var stats: [String: Int] = [:]
+            for i in stride(from: rows.count - 2, through: 0, by: -1) {
+                guard urls[i].isEmpty, let app = apps[i] else { continue }
+                var j = i + 1
+                while j < rows.count, apps[j] == app, ts[j] - ts[i] <= similarWindowMs, urls[j].isEmpty { j += 1 }
+                guard j < rows.count, apps[j] == app, ts[j] - ts[i] <= similarWindowMs else { continue }
+                let a = try words(i), b = try words(j)
+                let sim = Double(a.intersection(b).count) / Double(max(a.union(b).count, 1))
+                guard sim >= similarMin else { stats["\(app)|screen_differs", default: 0] += 1; continue }
+                guard try fromAX[j] || text(i).replacingOccurrences(of: " ", with: "").contains(urlMark(urls[j])) else {
+                    stats["\(app)|cleaned_url_ocr_mismatch", default: 0] += 1; continue
+                }
+                let newTitle = (titles[i] ?? "").isEmpty ? titles[j] : titles[i]
+                proposals.append(Proposal(id: ids[i], app: app, oldTitle: titles[i], oldUrl: urls[i],
+                                          newTitle: newTitle, newUrl: urls[j], kind: "fill_from_similar"))
+                stats["\(app)|fill_from_similar", default: 0] += 1
+                urls[i] = urls[j]
+                titles[i] = newTitle
+                fromAX[i] = fromAX[j]
             }
             return (proposals, stats)
         }
@@ -388,7 +460,7 @@ enum FixBrowserURLsCLI {
         print("\n完整清单:\(out.path)")
     }
 
-    private static func doApply(_ pool: DatabasePool, _ proposals: [Proposal], table: String) async throws {
+    private static func doApply(_ pool: DatabasePool, _ proposals: [Proposal], table: String, flag: String) async throws {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         try await pool.write { db in
             try db.execute(sql: """
@@ -411,7 +483,7 @@ enum FixBrowserURLsCLI {
             done += chunk.count
             print("  已改 \(done)/\(proposals.count)"); fflush(stdout)
         }
-        print("完成。回滚:--fix-browser-urls\(table == "frames_url_fill_backup" ? " --from-next" : "") --rollback")
+        print("完成。回滚:--fix-browser-urls\(flag) --rollback")
     }
 
     private static func doRollback(_ pool: DatabasePool, table: String) async throws {
