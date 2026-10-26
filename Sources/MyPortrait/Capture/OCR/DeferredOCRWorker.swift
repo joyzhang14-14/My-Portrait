@@ -12,7 +12,7 @@ import os.log
 ///   - 5 分钟没有键盘鼠标操作(Mac mini 这类没有盖子的机器);
 ///   - 积压的图超过 5GB(兜底)。
 /// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
-/// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看充电 + 内存;Run now 只看内存。
+/// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看内存,马上补完。
 ///
 /// 每帧:OCR → 写 OCR 字段 → 按常规写一张 JPG 换掉 HEIC → 移出队列 → 删 HEIC。之后
 /// MP4 压缩、Premium 打包、时间轴看到的和采集时直接 OCR 的帧一样。每帧之前重判条件,
@@ -39,8 +39,6 @@ actor DeferredOCRWorker {
 
     private var task: Task<Void, Never>?
     private var draining = false
-    /// Run now:不看充电 / 屏幕条件,只看内存,一直做到队列清空。
-    private var manual = false
     private var summary: (at: Date, count: Int, oldestMs: Int64?, bytes: Int64)?
     /// 只放自己拿过的防睡眠(别每 30 秒去碰一次 helper)。
     private var awake = false
@@ -66,11 +64,6 @@ actor DeferredOCRWorker {
         task = nil
     }
 
-    func runNow() {
-        manual = true
-        Task { await drain() }
-    }
-
     // MARK: - 主循环
 
     private func drain() async {
@@ -85,7 +78,7 @@ actor DeferredOCRWorker {
             guard gate == nil else { break }
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
             let frames = (try? await db.pendingOCRFrames(beforeMs: nowMs - Self.settleMs, limit: Self.batch)) ?? []
-            if frames.isEmpty { manual = false; break }
+            if frames.isEmpty { break }
             await holdAwake(true)
             for f in frames {
                 if done > 0, await checkGate(backlogBytes: s.bytes) != nil { break outer }
@@ -144,9 +137,8 @@ actor DeferredOCRWorker {
         if let level = SystemMemory.pressureLevel(), level > 1 { return "Memory pressure is high" }
         guard let avail = SystemMemory.availableBytes() else { return "Can't read free memory" }
         if avail < SystemMemory.minFreeBytes { return "Not enough free memory" }
-        if manual { return nil }
-        guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
         if !settings.deferOCR { return nil }
+        guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
         if PowerMonitor.isLidClosed || DisplayBrightness.isAtMinimum() { return nil }
         let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
         if idle >= Self.idleSeconds { return nil }
@@ -199,8 +191,6 @@ actor DeferredOCRWorker {
 @Observable
 final class DeferredOCRStatus {
     static let shared = DeferredOCRStatus()
-    /// Services 启动时填上。
-    var worker: DeferredOCRWorker?
     var running = false
     var waitingReason: String?
     var pendingCount = 0

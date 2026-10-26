@@ -14,17 +14,13 @@ struct LocalOptimizationView: View {
             SettingsCard(title: "Step 1 · Screen text") {
                 SettingsRow("Read screen text later",
                             description: "Keeps My Portrait light while you work.",
-                            info: "Screenshots are saved as they're taken, but the text on them is read later — while the Mac is charging and the screen isn't in use:\n\n• the screen brightness is at zero, or the lid is closed\n• no keyboard or mouse input for 5 minutes\n\nIf more than 5 GB of screenshots are waiting, it also runs whenever the Mac is charging.\n\nEvents, portrait and personality wait until the text of a time range has been read.",
+                            info: "Screenshots are saved as they're taken, but the text on them is read later — while the Mac is charging and the screen isn't in use:\n\n• the screen brightness is at zero, or the lid is closed\n• no keyboard or mouse input for 5 minutes\n\nIf more than 5 GB of screenshots are waiting, it also runs whenever the Mac is charging.\n\nTurn this off to read all waiting screenshots right away.\n\nEvents, portrait and personality wait until the text of a time range has been read.",
                             icon: "text.viewfinder") {
                     Toggle("", isOn: config.binding(\.localOptimization.deferOCR)).labelsHidden().toggleStyle(.switch)
                 }
                 SettingsDivider()
                 SettingsRow("Waiting screenshots", description: backlogText, icon: "photo.stack") {
-                    Button("Run now") {
-                        Task { await status.worker?.runNow() }
-                    }
-                    .font(.system(size: 11))
-                    .disabled(status.pendingCount == 0 || status.running)
+                    EmptyView()
                 }
             }
 
