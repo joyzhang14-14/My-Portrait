@@ -11,7 +11,7 @@ import os.log
 ///   - 屏幕亮度调到 0,或合盖;
 ///   - 5 分钟没有键盘鼠标操作(Mac mini 这类没有盖子的机器);
 ///   - 积压的图超过 5GB(兜底)。
-/// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于设置里的门槛
+/// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
 /// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看充电 + 内存;Run now 只看内存。
 ///
 /// 每帧:OCR → 写 OCR 字段 → 按常规写一张 JPG 换掉 HEIC → 移出队列 → 删 HEIC。之后
@@ -143,7 +143,7 @@ actor DeferredOCRWorker {
         let settings = await MainActor.run { ConfigStore.shared.current.localOptimization }
         if let level = SystemMemory.pressureLevel(), level > 1 { return "Memory pressure is high" }
         guard let avail = SystemMemory.availableBytes() else { return "Can't read free memory" }
-        if Double(avail) < settings.minFreeMemoryGB * 1_073_741_824 { return "Not enough free memory" }
+        if avail < SystemMemory.minFreeBytes { return "Not enough free memory" }
         if manual { return nil }
         guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
         if !settings.deferOCR { return nil }

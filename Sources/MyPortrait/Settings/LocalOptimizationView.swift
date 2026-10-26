@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Settings → Workflow → Local Optimization。Workflow 第 1 层(延后 OCR)的开关、
-/// 内存门槛和积压状态。状态由 DeferredOCRWorker 写进 DeferredOCRStatus。
+/// 内存门槛(固定值,只显示)和积压状态。状态由 DeferredOCRWorker 写进 DeferredOCRStatus。
 struct LocalOptimizationView: View {
     @State private var config = ConfigStore.shared
     @State private var status = DeferredOCRStatus.shared
@@ -32,10 +32,9 @@ struct LocalOptimizationView: View {
                 SettingsRow("Minimum free memory",
                             info: "Background work only starts when macOS reports normal memory pressure and at least this much memory can be freed right away. Compressed memory and swap don't count.",
                             icon: "memorychip") {
-                    Stepper(value: config.binding(\.localOptimization.minFreeMemoryGB), in: 0.5...32, step: 0.5) {
-                        Text(String(format: "%g GB", config.current.localOptimization.minFreeMemoryGB))
-                            .font(.system(size: 12).monospacedDigit())
-                    }
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(SystemMemory.minFreeBytes), countStyle: .memory))
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
             }
         }

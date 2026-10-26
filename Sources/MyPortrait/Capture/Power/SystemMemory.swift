@@ -8,6 +8,9 @@ import Foundation
 ///   - 能立刻让出来的内存 = 空闲(含预读)+ 不活跃 + 可清除。压缩器和 swap 里的不算。
 enum SystemMemory {
 
+    /// 能立刻让出来的内存低于这个数就不开跑后台重活。
+    static let minFreeBytes: UInt64 = 1536 * 1024 * 1024
+
     /// 能立刻让出来的字节数;读不到返回 nil。
     static func availableBytes() -> UInt64? {
         var stats = vm_statistics64()

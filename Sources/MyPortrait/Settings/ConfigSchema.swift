@@ -1223,19 +1223,15 @@ struct LocalModelConfig: Codable, Equatable {
 struct LocalOptimizationConfig: Codable, Equatable {
     /// 采集时不做 OCR,等充电且没人在用屏幕时再补(DeferredOCRWorker)。
     var deferOCR: Bool = true
-    /// 能立刻让出来的内存低于这个数(GB)就不跑 OCR。以后的本地模型共用这道闸。
-    var minFreeMemoryGB: Double = 2
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case deferOCR = "defer_ocr"
-        case minFreeMemoryGB = "min_free_memory_gb"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         deferOCR = c.dflt(Bool.self, .deferOCR, deferOCR)
-        minFreeMemoryGB = c.dflt(Double.self, .minFreeMemoryGB, minFreeMemoryGB)
     }
 }
 
