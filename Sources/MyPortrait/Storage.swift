@@ -56,6 +56,16 @@ enum Storage {
         rootURL.appendingPathComponent("metadata/transcript", isDirectory: true)
     }
 
+    /// 一段录音的转录副本位置,按文件名里的日期(`seg_YYYY-MM-DD…`)分目录。
+    /// 写入、搬家、隐私删除、保留清理都用它定位,不是录音段文件名时返回 nil。
+    static func transcriptURL(forAudio path: String) -> URL? {
+        let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        guard name.hasPrefix("seg_"), name.count >= 14 else { return nil }
+        let day = String(name.dropFirst(4).prefix(10))
+        return transcriptDir.appendingPathComponent(day, isDirectory: true)
+            .appendingPathComponent(name + ".transcript.json")
+    }
+
     /// Daily raw JSON logs (one file per day, batched at sleep).
     static var dailyLogsDir: URL { rootURL.appendingPathComponent("logs", isDirectory: true) }
 

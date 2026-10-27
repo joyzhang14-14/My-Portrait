@@ -608,6 +608,7 @@ struct TimelineDB: Sendable {
         // 必须走带分词器的 GRDB 连接,否则 DELETE 会触发器报错回滚。
         var doomedMedia: [String] = []
         var doomedAudio: [String] = []
+        var doomedTranscripts: [String] = []
         let r = withTokenizerWrite { db -> DeleteResult in
             var res = DeleteResult()
             // 先收集窗口内媒体文件路径 —— 事务提交后再删盘(文件删除无法回滚,
@@ -624,6 +625,8 @@ struct TimelineDB: Sendable {
                 """, arguments: ["ms": cutoffMs])
             doomedMedia = (snaps + mp4s).compactMap(AssetPath.resolve)
             doomedAudio = wavs.compactMap(AssetPath.resolve)
+            // 转录副本按文件名定位,录音文件已经不在了也照删(里面有转录全文)。
+            doomedTranscripts = wavs.compactMap { Storage.transcriptURL(forAudio: $0)?.path }
 
             try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms >= :ms",
                            arguments: ["ms": cutoffMs])
@@ -655,11 +658,9 @@ struct TimelineDB: Sendable {
         for p in doomedMedia { safeRemove(p) }
         for p in doomedAudio {
             safeRemove(p)
-            // 同时删 .meta.json / .transcript.json(同名兄弟,sidecar 里有转录全文)。
-            let base = URL(fileURLWithPath: p).deletingPathExtension()
-            safeRemove(base.appendingPathExtension("meta.json").path)
-            safeRemove(base.appendingPathExtension("transcript.json").path)
+            safeRemove(URL(fileURLWithPath: p).deletingPathExtension().appendingPathExtension("meta.json").path)
         }
+        for p in doomedTranscripts { safeRemove(p) }
         return result
     }
 

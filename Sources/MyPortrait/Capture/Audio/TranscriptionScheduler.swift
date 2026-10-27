@@ -688,10 +688,9 @@ actor TranscriptionScheduler {
         engine: String,
         transcribedAtMs: Int64
     ) {
-        let name = URL(fileURLWithPath: wavPath).deletingPathExtension().lastPathComponent
-        let dir = Storage.transcriptDir.appendingPathComponent(Self.dayString(chunk.recordedAtMs), isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let sidecar = dir.appendingPathComponent(name + ".transcript.json")
+        guard let sidecar = Storage.transcriptURL(forAudio: wavPath) else { return }
+        try? FileManager.default.createDirectory(at: sidecar.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
 
         let payload: [String: Any] = [
             "recorded_at_ms": chunk.recordedAtMs,
@@ -709,7 +708,7 @@ actor TranscriptionScheduler {
         }
     }
 
-    /// 转录完的段搬出 `audio_queue/`(10-27 update):WAV 和 .meta.json 挪进 `raw_data/audio/<日>/`,
+    /// 转录完(或重试用完、彻底失败)的段搬出 `audio_queue/`(10-27 update):WAV 和 .meta.json 挪进 `raw_data/audio/<日>/`,
     /// 旧版写在旁边的 .transcript.json 挪进 `metadata/transcript/<日>/`,再改库里的路径。
     /// 文件早就不在的段(删过的)也把路径改过去,免得每轮都被扫到。
     private func archiveTranscribed() async {
@@ -733,11 +732,10 @@ actor TranscriptionScheduler {
             let srcDir = src.deletingLastPathComponent()
             Self.moveIfPresent(srcDir.appendingPathComponent(name + ".meta.json"),
                                to: dstDir.appendingPathComponent(name + ".meta.json"))
-            let tDir = Storage.transcriptDir.appendingPathComponent(day, isDirectory: true)
-            if fm.fileExists(atPath: srcDir.appendingPathComponent(name + ".transcript.json").path) {
-                try? fm.createDirectory(at: tDir, withIntermediateDirectories: true)
-                Self.moveIfPresent(srcDir.appendingPathComponent(name + ".transcript.json"),
-                                   to: tDir.appendingPathComponent(name + ".transcript.json"))
+            if let t = Storage.transcriptURL(forAudio: src.path),
+               fm.fileExists(atPath: srcDir.appendingPathComponent(name + ".transcript.json").path) {
+                try? fm.createDirectory(at: t.deletingLastPathComponent(), withIntermediateDirectories: true)
+                Self.moveIfPresent(srcDir.appendingPathComponent(name + ".transcript.json"), to: t)
             }
             do {
                 try await db.updateAudioChunkPath(chunkId: chunkId, path: dst.path)
