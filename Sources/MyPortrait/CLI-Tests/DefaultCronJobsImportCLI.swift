@@ -15,7 +15,6 @@ enum DefaultCronJobsImportCLI {
     **输入**:本 prompt 前面已经自动注入了"最近 3 小时活动"上下文(屏幕 OCR、转录、打字记录),
     可以直接读。**如果近 3h 没什么信号、或你怀疑用户在跨日承诺上有遗漏**,主动调:
       - `mp-query memories --scope events --start "7d ago"` —— 翻这周的事件 .md(已 LLM 蒸馏 + 带 tag)
-      - `mp-query writing --start "7d ago" --q "<关键词>"` —— 用户实际敲过的字,比 OCR 准
       - `mp-query memories --scope portrait` —— 长期画像,看用户在意什么 / 在跟谁打交道
       - `mp-query read --path events/<day>/<file>.md` —— 看具体某条事件的全文
     用这些去**关联**:今天的承诺 vs 上周说过但没做的;邮件里答应回复但没回的;构建挂着没修的。

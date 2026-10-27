@@ -135,18 +135,8 @@ final class Services {
             clipboardLogger: ClipboardLogger()
         )
 
-        // 写作采集 worker(共用同一 DatabasePool)。注册到 WritingCaptureWorker.shared
-        // 给 UI(WorkflowSettingsView)用。
-        let writingStore = WritingCaptureStore(dbPool: dbImpl.dbPool)
-        let writingWorker = WritingCaptureWorker(store: writingStore)
-        WritingCaptureWorker.shared = writingWorker
-        // 启动时清残留 zombie processing 行 —— 上次进程崩 / 用户硬退之后
-        // 没改回 final status 的 run。否则下次 runBacklog 报 "already in progress"。
-        if let zombies = try? writingStore.markStuckProcessingAsFailed(
-            message: "process exited before run completed"
-        ), zombies > 0 {
-            print("[writing-capture] startup recovery: marked \(zombies) zombie run(s) as failed")
-        }
+        // Data → Input 读击键的入口(共用同一 DatabasePool)。
+        WritingCaptureStore.shared = WritingCaptureStore(dbPool: dbImpl.dbPool)
 
         // 一次性把老的 portrait/speech_style/ 文件夹 + .md frontmatter 迁到
         // writing_style/(配套 DB 的 v36 改名 + config 旧 key 回退)。幂等,跑过即

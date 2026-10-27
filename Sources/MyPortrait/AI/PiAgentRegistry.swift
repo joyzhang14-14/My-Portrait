@@ -7,7 +7,6 @@ enum PipelineOwner {
     static let event          = "event"
     static let distill        = "distill"
     static let personality    = "personality"
-    static let writingCapture = "writing_capture"
     static let writingStyle   = "writing_style"
 }
 

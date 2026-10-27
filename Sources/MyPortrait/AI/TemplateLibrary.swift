@@ -123,7 +123,6 @@ final class TemplateLibrary {
 
                 **Input**: the last 3 hours of activity (screen OCR, transcripts, typing) is already injected above this prompt — read it directly. If the last 3 hours are quiet, or you suspect something was promised on an earlier day, also call:
                   - `mp-query memories --scope events --start "7d ago"` — this week's distilled events (already summarised + tagged)
-                  - `mp-query writing --start "7d ago" --q "<keyword>"` — what the user actually typed, more reliable than OCR
                   - `mp-query memories --scope portrait` — long-term portrait: what they care about, who they deal with
                   - `mp-query read --path events/<day>/<file>.md` — the full body of one event
 

@@ -12,9 +12,8 @@ import Vision
 /// 本 CLI 补存量的 **54,899 个 ax 帧 + 25,086 个无文字帧**。
 ///
 /// ⚠️ **只写 `ocr_backfill_text` / `ocr_backfill_words`(Schema v43),不碰
-/// `full_text`/`text_source`/`ocr_words_json`** —— WritingCaptureStore 依赖
-/// `text_source=='ax'` 的语义(ChromeFilter 只对 ocr 帧过滤、统计 ax 帧数),覆盖会
-/// 改变写作采集行为。读侧 `TimelineDB.ocrText()` 已改 COALESCE 优先补跑列。
+/// `full_text`/`text_source`/`ocr_words_json`** —— 保留采集时的原始结果。
+/// 读侧 `TimelineDB.ocrText()` 已改 COALESCE 优先补跑列。
 ///
 /// 走 GRDB DatabasePool 并注册 FoundationTokenizer:UPDATE frames 会触发 frames_fts
 /// 同步触发器,裸 sqlite3 写会因分词器缺失报错回滚(与 ReOcrCLI 同一坑)。

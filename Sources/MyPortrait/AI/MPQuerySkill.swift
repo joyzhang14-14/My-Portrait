@@ -14,7 +14,7 @@ enum MPQuerySkill {
         ALL of the user's own captured data and knowledge base, NOT just transcripts. \
         Subcommands: `activity-summary` (what they were doing), `search` (screen OCR + \
         audio by keyword / app / time), `audio` (meeting & voice transcripts), \
-        `writing` (their own drafts / writing), `memories` (curated profile + past \
+        `memories` (curated profile + past \
         events — who they are, preferences, people), `read` (one specific item). For \
         ANY question about the user's activity, history, meetings, work, writing, or \
         who they are, pick the right subcommand and run it BEFORE answering — never say \
@@ -83,16 +83,6 @@ enum MPQuerySkill {
             when you need the whole note, not just the 300-char snippet.
             Only files under `portrait/` and `events/` are readable.
 
-        mp-query writing --start "30d ago" [--end "now"] [--q "..."]
-                         [--app "..."] [--limit 10]
-          → search what the user actually TYPED — LLM-distilled writing
-            records (typing stream + AX full text + LLM cleanup). Way
-            more reliable than OCR for "find what I wrote about X" —
-            OCR only catches what's visible on screen at capture time
-            (truncated, scrolled past, garbled). `writing` has the real
-            cleaned text, app, URL, context summary. **Default to this
-            first** when the user says "I wrote / I typed / find what I
-            said about / my answer to / my notes on ...".
 
         mp-query cronjob add    --name "..." --schedule "..." [options]
         mp-query cronjob list

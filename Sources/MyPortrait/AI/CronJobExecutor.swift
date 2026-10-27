@@ -135,7 +135,7 @@ enum CronJobExecutor {
             // 跟 ChatController.send 一致,首条 user message 前注入两个
             // SKILL preamble — cron agent 也需要知道 mp-query / mp-folders
             // 子命令存在,否则它只能用注入的固定时间窗,没法跨日/跨模态查
-            // (e.g. mp-query memories --scope portrait / mp-query writing)。
+            // (e.g. mp-query memories --scope portrait)。
             let skillPreamble = "\(MPQuerySkill.preamble)\n\n\(FoldersSkill.preamble)\n\n"
             let body = context.markdown.isEmpty
                 ? cronJob.prompt

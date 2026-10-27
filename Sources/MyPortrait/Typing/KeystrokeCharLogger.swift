@@ -80,8 +80,7 @@ final class KeystrokeCharLogger {
 
         // 黑名单:不记**内容**(char / modifiers / inputSource 全清空),但仍写一行
         // 只留计数所需字段(bundle_id / ts / is_backspace)。这样 Input 图谱按行计数
-        // 就能显示黑名单 app 的打字量,而不暴露打了什么。写作采集 worker 读击键时按
-        // bundle_id 排除同一份黑名单(WritingCaptureWorker),这些无内容行不会进 Pass2。
+        // 就能显示黑名单 app 的打字量,而不暴露打了什么。
         // (黑名单在下面跳主线程后判,看的是收到这颗键的 app:Spotlight 等面板焦点下就是面板的 app,不是它底下的前台 app。)
         //
         // 密码框:系统开着 secure event input 时不记内容。

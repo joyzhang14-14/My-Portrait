@@ -1161,6 +1161,16 @@ enum DBSchema {
                 """)
         }
 
+        // 写作采集(从击键还原成品)整条删掉(10-26 update)。writing_records 留表给
+        // writing style,只清掉还原出来的行;只属于还原流程的表整张删。
+        m.registerMigration("v50_drop_writing_capture") { db in
+            try db.execute(sql: "DELETE FROM writing_records")
+            for t in ["writing_records_staged", "writing_records_discarded", "writing_records_user_rejected",
+                      "writing_capture_runs", "writing_capture_cursor"] {
+                try db.execute(sql: "DROP TABLE IF EXISTS \(t)")
+            }
+        }
+
         return m
     }
 }

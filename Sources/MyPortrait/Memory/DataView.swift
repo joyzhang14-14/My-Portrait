@@ -672,7 +672,7 @@ struct DataView: View {
     /// 批量取 writing record 文本预览填 wrPreviews(后台 DB 查)。
     @MainActor
     private func loadWritingRecordPreviews(_ ids: [Int64]) async {
-        guard let store = WritingCaptureWorker.shared?.store else { return }
+        guard let store = WritingCaptureStore.shared else { return }
         let sel = selected
         let m = await Task.detached(priority: .userInitiated) { store.writingRecordPreviews(ids: ids) }.value
         guard selected == sel else { return }

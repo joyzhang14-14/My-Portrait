@@ -16,10 +16,10 @@ enum WritingCaptureBrowse {
     private static var isDemo: Bool { DevMode.isOn }
 
     private static var store: WritingCaptureStore? {
-        WritingCaptureWorker.shared?.store
+        WritingCaptureStore.shared
     }
 
-    /// 数据源在不在。false = 走空态提示(真实环境是 worker 没起来;
+    /// 数据源在不在。false = 走空态提示(真实环境是 store 没建;
     /// 演示环境是 `input_records.json` 缺失或解析失败)。
     static var isAvailable: Bool {
         isDemo ? !DevMode.demoInputRecords.isEmpty : store != nil

@@ -399,8 +399,6 @@ final class MemoryScheduler {
     private let kClassifierPipelineV2 = "scheduler.classifierPipelineV2"
     private let kLastPortrait       = "scheduler.lastPortraitRun"
     private let kLastPersonality    = "scheduler.lastPersonalityRun"
-    /// (07-30) 写作采集定时触发已拿掉,此 key 不再写入,留着以备未来重新挂定时时复用。
-    private let kLastWritingCapture = "scheduler.lastWritingCaptureRun"
     private let kLastWritingStyle    = "scheduler.lastWritingStyleRun"
 
     private init() {}
@@ -664,14 +662,13 @@ final class MemoryScheduler {
         }
 
         // **两级触发顺序**(每个 job 仍按各自频率 + 一天一次去重):
-        //   Tier 1 = event / writing-capture —— 上游,生产 events / writing_records。
+        //   Tier 1 = event —— 上游,生产 events。
         //   Tier 2 = portrait / personality / writing-style —— 下游,消费 Tier 1
         //            写出来的东西。
         // 规则:Tier-1 先跑(已 await 完成,保证收尾);若本 tick 有 Tier-1 跑过,
         // **不等下一个 tick,而是留 10s 缓冲后在本 tick 接着跑 Tier-2** —— 上游
         // 一跑完下游马上接力,不必干等 15 分钟。10s 缓冲让 event rebalance 重写
         // 的 events/ 盘上写入 / DB 落定,Tier-2 读到稳定状态。
-        // Tier-1 内部(event ↔ writing-capture)彼此无先后,可同 tick 一起跑。
         //
         // **portrait 追赶分支(catchUp)**:daily 频率下,只要有 pending 活 + 今天没跑过,
         // 任何 tick 都触发(不必等到点)。weekly/monthly 维持"scheduled 日 + 到点"语义。
@@ -694,15 +691,11 @@ final class MemoryScheduler {
             tier1Ran = true
         }
 
-        // (07-30 update) 写作采集定时触发已整个拿掉:新逻辑不跑模型,不需要
-        // 定时批处理。runWritingCaptureJob() 保留但已无调用方,要重新定时
-        // 的话在这里重新挂。
-
         // 有 Tier-1 跑过 → **本 tick 接着跑 Tier-2**(不等下一个 tick),只在
         // 中间留 10s 缓冲:让 event rebalance 的盘上写入 / DB 落定,Tier-2 读到
         // 稳定状态。Tier-1 已 await 完成(顺序保证),缓冲只是 settle time。
         if tier1Ran {
-            schedLog.info("tick: tier-1 (event/writing-capture) ran — 10s buffer, then tier-2 in this tick")
+            schedLog.info("tick: tier-1 (event) ran — 10s buffer, then tier-2 in this tick")
             try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
         }
 
@@ -783,48 +776,6 @@ final class MemoryScheduler {
                 summary: error.localizedDescription
             ))
             store.appendPipelineRun(trigger: "scheduler", pipeline: "Speech style", outcome: "failure", reason: error.localizedDescription)
-        }
-    }
-
-    /// 跑写作采集 worker(backlog 模式)—— 跟手动 Run 一样,从 cursor 跑到现在
-    /// 一次性出一个 staged batch。失败 swallow + log,不阻塞下一次 tick。
-    /// 已经有 pending_review / processing → backlog 内部自带 guard 跳过,不会
-    /// 重复跑。
-    func runWritingCaptureJob() async {
-        // 07-30 update:这套 pass 处理停用(见 WritingCaptureWorker.typingRebuildV1Enabled)。
-        // 在这里就返回 —— 不然每个 tick 都会走到 runBacklog 抛错的 catch 分支,
-        // 弹一次失败通知 + 记一条 failure,纯噪音。
-        guard WritingCaptureWorker.typingRebuildV1Enabled else {
-            schedLog.info("writingCapture tick: pass processing disabled — skip")
-            return
-        }
-        guard let worker = WritingCaptureWorker.shared else {
-            schedLog.warning("writingCapture tick: worker not initialized — skip")
-            return
-        }
-        do {
-            let summary = try await worker.runBacklog()
-            schedLog.info("writingCapture backlog: status=\(summary.status.rawValue, privacy: .public) records=\(summary.recordsCount) discarded=\(summary.discardedCount)")
-            // recordsCount == 0 = 没新写作可处理,跟 .noWork 等价 → 静默,不弹噪音。
-            if summary.recordsCount > 0 {
-                NotificationCenterService.shared.post(.schedulerRun(
-                    pipeline: "Writing capture",
-                    success: true,
-                    summary: "\(summary.recordsCount) record\(summary.recordsCount == 1 ? "" : "s")"
-                        + (summary.discardedCount > 0 ? " · \(summary.discardedCount) discarded" : "")
-                ))
-                store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "success", reason: nil)
-            } else {
-                store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "no-work", reason: nil)
-            }
-        } catch {
-            schedLog.warning("writingCapture backlog failed: \(String(describing: error), privacy: .public)")
-            NotificationCenterService.shared.post(.schedulerRun(
-                pipeline: "Writing capture",
-                success: false,
-                summary: error.localizedDescription
-            ))
-            store.appendPipelineRun(trigger: "scheduler", pipeline: "Writing capture", outcome: "failure", reason: error.localizedDescription)
         }
     }
 

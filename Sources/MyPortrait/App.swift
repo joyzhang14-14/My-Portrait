@@ -341,36 +341,6 @@ struct MyPortraitApp: App {
         if args.contains("--typing-observe-m4") {
             AppDelegate.typingObserveM4Only = true
         }
-        // `--writing-capture-*` 写作采集 worker CLI 入口(UI Run now 的等价物)。
-        // 内部跑完 → exit,不开窗口 / Services / capture。详见 WritingCaptureCLI。
-        if args.contains("--writing-capture-list") {
-            WritingCaptureCLI.list()
-        }
-        if let idx = args.firstIndex(of: "--writing-capture-approve"), idx + 1 < args.count {
-            WritingCaptureCLI.approve(date: args[idx + 1])
-        }
-        if let idx = args.firstIndex(of: "--writing-capture-reject"), idx + 1 < args.count {
-            WritingCaptureCLI.reject(date: args[idx + 1])
-        }
-        if args.contains("--writing-capture-run") {
-            // 后面跟可选的日期 YYYY-MM-DD
-            let idx = args.firstIndex(of: "--writing-capture-run")!
-            let nextArg: String? = (idx + 1 < args.count) ? args[idx + 1] : nil
-            // 简单格式校验:YYYY-MM-DD 长度 10 + 含 "-"
-            let date: String? = {
-                guard let s = nextArg, s.count == 10, s.contains("-") else { return nil }
-                return s
-            }()
-            WritingCaptureCLI.run(specificDate: date)
-        }
-        // v27 backlog 模式:不按天分,cursor → 现在,全量跑一次
-        // 注意:`--writing-capture-backlog-no-ax` 必须先匹配,否则会被
-        // `--writing-capture-backlog` 误判。
-        if args.contains("--writing-capture-backlog-no-ax") {
-            WritingCaptureCLI.runBacklog(includeAxText: false)
-        } else if args.contains("--writing-capture-backlog") {
-            WritingCaptureCLI.runBacklog()
-        }
         // 一次性 backfill:今日 Safari Google Doc 帧重跑 Vision OCR
         if args.contains("--reocr-google-docs-today") {
             ReOcrCLI.runGoogleDocsToday()
@@ -399,12 +369,6 @@ struct MyPortraitApp: App {
         // capture.screen.pauseWhenLocked —— 新帧不再产生,存量清一次)。
         if let idx = args.firstIndex(of: "--purge-loginwindow"), idx + 1 < args.count {
             PurgeLoginWindowCLI.run(quarantineDir: args[idx + 1])
-        }
-        if args.contains("--writing-capture-backlog-approve") {
-            WritingCaptureCLI.approveBacklog()
-        }
-        if args.contains("--writing-capture-backlog-reject") {
-            WritingCaptureCLI.rejectBacklog()
         }
         // Premium offload:--premium-export / --premium-import / --premium-rollback <id> /
         // --premium-selftest。详见 PremiumCLI。内部 exit。

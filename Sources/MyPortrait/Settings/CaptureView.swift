@@ -882,11 +882,6 @@ struct TypingCaptureSettingsView: View {
             Group {
                 typingSection
                 blacklistSection
-                // Writing capture —— 数据源是 typing capture(07-30 起停用重写,
-                // 只剩 Pending review 处理旧 staged 记录)。
-                // (writing style 是 portrait 侧 pipeline,留在 Memory 页。)
-                WritingPipelineSection()
-                // (07-30 update:typing capture 不跑模型,没有 provider / model 可选。)
             }
         }
         .task {
