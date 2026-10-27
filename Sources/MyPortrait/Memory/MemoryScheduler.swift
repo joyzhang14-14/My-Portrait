@@ -1217,7 +1217,7 @@ final class MemoryScheduler {
             }
             let ds = pd.day
             // 本地日按 UTC 零点存成 Date,下游按 UTC 格式化出来就是这个日期串
-            // (events/<ds>/、last_modified、personality_daily/<ds>.md)。
+            // (events/<ds>/、last_modified)。
             guard let day = ProcessingLogStore.day(from: ds),
                   let window = IntervalSegmenter.dayWindow(ds, tzOffsetMin: pd.tzOffsetMin) else { continue }
             // 台账行先建好(钉住偏移),之后按 key 记账。

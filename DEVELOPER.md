@@ -138,7 +138,6 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 ├── secrets/                        # provider credentials: secrets.sqlite + its AES master.key
 ├── portrait/<category>/            # long-term distilled portrait (one dir per category)
 ├── events/<yyyy-MM-dd>/            # semantic event files (one .md per event)
-├── personality_daily/<date>.md
 ├── journal/                        # append-only action log
 ├── logs/                           # daily raw JSON
 ├── raw_data/
@@ -649,7 +648,7 @@ The local personality job (`MemoryScheduler.runPersonalityJob`) runs in the same
 local event run and at `[scheduler.personality] time_of_day`, taking up to 7 ready days; other
 ticks only retry failed days (same rule as intervals) past backoff, and Run now runs at once. It calls
 `PersonalityRefresh.refresh(day:ocrWindow:)`: `day` is the local date stored as UTC midnight, so
-`events/<day>/`, `last_modified` and `personality_daily/<day>.md` all use that date, and the gate
+`events/<day>/` and `last_modified` both use that date, and the gate
 counts frames in the day window. Its denominator is the day's frames with more than 4 characters
 of OCR text (`TimelineDB.ocrFrameCount`); a keyword matching more than 30 % of them
 (`PersonalityRefresh.maxKeywordHitPct`: words always on screen, common substrings) is not
@@ -824,7 +823,7 @@ the ledger entry `import_failed` (not retried automatically; `--premium-import` 
 successful import the Mac acks the bundle (the server deletes its result) and drops the ledger
 entry; an ack that fails is retried, and the re-import is idempotent.
 
-**Backup / rollback.** Every import snapshots `events/`, `portrait/`, `personality_daily/`, the
+**Backup / rollback.** Every import snapshots `events/`, `portrait/`, the
 processing_log, event_intervals and personality_days rows it will overwrite, and its db_ops into
 `.staging/premium_import_backup/<bundle_id>/` (newest 3 kept). `--premium-rollback <bundle_id>`
 restores those trees and rows (rows the import created are removed) and un-marks the writing

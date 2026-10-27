@@ -1554,7 +1554,7 @@ enum PremiumImportSelfTest {
         // frontmatter 往返要对齐的就是这个;不稳定的文件导入时会显示成 Premium 改过。
         var total = 0, unstable: [String] = []
         for rel in PremiumExchange.listTreeFiles(root: Storage.rootURL)
-        where rel.hasSuffix(".md") && !rel.hasPrefix("personality_daily/") && !rel.hasSuffix("/INDEX.md") {
+        where rel.hasSuffix(".md") && !rel.hasSuffix("/INDEX.md") {
             guard let raw = read(Storage.rootURL.appendingPathComponent(rel)),
                   let f = try? PortraitFileIO.parse(raw) else { continue }
             total += 1

@@ -13,7 +13,7 @@ enum PremiumExchange {
     /// personality 按本地日(`frames/pday_<day>.jsonl`)。
     static let schemaVersion = 2
     /// 交换的三棵树(相对数据根)。
-    static let treeNames = ["events", "portrait", "personality_daily"]
+    static let treeNames = ["events", "portrait"]
     static let triggerNightly = "nightly"
     /// Premium 要重跑某天时发的包(`PremiumExchangeExporter.exportRedo`)。
     static let triggerRedo = "redo"

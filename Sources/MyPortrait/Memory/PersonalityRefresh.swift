@@ -82,15 +82,14 @@ final class PersonalityRefresh {
 
     /// `day` = 本地日按 UTC 零点存的 Date(按 UTC 格式化即该日期串:events/<day>/、
     /// last_modified);`ocrWindow` = 该本地日 [00:00, 24:00) 的 UTC ms(钉死偏移)。
-    func refresh(day: Date, ocrWindow: (start: Int64, end: Int64), writeDailySnapshot: Bool = true,
+    func refresh(day: Date, ocrWindow: (start: Int64, end: Int64),
                  progress: ((Phase) -> Void)? = nil) async throws -> Report {
         let napGuard = AppNapGuard.acquire(reason: "Personality refresh")
         defer { napGuard.release() }
-        return try await refreshImpl(day: day, ocrWindow: ocrWindow, writeDailySnapshot: writeDailySnapshot,
-                                     progress: progress)
+        return try await refreshImpl(day: day, ocrWindow: ocrWindow, progress: progress)
     }
 
-    private func refreshImpl(day: Date, ocrWindow: (start: Int64, end: Int64), writeDailySnapshot: Bool,
+    private func refreshImpl(day: Date, ocrWindow: (start: Int64, end: Int64),
                              progress: ((Phase) -> Void)?) async throws -> Report {
 
         // ── 1) events 源(weight > threshold) ──────────────────────────
@@ -101,9 +100,6 @@ final class PersonalityRefresh {
 
         let snapshot = try await PersonalityAgent(provider: provider, model: model)
             .generateDailySnapshot(date: day, events: highWeightEvents)
-        if writeDailySnapshot {
-            _ = try? PersonalityDailyStore.write(snapshot)
-        }
 
         // ── 2) OCR 验证: 每个 tag 自带 ocr_keywords,数命中帧数 ────────
         let timeline = TimelineDB()

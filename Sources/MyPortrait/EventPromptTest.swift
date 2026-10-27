@@ -548,16 +548,15 @@ enum BackfillDaysCLI {
 }
 
 /// `--wipe-personality-concepts` — DEV-ONLY 一次性迁移:清空 portrait/
-/// personality/ + personality_daily/(只留 INDEX.md)。不备份。events/ 不动。
+/// personality/(只留 INDEX.md)。不备份。events/ 不动。
 enum WipePersonalityCLI {
     static func run() {
         print("=== wipe-personality-concepts ===")
         let fm = FileManager.default
         let personalityDir = Storage.portraitDir.appendingPathComponent("personality")
-        let dailyDir = Storage.personalityDailyDir
         // 不备份,用户已确认风险自担。
         var removed = 0
-        for dir in [personalityDir, dailyDir] {
+        for dir in [personalityDir] {
             guard let en = fm.enumerator(at: dir, includingPropertiesForKeys: nil,
                                          options: [.skipsHiddenFiles]) else { continue }
             while let url = en.nextObject() as? URL {
@@ -905,8 +904,6 @@ enum PersonalityMergeApplyCLI {
                 let events = await PersonalityAgent.readEvents(for: day)
                 let snapshot = try await PersonalityAgent().generateDailySnapshot(date: day, events: events)
                 print("daily snapshot — \(snapshot.tags.count) tag(s): \(snapshot.tags.map(\.name))")
-                let dailyURL = try PersonalityDailyStore.write(snapshot)
-                print("daily snapshot written: \(dailyURL.path)")
                 let concepts = await PersonalityMerger.readConcepts()
                 print("existing personality concepts: \(concepts.count)")
 

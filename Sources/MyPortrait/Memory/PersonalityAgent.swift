@@ -40,8 +40,7 @@ struct PersonalityDailySnapshot: Codable, Equatable, Sendable {
 /// 一天的事件 → personality 快照。LLM 路径复刻 ImpactScorer 的 PiAgent +
 /// Coordinator + budget 检测，每个 processor 自己一份 actor，不抽共享基类。
 ///
-/// P1 阶段只产 in-memory snapshot：不写盘（P6 才落 personality_daily/），
-/// 也不读 portrait/personality/*.md（P2 Merger 的事）。
+/// 只产 in-memory snapshot,不写盘,也不读 portrait/personality/*.md(Merger 的事)。
 @MainActor
 final class PersonalityAgent {
 

@@ -22,8 +22,6 @@ enum Storage {
     static var uiRootURL: URL { DevMode.isOn ? DevMode.rootURL : rootURL }
 
     /// events / portrait 的界面版。
-    ///
-    /// **不切**:`personality_daily/` —— 查过调用方,只有 pipeline 在写、UI 不读。
     static var uiEventsDir: URL { uiRootURL.appendingPathComponent("events", isDirectory: true) }
     static var uiPortraitDir: URL { uiRootURL.appendingPathComponent("portrait", isDirectory: true) }
 
@@ -57,13 +55,6 @@ enum Storage {
     /// Append-only daily action logs from the Memory pipeline (merges,
     /// archives, supersede decisions, weight passes). See design doc 6.6.
     static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
-
-    /// Per-day personality snapshots (one file per day, `YYYY-MM-DD.md`),
-    /// produced by PersonalityAgent. Kept separate from the portrait tree —
-    /// these are transient daily reads, not long-term concepts.
-    static var personalityDailyDir: URL {
-        rootURL.appendingPathComponent("personality_daily", isDirectory: true)
-    }
 
     // MARK: - Capture layer (Capture/ module)
 
@@ -106,7 +97,7 @@ enum Storage {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            journalDir, personalityDailyDir, rawDataDir, framesDir, videoDir,
+            journalDir, rawDataDir, framesDir, videoDir,
             voiceTrainingDir,
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)

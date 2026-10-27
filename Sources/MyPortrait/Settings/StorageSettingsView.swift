@@ -351,11 +351,10 @@ private struct StorageStats {
         let monthly = max(Int64(1_000_000_000), max(mediaBytes, dataBytes) / 12)
         let months = Double(free) / Double(monthly)
 
-        // 记忆层四个目录合成一行 —— 单拎出来每个都是几百 KB,占四行只是噪音。
+        // 记忆层三个目录合成一行 —— 单拎出来每个都是几百 KB,占三行只是噪音。
         let memoryBytes = directorySize(root.appendingPathComponent("events"))
                         + directorySize(root.appendingPathComponent("portrait"))
                         + directorySize(root.appendingPathComponent("journal"))
-                        + directorySize(root.appendingPathComponent("personality_daily"))
         // app 本体在 ~/.portrait 之外(/Applications 之类),单独量。
         let bundleBytes = directorySize(Bundle.main.bundleURL)
         // 首次启动下载的 AI 运行时:Bun + pi-agent 包 + 注入 PATH 的小 wrapper。

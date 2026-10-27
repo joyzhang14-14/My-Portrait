@@ -251,8 +251,8 @@ struct MyPortraitApp: App {
             DropPortraitImpactResidueCLI.run()
             // run() exits the process internally.
         }
-        // DEV-ONLY: `--wipe-personality-concepts` —— backup + wipe
-        // portrait/personality/ + personality_daily/ for the new architecture.
+        // DEV-ONLY: `--wipe-personality-concepts` —— wipe portrait/personality/
+        // for the new architecture.
         if args.contains("--wipe-personality-concepts") {
             WipePersonalityCLI.run()
         }
