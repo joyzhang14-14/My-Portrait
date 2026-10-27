@@ -34,9 +34,6 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
 
     init(modelId: String = defaultModelId) {
         self.modelId = modelId.isEmpty ? Self.defaultModelId : modelId
-        // MLX Metal buffer cache 上限。不设的话实时转录跨 chunk 累积到十几 GB
-        // (用户实测撑爆 24G 内存)。跟 RetranscribeQwenCLI 同款兜底。
-        MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
     }
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "qwen-asr")
@@ -101,6 +98,10 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
             logger.warning("Qwen3-ASR model not downloaded: \(self.modelId, privacy: .public) — download it in AI models first")
             throw Qwen3ASRError.modelNotDownloaded(modelId)
         }
+        // MLX Metal buffer cache 上限。不设的话实时转录跨 chunk 累积到十几 GB
+        // (实测撑爆 24G 内存)。跟 RetranscribeQwenCLI 同款兜底。放在这里而不是 init:
+        // 一碰 MLX.GPU 就会建 Metal 设备、装 metallib,不转录时不该占这份内存。
+        MLX.GPU.set(cacheLimit: 512 * 1024 * 1024)
         logger.info("loading Qwen3-ASR model: \(self.modelId, privacy: .public)")
         model = try await Qwen3ASRModel.fromPretrained(modelId: modelId, offlineMode: true)
         logger.info("Qwen3-ASR model loaded")
