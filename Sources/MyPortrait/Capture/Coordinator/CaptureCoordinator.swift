@@ -357,6 +357,11 @@ actor CaptureCoordinator {
             // 空闲大块攒着不还系统,后台进程等不到内存压力信号,footprint 就一直
             // 挂在 300-600MB。每帧干完主动交还,只动空闲块,不影响 OCR 本身。
             malloc_zone_pressure_relief(nil, 0)
+        } else {
+            // 不做 OCR 时主路径很短,等 HEIC 写完再走:手上始终只压一张全分辨率图,
+            // 编码器的缓冲用完也一并交还。
+            await writeTask.value
+            malloc_zone_pressure_relief(nil, 0)
         }
 
         // 9. 入库。
