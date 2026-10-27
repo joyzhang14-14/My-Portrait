@@ -805,7 +805,7 @@ struct DataView: View {
             : f.portraitFacets.map { "\($0.facet):\($0.value)" }.joined(separator: ", ")
         let halfLife = Double(ConfigStore.shared.current.memory.weightHalfLifeDays)
         let curW = WeightEMA(halfLifeDays: halfLife)
-            .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
+            .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified(now: f.settledAsOf))
         // event 路径展示 impact / impact_source；portrait 路径整行不渲染
         // （portrait 不持有 impact，impact_source 残留也无意义）。
         let impactRows: [(String, String)] = scope == .events
@@ -1224,7 +1224,7 @@ struct DataView: View {
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? file.created
             let cw = WeightEMA(halfLifeDays: halfLifeDays)
                 .currentWeight(stored: file.weight,
-                               daysSinceModified: file.daysSinceModified())
+                               daysSinceModified: file.daysSinceModified(now: file.settledAsOf))
             out.append(Entry(
                 id: url,
                 title: title,

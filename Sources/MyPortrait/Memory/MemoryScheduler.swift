@@ -1018,7 +1018,13 @@ final class MemoryScheduler {
         // pending / markRan 都不该跑)。
         guard pauseGen == pauseGeneration else { return .busy }
 
-        if !intervals.isEmpty {
+        // weight / rebalance / 归档只在这一轮真处理完至少一个区间(event + impact 都 complete)
+        // 时结算 —— 流水线没跑成,weight 和归档状态保持原样(10-26 update)。
+        let settled = keys.contains {
+            let r = ledgerRow($0)
+            return r?.event == .complete && r?.impact == .complete
+        }
+        if settled {
             // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次。
             // pause 中止时跟 rebalance 一起被上面的 guard 跳过；个别区间失败不影响它跑。
             eventProgress = StepProgress(fraction: 0.98, stage: "Recomputing weights")
@@ -1032,6 +1038,7 @@ final class MemoryScheduler {
             // weight 刚算好 → 归档冷掉的老 event;放在 classify 前,归档的不会再被分进 folder。
             eventProgress = StepProgress(fraction: 0.993, stage: "Archiving events")
             await Task.detached(priority: .userInitiated) { Archiver.runEvents() }.value
+            PipelineSettle.markEvents()
 
             // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
             // personality 按本地日自己判就绪(EventIntervalStore.readyPersonalityDays)。

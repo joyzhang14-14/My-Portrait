@@ -499,13 +499,13 @@ enum GraphSceneBuilder {
                 ? (firstHeading(in: file.body) ?? url.deletingPathExtension().lastPathComponent)
                 : file.eventTitle
             let anchor = file.lastOccurrence ?? file.created
-            let daysAgo = max(0, Date().timeIntervalSince(anchor) / 86_400)
+            let daysAgo = max(0, file.settledAsOf.timeIntervalSince(anchor) / 86_400)
             let rel = url.path.hasPrefix(prefix)
                 ? String(url.path.dropFirst(prefix.count)) : url.lastPathComponent
             out.append(ScannedFile(
                 url: url, relPath: rel, title: title,
                 weight: ema.currentWeight(stored: file.weight,
-                                          daysSinceModified: file.daysSinceModified()),
+                                          daysSinceModified: file.daysSinceModified(now: file.settledAsOf)),
                 occurrences: file.occurrences.count,
                 daysAgo: daysAgo))
         }

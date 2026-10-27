@@ -186,7 +186,10 @@ final class PortraitDistiller {
         // 蒸馏后扫一遍 portrait/ 归档（程序化、无 LLM）。放在 distill 之后
         // 是因为归档动的就是 portrait 文件、distill 刚更新完它们；用 Settings
         // 配置的阈值（archive_max_weight / archive_min_days_idle）。
-        let archive = try Archiver.run(rule: .fromConfig)
+        // 只在各分类都跑成时归档:distill 没跑成,画像保持原样(10-26 update)。
+        let archive = failed == 0 ? try Archiver.run(rule: .fromConfig)
+            : Archiver.Result(archivedCount: 0, skippedCount: 0, plans: [])
+        if failed == 0 { PipelineSettle.markPortrait() }
 
         return Result(
             categoriesProcessed: categories.count,

@@ -126,6 +126,8 @@ enum PremiumExchangeImporter {
         // Premium 写回的 event 也要过一遍归档(event 链在 Premium 时本机不跑 event job)。
         if !imported.isEmpty {
             await Task.detached(priority: .utility) { Archiver.runEvents() }.value
+            PipelineSettle.markEvents()
+            PipelineSettle.markPortrait()
         }
         scheduler.releaseAllLocks()
         lock.release()

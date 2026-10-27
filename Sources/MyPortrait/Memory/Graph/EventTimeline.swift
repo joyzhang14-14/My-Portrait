@@ -165,7 +165,8 @@ enum EventTimeline {
         for i in entries.indices { entries[i].join = joinOf[entries[i].relPath] }
 
         let lo = entries.map(\.born).min()!
-        let hi = max(entries.map(\.born).max()!, cal.startOfDay(for: Date()))
+        // 终点停在事件流水线上次结算那天:没跑流水线的日子不给拖(10-26 update)。
+        let hi = max(entries.map(\.born).max()!, cal.startOfDay(for: PipelineSettle.events))
         return Index(entries: entries, folders: folders, range: lo...hi,
                      birthsPerDay: births, mergesPerDay: merges)
     }

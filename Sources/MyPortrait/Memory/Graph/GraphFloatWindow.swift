@@ -222,7 +222,7 @@ struct GraphFloatWindow: View {
                    [DataView.DerivedRef], [Int64])? in
             guard let f = try? PortraitFileIO.read(from: url) else { return nil }
             let w = WeightEMA(halfLifeDays: halfLife)
-                .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified())
+                .currentWeight(stored: f.weight, daysSinceModified: f.daysSinceModified(now: f.settledAsOf))
             // writing_style 记录来源 → wr chips;其它 → event chips(同 text 模式)。
             let wr = DataView.splitWritingRecords(f.body)
             if !wr.wrIds.isEmpty {
