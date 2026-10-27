@@ -86,6 +86,9 @@ final class PortraitDistiller {
     private func distillImpl(progress: ((Progress) -> Void)?) async throws -> Result {
         try PortraitPaths.ensureSeedTree()
         let start = Date()
+        // 本轮读到的事件截至 events 结算时刻:新建 / 更新的画像的 created、lastModified 和 weight
+        // 都按它算,不按 distill 哪天跑(10-27 update)。
+        let settleAt = PipelineSettle.portraitClock
 
         // 1. Group events by category from disk.
         let eventsByCategory = await collectEventsByCategory()
@@ -133,15 +136,15 @@ final class PortraitDistiller {
                 for decision in decisions {
                     switch decision.action {
                     case "create":
-                        if try writeNewPortrait(category: category, decision: decision) {
+                        if try writeNewPortrait(category: category, decision: decision, at: settleAt) {
                             written += 1
                         }
                     case "update":
-                        if try updateExistingPortrait(category: category, decision: decision) {
+                        if try updateExistingPortrait(category: category, decision: decision, at: settleAt) {
                             updated += 1
                         } else {
                             // Slug not found → treat as create.
-                            if try writeNewPortrait(category: category, decision: decision) {
+                            if try writeNewPortrait(category: category, decision: decision, at: settleAt) {
                                 written += 1
                             }
                         }
@@ -185,7 +188,6 @@ final class PortraitDistiller {
         // 只在各分类都跑成时结算:weight 按 portrait 结算时刻(本轮读到的事件截至哪天)随
         // lastModified 衰减(本轮 LLM 没动的 entry 也一样)+ 归档。distill 没跑成,画像
         // 保持原样(10-27 update)。
-        let settleAt = PipelineSettle.portraitClock
         if failed == 0 { PortraitWeight.refreshDistillCategories(now: settleAt) }
         let archive = failed == 0 ? try Archiver.run(rule: .fromConfig, now: settleAt)
             : Archiver.Result(archivedCount: 0, skippedCount: 0, plans: [])
@@ -489,13 +491,13 @@ final class PortraitDistiller {
     // MARK: - Disk writes
 
     /// 返回 true = 真写了一个新文件;false = 跳过(空溯源)或委托给 update。
-    private func writeNewPortrait(category: String, decision: ParsedDecision) throws -> Bool {
+    private func writeNewPortrait(category: String, decision: ParsedDecision, at: Date) throws -> Bool {
         let dir = PortraitPaths.categoryDir(category)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(decision.slug + ".md")
         // If slug collides with existing file, fall through to update.
         if FileManager.default.fileExists(atPath: url.path) {
-            return try updateExistingPortrait(category: category, decision: decision)
+            return try updateExistingPortrait(category: category, decision: decision, at: at)
         }
         // 不变量:全新 portrait 条目必须有 event 溯源。derived 为空 = 没有任何
         // 来源事件 → 不能凭空创建(否则 weight = ref_count × decay = 0,落出一个
@@ -513,11 +515,11 @@ final class PortraitDistiller {
         // facet-driven portrait entries (treated as `experience` by default).
         let portraitType: String = (category == "emotions") ? "emotion" : "experience"
         // firstOccurrence 传【最早的 event 发生日】—— 便捷 init 会用它 seed
-        // occurrences=[firstOccurrence],传 Date() 会塞个"今天"的幽灵 occurrence。
+        // occurrences=[firstOccurrence],传运行日会塞个幽灵 occurrence。
         let firstEventDay = decision.derivedFromEventIds
-            .compactMap { Self.eventDay(fromId: $0) }.min() ?? Date()
+            .compactMap { Self.eventDay(fromId: $0) }.min() ?? at
         var file = PortraitFile(
-            created: Date(),
+            created: at,
             // impact: 不传 —— portrait 不持有 impact（event-only 字段）。
             body: renderBody(decision: decision, derivedIds: decision.derivedFromEventIds),
             source: "distilled",
@@ -558,7 +560,7 @@ final class PortraitDistiller {
 
     /// Returns true if file existed and was updated; false if not found.
     @discardableResult
-    private func updateExistingPortrait(category: String, decision: ParsedDecision) throws -> Bool {
+    private func updateExistingPortrait(category: String, decision: ParsedDecision, at: Date) throws -> Bool {
         let url = PortraitPaths.categoryDir(category).appendingPathComponent(decision.slug + ".md")
         guard FileManager.default.fileExists(atPath: url.path) else { return false }
         var file = try PortraitFileIO.read(from: url)
@@ -596,7 +598,7 @@ final class PortraitDistiller {
         }
         // body 改了 → 刷新 EMA 锚点 + merge 计数(老文件可能 nil,兜 1)。
         file.mergeCount = (file.mergeCount ?? 1) + 1
-        let now = Date()
+        let now = at
         file.lastModified = now
         // weight 用合并后的 ref 数,仍封顶 20 防超热 facet 拉爆 ranking
         //(derived 列表已不封顶,全展示)。
@@ -725,7 +727,7 @@ final class PortraitDistiller {
                                       body: "Updated prose.", derivedFromEventIds: newIds)
 
         // 3. 走真 updateExistingPortrait
-        do { _ = try PortraitDistiller().updateExistingPortrait(category: cat, decision: decision) }
+        do { _ = try PortraitDistiller().updateExistingPortrait(category: cat, decision: decision, at: Date()) }
         catch { failLine("updateExistingPortrait threw: \(error)"); cleanup(); return false }
 
         // 4. 读回断言
@@ -781,7 +783,7 @@ final class PortraitDistiller {
         let skipBefore = try? Data(contentsOf: skipURL)
         let skipDecision = ParsedDecision(action: "update", slug: "zz_double_escape", title: "Skip changed",
                                           body: #"line one\nline two plus"#, derivedFromEventIds: newIds)
-        let skipOK = (try? PortraitDistiller().updateExistingPortrait(category: cat, decision: skipDecision)) == true
+        let skipOK = (try? PortraitDistiller().updateExistingPortrait(category: cat, decision: skipDecision, at: Date())) == true
         if skipBefore == nil || !skipOK || (try? Data(contentsOf: skipURL)) != skipBefore {
             pass = false; failLine("多一层转义的 update 应返回 true 且文件字节不变")
         }
