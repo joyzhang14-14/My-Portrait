@@ -539,6 +539,8 @@ struct ProcessingLogStore: Sendable {
             return false
         }
         defer { sqlite3_close(db) }
+        // 库被占用(比如 Premium 导入的事务)时等一会儿再写,不当场失败。
+        sqlite3_busy_timeout(db, 5000)
         return body(db)
     }
 }
