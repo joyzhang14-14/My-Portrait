@@ -25,7 +25,7 @@ final class SpeakerAudioPlayer: NSObject {
 
     /// 切换:在播这个 id → 停;否则起播。找不到音频静默返。
     /// 播放优先级:
-    ///   1. ~/.portrait/voice_training/<id>.wav(用户训练录的那 30s)
+    ///   1. ~/.portrait/metadata/voice_training/<id>.wav(用户训练录的那 30s)
     ///   2. audio_chunks 里最近一条带转录的会议音频(fallback)
     func toggle(speakerId: Int64) {
         if playingId == speakerId {

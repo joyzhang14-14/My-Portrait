@@ -144,7 +144,7 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 │   ├── frames/<date>/{ts_ms}_m{monitor}.jpg    # hot JPG tier
 │   └── video/<date>/m{id}_{startTs}.mp4        # HEVC compaction tier
 ├── audio_queue/                    # VAD-segmented WAV + deferred-transcription queue
-├── voice_training/<speaker_id>.wav
+├── metadata/voice_training/<speaker_id>.wav
 ├── runtime/                        # auto-installed agent runtime: bun/, pi-agent/, bin/ (PATH dir for agents)
 └── models/                         # local model cache
 ```

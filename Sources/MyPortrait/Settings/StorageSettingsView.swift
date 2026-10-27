@@ -307,8 +307,8 @@ private struct StorageStats {
     /// missing dirs just contribute 0.
     ///
     /// 三张卡(capture / analysis / app)的目标是把 app 占的空间记全,但
-    /// **没有兜底行** —— chat.sqlite、voice_training、agent_sessions、
-    /// attachments、cron_jobs 这些(合计十几 MB)不计入任何一行,几行加起来
+    /// **没有兜底行** —— metadata/voice_training、metadata/transcript 这些
+    /// (合计几 MB)不计入任何一行,几行加起来
     /// 不等于 Data 磁贴。要闭合就再加一行 Other。
     ///
     /// 另外 App 那行量的是 `Bundle.main`,**在 `~/.portrait` 之外** ——

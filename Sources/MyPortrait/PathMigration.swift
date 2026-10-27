@@ -75,6 +75,12 @@ enum PathMigration {
                          to: AIPaths.runtimeDir.appendingPathComponent(name, isDirectory: true))
         }
 
+        // 1.9. 声纹训练录音: ~/.portrait/voice_training/ → ~/.portrait/metadata/voice_training/。
+        try? fm.createDirectory(at: Storage.voiceTrainingDir.deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+        moveIfNeeded(from: target.appendingPathComponent("voice_training", isDirectory: true),
+                     to: Storage.voiceTrainingDir)
+
         // 调度器的失败记录: ~/.portrait/scheduler/last_failures.json → ~/.portrait/pipeline/。
         let oldScheduler = target.appendingPathComponent("scheduler", isDirectory: true)
         moveIfNeeded(from: oldScheduler.appendingPathComponent("last_failures.json"),

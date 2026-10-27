@@ -193,7 +193,7 @@ final class VoiceTrainer {
                     self.phase = .failure("Couldn't extract voice embedding — try again with more speech.")
                     return
                 }
-                // 保存训练录音到 ~/.portrait/voice_training/<id>.wav,SpeakerAudio
+                // 保存训练录音到 ~/.portrait/metadata/voice_training/<id>.wav,SpeakerAudio
                 // Player 试听优先放这条(用户能自查训练质量)。失败 swallow,
                 // 不影响主流程。
                 Self.persistTrainingClip(samples: samples, speakerId: speakerId)
@@ -360,7 +360,7 @@ final class VoiceTrainer {
         return Array(UnsafeBufferPointer(start: ptr, count: frames))
     }
 
-    /// 把训练 buffer 写到 ~/.portrait/voice_training/<speakerId>.wav,SpeakerAudio
+    /// 把训练 buffer 写到 ~/.portrait/metadata/voice_training/<speakerId>.wav,SpeakerAudio
     /// Player 试听优先放这条。samples 是 16kHz mono Float32 ——直接走 AVAudioFile
     /// 写 LinearPCM Float32 wav,不重采样。
     nonisolated static func persistTrainingClip(samples: [Float], speakerId: Int64) {

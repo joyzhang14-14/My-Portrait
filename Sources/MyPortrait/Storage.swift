@@ -112,8 +112,9 @@ enum Storage {
 
     /// Voice training 录音 WAV (`<speaker_id>.wav`)。每次重训覆盖。
     /// 给 SpeakersView 试听 + 给 maintainer 排查训练质量用。
+    /// `~/.portrait/metadata/voice_training/`(10-27 update,原 `~/.portrait/voice_training/`)。
     static var voiceTrainingDir: URL {
-        rootURL.appendingPathComponent("voice_training", isDirectory: true)
+        rootURL.appendingPathComponent("metadata/voice_training", isDirectory: true)
     }
 
     /// Make sure the layout exists on disk. Idempotent. Call at app start.
