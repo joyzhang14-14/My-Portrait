@@ -753,12 +753,16 @@ enum PremiumExchangeExporter {
         }
 
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let manifest = PremiumBundleManifest(
+        let ivEnd = input.pending.eventIntervals.compactMap(\.endMs).max()
+        let settle = max(PipelineSettle.eventsClock(through: Date(timeIntervalSince1970: Double(ivEnd ?? 0) / 1000)),
+                         PipelineSettle.portrait)
+        var manifest = PremiumBundleManifest(
             bundleId: bundleId, exportedAtMs: nowMs, macNowMs: nowMs,
             appVersion: input.appVersion, trigger: input.trigger, chains: input.chains, contents: input.contents,
             pending: input.pending, processingLog: input.processingLog,
             personalityLog: input.pending.personalityLog, aboutUserBlock: input.aboutUserBlock,
             params: input.params, trees: trees, files: files, redo: input.redo)
+        manifest.settleMs = Int64(settle.timeIntervalSince1970 * 1000)
         try PremiumExchange.encoder().encode(manifest)
             .write(to: tmp.appendingPathComponent("manifest.json"))
 

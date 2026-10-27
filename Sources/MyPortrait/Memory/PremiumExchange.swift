@@ -392,6 +392,9 @@ struct PremiumBundleManifest: Codable {
     var files: [String: String]
     /// 重跑的日子(只在 `redo` 包里有)。
     var redo: [PremiumRedoEntry]? = nil
+    /// 结算时刻(本包的料截至哪儿,见 `PipelineSettle`):Premium 中途临时算 weight、给新建 / 更新的
+    /// 画像记 created / lastModified 都按它,不按 Premium 哪天跑。
+    var settleMs: Int64? = nil
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -404,6 +407,7 @@ struct PremiumBundleManifest: Codable {
         case personalityLog = "personality_log"
         case aboutUserBlock = "about_user_block"
         case params, trees, files, redo
+        case settleMs = "settle_ms"
     }
 }
 
