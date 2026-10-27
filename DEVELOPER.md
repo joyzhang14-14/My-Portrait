@@ -466,8 +466,8 @@ Related invariants:
 - **Write the JPG and return immediately**; OCR and the DB insert fan out concurrently.
 - **OCR is deferred by default** (Settings → Workflow → Local Optimization). Frames are saved as
   full-resolution HEIC and queued in `ocr_pending`; `DeferredOCRWorker` reads them while the Mac
-  is charging, at the time picked in the page's schedule (any time, lid closed / brightness at
-  zero, or also after 5 minutes without input; more than 5 GB waiting runs it whenever charging),
+  is charging, at the time picked on that page (any time, lid closed, or idle: lid closed,
+  brightness at zero or 5 minutes without input; more than 5 GB waiting runs it whenever charging),
   with normal memory pressure and enough free memory
   (`SystemMemory`). Each frame then gets the usual JPG. Workflow steps run in order: interval
   sealing never passes the oldest queued frame, and the event / portrait / personality jobs don't

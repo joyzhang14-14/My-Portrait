@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import IOKit
 import IOKit.ps
@@ -67,6 +68,14 @@ public enum PowerMonitor {
     /// 合盖=Yes/true；`AppleClamshellCausesSleep` 是另一回事，别用)。取不到时
     /// 按"开盖"(false)最保守 —— 让 helper 宁可不持有 disablesleep。
     public static var isLidClosed: Bool { rootDomainBool("AppleClamshellState") }
+
+    /// 没人在用这台 Mac:合盖、屏幕亮度调到 0,或 5 分钟没有键盘鼠标操作
+    /// (Mac mini 这类没有盖子的机器靠最后一条)。延后 OCR 和转录的 idle 档共用。
+    static var isIdle: Bool {
+        if isLidClosed || DisplayBrightness.isAtMinimum() { return true }
+        let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
+        return idle >= 300
+    }
 
     /// 系统当前是否处于 disablesleep(`pmset disablesleep 1`)。读 `SleepDisabled`
     /// (普通权限可读、不可写)。用于检测 helper 异常死亡(SIGKILL/重启)留下、

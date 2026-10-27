@@ -789,11 +789,13 @@ struct RecordingConfig: Codable, Equatable {
 }
 
 /// 转录电源门槛(逐档收紧)。always=除电池合盖(机器本就睡)都跑;
-/// pluggedIn=需插电(默认);pluggedInLidClosed=只在插电+合盖跑。
+/// pluggedIn=需插电(默认);pluggedInLidClosed=只在插电+合盖跑;
+/// pluggedInIdle=插电且没人在用(`PowerMonitor.isIdle`)。
 enum TranscriptionPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
     case always
     case pluggedIn          = "plugged_in"
     case pluggedInLidClosed = "plugged_in_lid_closed"
+    case pluggedInIdle      = "plugged_in_idle"
 }
 
 struct AudioConfig: Codable, Equatable {
@@ -1219,7 +1221,7 @@ struct LocalModelConfig: Codable, Equatable {
     }
 }
 
-/// 延后 OCR 什么时候补做。三档都要充电;合盖档里屏幕亮度调到 0 也算。
+/// 延后 OCR 什么时候补做。三档都要充电;idle 见 `PowerMonitor.isIdle`。
 enum OCRPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
     case charging
     case chargingLidClosed = "charging_lid_closed"

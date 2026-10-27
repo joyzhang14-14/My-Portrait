@@ -238,12 +238,13 @@ actor TranscriptionScheduler {
         }
         // 当前电源状态下该不该跑(实时读 PowerMonitor —— 合盖 / 掉电会实时变):
         // always=除「电池+合盖」(机器本就睡)都跑;pluggedIn=需插电;
-        // pluggedInLidClosed=需插电+合盖。
+        // pluggedInLidClosed=需插电+合盖;pluggedInIdle=需插电+没人在用。
         func powerShouldRun() -> Bool {
             switch mode {
             case .always:             return PowerMonitor.isOnAC || !PowerMonitor.isLidClosed
             case .pluggedIn:          return PowerMonitor.isOnAC
             case .pluggedInLidClosed: return PowerMonitor.isOnAC && PowerMonitor.isLidClosed
+            case .pluggedInIdle:      return PowerMonitor.isOnAC && PowerMonitor.isIdle
             }
         }
 

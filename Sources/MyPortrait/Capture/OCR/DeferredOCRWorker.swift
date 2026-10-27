@@ -9,8 +9,8 @@ import os.log
 /// 采集时不做 OCR(全分辨率 OCR 的工作内存是常驻 300–600MB 的大头),帧存全分辨率
 /// HEIC 并登记进 `ocr_pending`。这里在**充电**时按设置里的档位补做(`OCRPowerMode`):
 ///   - Charging:充电就跑;
-///   - Charging & lid closed:合盖,或屏幕亮度调到 0;
-///   - Charging & idle:上面两条,或 5 分钟没有键盘鼠标操作(Mac mini 这类没有盖子的机器)。
+///   - Charging & lid closed:合盖;
+///   - Charging & idle:没人在用(合盖、亮度调到 0 或 5 分钟没有键鼠操作,`PowerMonitor.isIdle`)。
 /// 积压的图超过 5GB 时,后两档也是充电就跑(兜底)。
 /// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
 /// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看内存,马上补完。
@@ -23,7 +23,6 @@ import os.log
 /// 这一层在跑时事件 / 画像 / 性格都不开跑(`MemoryScheduler`)。
 actor DeferredOCRWorker {
 
-    static let idleSeconds: Double = 300
     static let backlogFallbackBytes: Int64 = 5 * 1024 * 1024 * 1024
     /// 刚采的帧 HEIC 可能还没写完盘,留一分钟。
     private static let settleMs: Int64 = 60_000
@@ -140,11 +139,10 @@ actor DeferredOCRWorker {
         if avail < SystemMemory.minFreeBytes { return "Not enough free memory" }
         if !settings.deferOCR { return nil }
         guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
-        if settings.ocrPowerMode == .charging { return nil }
-        if PowerMonitor.isLidClosed || DisplayBrightness.isAtMinimum() { return nil }
-        if settings.ocrPowerMode == .chargingIdle {
-            let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
-            if idle >= Self.idleSeconds { return nil }
+        switch settings.ocrPowerMode {
+        case .charging: return nil
+        case .chargingLidClosed: if PowerMonitor.isLidClosed { return nil }
+        case .chargingIdle: if PowerMonitor.isIdle { return nil }
         }
         if backlogBytes > Self.backlogFallbackBytes { return nil }
         return settings.ocrPowerMode == .chargingIdle ? "Waiting until the screen isn't in use" : "Waiting for the lid to close"

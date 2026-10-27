@@ -18,11 +18,9 @@ struct LocalOptimizationView: View {
                             icon: "text.viewfinder") {
                     Toggle("", isOn: config.binding(\.localOptimization.deferOCR)).labelsHidden().toggleStyle(.switch)
                 }
-            }
-
-            SettingsCard(title: "Schedule") {
+                SettingsDivider()
                 SettingsRow("When to run OCR",
-                            info: "• **Charging**: any time the Mac is charging.\n• **Charging & lid closed**: the lid is closed or the screen brightness is at zero.\n• **Charging & idle**: also when there's been no keyboard or mouse input for 5 minutes.\n\nIf more than 5 GB of screenshots are waiting, it runs whenever the Mac is charging. With the lid closed it keeps running via a background helper.",
+                            info: "• **Charging**: any time the Mac is charging.\n• **Charging & lid closed**: the lid is closed.\n• **Charging & idle**: the lid is closed, the screen brightness is at zero, or there's been no keyboard or mouse input for 5 minutes.\n\nIf more than 5 GB of screenshots are waiting, it runs whenever the Mac is charging. With the lid closed it keeps running via a background helper.",
                             icon: "powerplug") {
                     Picker("", selection: config.binding(\.localOptimization.ocrPowerMode)) {
                         Text("Only while charging").tag(OCRPowerMode.charging)
@@ -35,8 +33,8 @@ struct LocalOptimizationView: View {
                         SleepHelperClient.shared.enable()
                     }
                 }
+                .disabled(!config.current.localOptimization.deferOCR)
             }
-            .disabled(!config.current.localOptimization.deferOCR)
         }
     }
 
