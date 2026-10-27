@@ -46,8 +46,15 @@ enum Storage {
     /// Subdirs are dates (yyyy-MM-dd).
     static var eventsDir: URL { rootURL.appendingPathComponent("events", isDirectory: true) }
 
-    /// VAD-segmented raw audio + transcripts queue (P1 deferred transcription).
+    /// 待转录的录音段(VAD 切好的 WAV + .meta.json)。转录完就搬进 `audioDir/<日>/`,
+    /// 这里只剩还没转的(10-27 update)。
     static var audioQueueDir: URL { rootURL.appendingPathComponent("audio_queue", isDirectory: true) }
+
+    /// 转录结果的 JSON 副本,`metadata/transcript/<日>/<段名>.transcript.json`。
+    /// 正本在数据库(audio_transcriptions),这里只是按文件翻看用。
+    static var transcriptDir: URL {
+        rootURL.appendingPathComponent("metadata/transcript", isDirectory: true)
+    }
 
     /// Daily raw JSON logs (one file per day, batched at sleep).
     static var dailyLogsDir: URL { rootURL.appendingPathComponent("logs", isDirectory: true) }
@@ -73,10 +80,9 @@ enum Storage {
     /// `~/.portrait/raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4`.
     static var videoDir: URL { rawDataDir.appendingPathComponent("video", isDirectory: true) }
 
-    /// Per-day imported-audio directory. Path:
-    /// `~/.portrait/raw_data/audio/YYYY-MM-DD/imported_<basename>`.
-    /// 只放 screenpipe import 拷进来的音频副本 —— 让 retention 只删 ~/.portrait
-    /// 里的副本,永不碰只读的 ~/.screenpipe 原始文件。
+    /// 留存的录音,`~/.portrait/raw_data/audio/YYYY-MM-DD/`:转录完从 `audioQueueDir`
+    /// 搬来的 WAV + .meta.json,以及 screenpipe import 拷进来的音频副本(retention 只删
+    /// ~/.portrait 里的副本,永不碰只读的 ~/.screenpipe 原始文件)。
     static var audioDir: URL { rawDataDir.appendingPathComponent("audio", isDirectory: true) }
 
     /// SQLite written by the capture layer (frames / video_chunks / OCR / audio).
@@ -97,7 +103,7 @@ enum Storage {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            journalDir, rawDataDir, framesDir, videoDir,
+            journalDir, transcriptDir, rawDataDir, framesDir, videoDir,
             voiceTrainingDir,
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)

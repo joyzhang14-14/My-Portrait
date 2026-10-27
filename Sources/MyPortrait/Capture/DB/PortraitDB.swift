@@ -77,6 +77,10 @@ protocol PortraitDB: Sendable {
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
+    /// 已转录完、文件还在 `audio_queue/` 下的段(等着搬进 raw_data/audio)。
+    func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
+    /// 改一段的文件路径(搬家后)。`path` 存相对 root 的形式。
+    func updateAudioChunkPath(chunkId: Int64, path: String) async throws
 
     /// audio_chunks pending 队列实时 stats。StallDetector 用来判 audioBacklog
     /// stall(数量 > 阈值且最老 chunk 已超 freshness)。

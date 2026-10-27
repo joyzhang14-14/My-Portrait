@@ -314,6 +314,32 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
+        try await dbPool.read { db in
+            try AudioChunkRow
+                .filter(Column("status") == AudioChunkStatus.done.rawValue)
+                .filter(Column("file_path").like("audio_queue/%"))
+                .order(Column("recorded_at_ms"))
+                .limit(limit)
+                .fetchAll(db)
+                .map { row in
+                    AudioChunkRecord(
+                        id: row.id, filePath: row.filePath, recordedAtMs: row.recordedAtMs,
+                        durationS: row.durationS, device: row.device, isInput: row.isInput,
+                        status: AudioChunkStatus(rawValue: row.status) ?? .done)
+                }
+        }
+    }
+
+    func updateAudioChunkPath(chunkId: Int64, path: String) async throws {
+        try await dbPool.write { db in
+            try db.execute(
+                sql: "UPDATE audio_chunks SET file_path = :path WHERE id = :chunkId",
+                arguments: ["path": AssetPath.normalize(path), "chunkId": chunkId]
+            )
+        }
+    }
+
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
         try await dbPool.read { db in
             let rows = try AudioChunkRow

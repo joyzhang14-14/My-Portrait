@@ -233,6 +233,9 @@ actor TranscriptionScheduler {
         isDraining = true
         defer { isDraining = false }
 
+        // 上一轮转录完的段先搬出队列(每轮都扫,崩在半路的下一轮接着搬)。
+        await archiveTranscribed()
+
         // 转录电源档位:决定「转 / 停」+ 隐含防睡方式(开盖 IOPMAssertion / 合盖 helper)。
         let mode = await MainActor.run {
             ConfigStore.shared.current.capture.audio.transcriptionPowerMode
@@ -676,7 +679,7 @@ actor TranscriptionScheduler {
         logger.info("history cross-channel dedup complete: deleted \(totalDeleted, privacy: .public) duplicate mic segment(s)")
     }
 
-    /// 写 `seg_<ts>.transcript.json` 到 wav 同目录。
+    /// 写 `metadata/transcript/<日>/seg_<ts>.transcript.json`。
     /// 失败只 log（DB 已经记了真相镜像，sidecar 丢了无大碍但要警告）。
     private func writeTranscriptSidecar(
         wavPath: String,
@@ -685,13 +688,12 @@ actor TranscriptionScheduler {
         engine: String,
         transcribedAtMs: Int64
     ) {
-        let wavURL = URL(fileURLWithPath: wavPath)
-        // 去掉 ".wav" 加 ".transcript.json"。
-        let base = wavURL.deletingPathExtension()
-        let sidecar = base.appendingPathExtension("transcript.json")
+        let name = URL(fileURLWithPath: wavPath).deletingPathExtension().lastPathComponent
+        let dir = Storage.transcriptDir.appendingPathComponent(Self.dayString(chunk.recordedAtMs), isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let sidecar = dir.appendingPathComponent(name + ".transcript.json")
 
         let payload: [String: Any] = [
-            "wav_path": wavPath,
             "recorded_at_ms": chunk.recordedAtMs,
             "duration_s": chunk.durationS,
             "device": chunk.device,
@@ -705,6 +707,61 @@ actor TranscriptionScheduler {
         } catch {
             logger.warning("transcript sidecar write failed for \(sidecar.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// 转录完的段搬出 `audio_queue/`(10-27 update):WAV 和 .meta.json 挪进 `raw_data/audio/<日>/`,
+    /// 旧版写在旁边的 .transcript.json 挪进 `metadata/transcript/<日>/`,再改库里的路径。
+    /// 文件早就不在的段(删过的)也把路径改过去,免得每轮都被扫到。
+    private func archiveTranscribed() async {
+        guard let chunks = try? await db.transcribedQueuedAudioChunks(limit: 2000), !chunks.isEmpty else { return }
+        let fm = FileManager.default
+        var moved = 0
+        for chunk in chunks {
+            guard let chunkId = chunk.id else { continue }
+            let src = URL(fileURLWithPath: (Storage.rootURL.path as NSString).appendingPathComponent(chunk.filePath))
+            let name = src.deletingPathExtension().lastPathComponent
+            let day = Self.dayString(chunk.recordedAtMs)
+            let dstDir = Storage.audioDir.appendingPathComponent(day, isDirectory: true)
+            let dst = dstDir.appendingPathComponent(src.lastPathComponent)
+            try? fm.createDirectory(at: dstDir, withIntermediateDirectories: true)
+            if fm.fileExists(atPath: src.path), !fm.fileExists(atPath: dst.path) {
+                do { try fm.moveItem(at: src, to: dst) } catch {
+                    logger.warning("archive \(src.lastPathComponent, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                    continue
+                }
+            }
+            let srcDir = src.deletingLastPathComponent()
+            Self.moveIfPresent(srcDir.appendingPathComponent(name + ".meta.json"),
+                               to: dstDir.appendingPathComponent(name + ".meta.json"))
+            let tDir = Storage.transcriptDir.appendingPathComponent(day, isDirectory: true)
+            if fm.fileExists(atPath: srcDir.appendingPathComponent(name + ".transcript.json").path) {
+                try? fm.createDirectory(at: tDir, withIntermediateDirectories: true)
+                Self.moveIfPresent(srcDir.appendingPathComponent(name + ".transcript.json"),
+                                   to: tDir.appendingPathComponent(name + ".transcript.json"))
+            }
+            do {
+                try await db.updateAudioChunkPath(chunkId: chunkId, path: dst.path)
+                moved += 1
+            } catch {
+                logger.warning("archive path update failed for chunk \(chunkId, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
+        if moved > 0 { logger.info("archived \(moved, privacy: .public) transcribed audio chunk(s)") }
+    }
+
+    private static func moveIfPresent(_ src: URL, to dst: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: src.path), !fm.fileExists(atPath: dst.path) else { return }
+        try? fm.moveItem(at: src, to: dst)
+    }
+
+    /// 录音段按本地日分目录(yyyy-MM-dd)。
+    static func dayString(_ ms: Int64) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
     }
 
 }
