@@ -40,8 +40,8 @@ import GRDB
 /// 从后往前扫,接上的帧可以再接给更早的帧。标题原本为空的一并取那一帧的标题。
 /// 备份表 `frames_url_sim_backup`,`--from-similar --rollback` 还原。
 ///
-/// 默认 **dry-run**:打印统计 + 样例,完整清单写到
-/// `~/.portrait/logs/fix-browser-urls-dryrun.tsv`。`--apply` 前把受影响行的旧值存进
+/// 默认 **dry-run**:打印统计 + 样例,完整清单导出到
+/// `~/Downloads/fix-browser-urls-dryrun.tsv`(导出物一律进 Downloads,不放数据目录)。`--apply` 前把受影响行的旧值存进
 /// `frames_url_fix_backup`,`--rollback` 从那张表整体还原。frames 有 FTS 触发器
 /// (foundation_icu 分词器),必须经 PortraitDBImpl 的 pool 写。
 enum FixBrowserURLsCLI {
@@ -449,8 +449,9 @@ enum FixBrowserURLsCLI {
                 print("  #\(p.id) \(p.app) \(kind)\n     \(p.oldUrl ?? "∅")  →  \(p.newUrl)\n     \(p.oldTitle ?? "∅")  →  \(p.newTitle ?? "∅")")
             }
         }
-        let out = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".portrait/logs/fix-browser-urls-dryrun.tsv")
+        let out = (FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                   ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads"))
+            .appendingPathComponent("fix-browser-urls-dryrun.tsv")
         var tsv = "id\tapp\tkind\told_url\tnew_url\told_title\tnew_title\n"
         for p in proposals {
             tsv += [String(p.id), p.app, p.kind, p.oldUrl ?? "", p.newUrl, p.oldTitle ?? "", p.newTitle ?? ""]
