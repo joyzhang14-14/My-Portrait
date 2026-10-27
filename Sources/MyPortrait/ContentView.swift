@@ -226,8 +226,8 @@ struct ContentView: View {
 
     /// 当前这一屏**能不能动到真实数据** —— dev mode 顶条据此变红。
     ///
-    /// dev mode 保护的是"存在 config.toml 里的设置"和"events / portrait /
-    /// chat 三份数据",这几处不在保护范围内、且是有意为之:
+    /// dev mode 保护的是"存在 config.toml 里的设置"和"events / portrait
+    /// 两份数据",这几处不在保护范围内、且是有意为之:
     ///   - Connections / Downloads → 凭据在 `secrets.sqlite`,**永远是真实那份**
     ///     (这正是"切过去不用重新绑定供应商"的前提)
     ///   - Notifications → 跟真实配置跑

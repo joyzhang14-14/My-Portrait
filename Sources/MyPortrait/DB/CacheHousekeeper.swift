@@ -3,17 +3,14 @@ import os.log
 
 /// 自动回收 —— 后台清掉确定没用的东西,**不给用户任何开关**。
 ///
-/// 只做两件没有歧义的事:
-///   1. `bun/install/cache` —— bun 装 npm 包时的下载缓存,装完就没用了
-///   2. `attachments/` 里没有任何**还活着的对话**再引用的孤儿文件
+/// 只做一件没有歧义的事:`bun/install/cache` —— bun 装 npm 包时的下载
+/// 缓存,装完就没用了。
 ///
 /// ⚠️ **绝不碰**这几个,它们看着像缓存其实不是:
 ///   - `bun/bin/` —— Bun 运行时本体,删了 AI 直接不能跑,要重新联网下载
 ///   - `pi-agent/` —— agent 的 node_modules,同上
 ///   - `models/` —— Downloads 页那些本地模型(说话人 / VAD / 语音分割),
 ///     删了那页会从 "Installed 5/5" 悄悄变回未安装
-///   - `agent_sessions/` —— 对话删除时 `ChatStore.deleteConversation` 已经
-///     跟着删了,这里再插一手只会跟它打架
 ///
 /// 每一步都可以在任何时刻安全地放弃:拿不准就什么都不删,下一轮(24h 后)
 /// 再试。宁可多占几百 MB,不可误删用户唯一的一份文件。
@@ -21,16 +18,8 @@ enum CacheHousekeeper {
 
     private static let log = Logger(subsystem: "com.myportrait.db", category: "housekeeper")
 
-    /// 附件的年龄闸:只有**这么久没动过**的才进入孤儿判定。
-    /// 刚粘上还没发出去的、正在聊的,一律不碰。
-    private static let attachmentMinAgeDays: Double = 30
-
     /// bun 缓存的静默期:目录在这个时间内被写过 → 多半正在装包,让开。
     private static let bunCacheQuietSeconds: TimeInterval = 600
-
-    /// 单个 session 文件的读取上限。超过就当"读不了"处理(见 sweep 里的
-    /// fail-safe)—— 不为了回收几十 MB 附件去把几百 MB 的 jsonl 读进内存。
-    private static let maxSessionFileBytes: Int = 64 * 1024 * 1024
 
     /// 跑一轮。挂在 RetentionWorker 的 24h 节拍上,**不受 auto-delete 模式
     /// 影响** —— 这里清的不是用户数据,是垃圾,用户选哪档都照清。
@@ -41,11 +30,6 @@ enum CacheHousekeeper {
             let freed = t.bunCache.reduce(0) { $0 + size(of: $1) }
             for u in t.bunCache { try? fm.removeItem(at: u) }
             log.notice("bun cache: freed \(freed / 1_048_576) MB")
-        }
-        if !t.orphanAttachments.isEmpty {
-            let freed = t.orphanAttachments.reduce(0) { $0 + size(of: $1) }
-            for u in t.orphanAttachments { try? fm.removeItem(at: u) }
-            log.notice("attachments: removed \(t.orphanAttachments.count) orphan(s), freed \(freed / 1_048_576) MB")
         }
     }
 
@@ -58,14 +42,12 @@ enum CacheHousekeeper {
     /// 此刻可以安全删掉的东西。**只列不删**,`run()` 和磁贴共用。
     struct Reclaimable {
         var bunCache: [URL] = []
-        var orphanAttachments: [URL] = []
-        var all: [URL] { bunCache + orphanAttachments }
+        var all: [URL] { bunCache }
     }
 
     static func reclaimable() async -> Reclaimable {
         var r = Reclaimable()
         r.bunCache = bunInstallCacheTargets()
-        r.orphanAttachments = await orphanAttachmentTargets()
         return r
     }
 
@@ -96,101 +78,13 @@ enum CacheHousekeeper {
         return (try? fm.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)) ?? []
     }
 
-    // MARK: - 2. attachments 孤儿回收
-
-    /// 附件(用户往聊天里粘的图 / 拖的文件)存成 `attachments/<UUID>.<ext>`。
-    ///
-    /// **引用只存在于 agent 的 session 文件里** —— 消息正文存的是用户打的字,
-    /// 附件路径只进了发给 agent 的 prompt(`ChatController.send`),而
-    /// `attachmentsByMessage` 明确不持久化。所以判定就是:还活着的对话,
-    /// 它自己那个 session 文件里有没有提到这个 UUID。
-    ///
-    /// **只查活对话自己的那一个文件,不扫目录。** Claude Code 的
-    /// `~/.claude/projects` 在开发机上能有 8 GB / 两万多个 jsonl,全扫是灾难。
-    private static func orphanAttachmentTargets() async -> [URL] {
-        let fm = FileManager.default
-        let dir = AIPaths.supportDir.appendingPathComponent("attachments", isDirectory: true)
-        guard fm.fileExists(atPath: dir.path),
-              let files = try? fm.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: [.contentModificationDateKey])
-        else { return [] }
-
-        let cutoff = Date().addingTimeInterval(-attachmentMinAgeDays * 86400)
-        let candidates = files.filter { u in
-            guard let m = modifiedAt(u) else { return false }   // 读不到日期 → 不碰
-            return m < cutoff
-        }
-        guard !candidates.isEmpty else { return [] }
-
-        // 活对话的 session 文件清单。conv 被删时 pi 的 jsonl 会跟着删,
-        // 所以"对话没了"天然等于"它的附件成了孤儿"。
-        let convs = await MainActor.run {
-            ChatStore.shared.conversations.map { ($0.piSessionPath, $0.claudeSessionId) }
-        }
-
-        var sessionFiles: [URL] = []
-        for (piPath, claudeSid) in convs {
-            if let p = piPath, fm.fileExists(atPath: p) {
-                sessionFiles.append(URL(fileURLWithPath: p))
-            }
-            if let sid = claudeSid, let u = claudeSessionFile(sid: sid) {
-                sessionFiles.append(u)
-            }
-        }
-
-        // UUID(不含扩展名)出现在任何一个 session 文本里 = 还被引用。
-        var referenced = Set<String>()
-        for f in sessionFiles {
-            guard let text = readIfSmallEnough(f) else {
-                // 有文件但读不出来 → 我们不知道它引用了什么。**整轮放弃**,
-                // 一个都不删。宁可这次白跑,不可猜。
-                log.notice("attachments: session unreadable — abort this pass")
-                return []
-            }
-            for u in candidates {
-                let stem = u.deletingPathExtension().lastPathComponent
-                if !referenced.contains(stem), text.contains(stem) {
-                    referenced.insert(stem)
-                }
-            }
-        }
-
-        return candidates.filter {
-            !referenced.contains($0.deletingPathExtension().lastPathComponent)
-        }
-    }
-
-    /// Claude Code 把 session 存在 `~/.claude/projects/<项目目录名>/<sid>.jsonl`。
-    /// 那个目录名怎么算是它的内部实现,**不猜** —— 在 projects 下面平铺找一层,
-    /// 找到哪个算哪个。找不到 → nil(该 session 已经不在了,它引用的附件也就
-    /// 再没人能读到)。
-    private static func claudeSessionFile(sid: String) -> URL? {
-        let fm = FileManager.default
-        let root = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".claude/projects", isDirectory: true)
-        guard let projects = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-        else { return nil }
-        for p in projects {
-            let f = p.appendingPathComponent("\(sid).jsonl")
-            if fm.fileExists(atPath: f.path) { return f }
-        }
-        return nil
-    }
-
     // MARK: - 小工具
-
-    /// 读文件内容。超过上限 → nil(调用方按"读不了"走 fail-safe)。
-    private static func readIfSmallEnough(_ url: URL) -> String? {
-        guard fileSize(url) <= Int64(maxSessionFileBytes) else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
-    }
 
     private static func modifiedAt(_ url: URL) -> Date? {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
     }
 
-    /// 文件就是文件大小,目录就递归求和 —— bun 缓存的每个 target 是目录,
-    /// 附件的每个 target 是文件,两边共用一个入口。
+    /// 文件就是文件大小,目录就递归求和 —— bun 缓存的 target 文件、目录都有。
     private static func size(of url: URL) -> Int64 {
         let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
         return isDir ? directorySize(url) : fileSize(url)

@@ -21,13 +21,9 @@ enum Storage {
     /// 采集线程自己在跑的"?后者一律 `rootURL`。
     static var uiRootURL: URL { DevMode.isOn ? DevMode.rootURL : rootURL }
 
-    /// events / portrait 的界面版。AI chat 的 `chat.sqlite`、`agent_sessions/`
-    /// 在 `AIPaths` 里切。
+    /// events / portrait 的界面版。
     ///
-    /// **不切**的两个:
-    ///   - `cron_jobs/` —— 定时 AI 任务跟真实配置跑(08-09 update)。切了的话
-    ///     dev mode 期间你本人的定时任务会停摆,而它们是真的要按时出结果的。
-    ///   - `personality_daily/` —— 查过调用方,只有 pipeline 在写、UI 不读。
+    /// **不切**:`personality_daily/` —— 查过调用方,只有 pipeline 在写、UI 不读。
     static var uiEventsDir: URL { uiRootURL.appendingPathComponent("events", isDirectory: true) }
     static var uiPortraitDir: URL { uiRootURL.appendingPathComponent("portrait", isDirectory: true) }
 

@@ -555,137 +555,6 @@ struct TimelineDB: Sendable {
         return out
     }
 
-    /// 最近 `lookback` 秒内的活跃 app + 窗口频次。给 AI chat 的 Quick Actions
-    /// 动态模板用 —— 端口自 screenpipe suggestions.rs 的 fetch_app_activity /
-    /// fetch_window_activity。同一次查询拉两组数据,避免主线程跑两次 SQL。
-    struct RecentActivity: Sendable {
-        struct AppCount: Sendable {
-            let appName: String
-            /// 该 app 出现过帧的 distinct 分钟数 —— 真实活跃时长(粒度:分)。
-            /// 跟 macOS Screen Time 的算法一致。
-            let activeMinutes: Int
-            /// raw frame 计数。给排序用,**不要拿来推时间** —— 帧是 event-
-            /// driven(app/window 切换才记),不是均匀采样;
-            /// 用 active_minutes 表达"用了多久"。
-            let frameCount: Int
-        }
-        struct WindowCount: Sendable {
-            let appName: String
-            let windowName: String
-            let activeMinutes: Int
-            let frameCount: Int
-        }
-        let apps: [AppCount]
-        let windows: [WindowCount]
-        /// 整个查询窗口内出现过帧的 distinct 分钟数(跨所有 app 去重)。
-        let totalActiveMinutes: Int
-        var totalFrames: Int { apps.reduce(0) { $0 + $1.frameCount } }
-    }
-
-    /// 兼容旧调用方:从 `now - lookback` 到 `now`。HomeView Quick Actions 用。
-    func recentActivity(lookback: TimeInterval = 3600) -> RecentActivity {
-        let end = Date()
-        let start = end.addingTimeInterval(-lookback)
-        return activity(from: start, to: end)
-    }
-
-    /// 显式时间段:查 `[start, end]` 内的活跃 app + 窗口频次 +真实分钟数。
-    ///
-    /// **active_minutes 不是 frame_count / 60**:帧是 event-driven(app/window
-    /// 切换才存),Terminal 光标停 6 小时可能只有 200 帧。改用
-    /// `COUNT(DISTINCT 每分钟的桶)` —— 这分钟有任何帧 = 这分钟在用,
-    /// 跟 macOS Screen Time 算法一致。
-    func activity(from start: Date, to end: Date) -> RecentActivity {
-        guard exists else { return .init(apps: [], windows: [], totalActiveMinutes: 0) }
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            return .init(apps: [], windows: [], totalActiveMinutes: 0)
-        }
-        defer { sqlite3_close(db) }
-
-        let startMs = Self.dbMs(start)
-        let endMs = Self.dbMs(end)
-
-        // app 维度:active_minutes 用 timestamp_ms / 60000 当桶 ID 去重。
-        // 同时回 frame_count 给排序。
-        var appsOut: [RecentActivity.AppCount] = []
-        let appSQL = """
-            SELECT app_name,
-                   COUNT(*) AS frames,
-                   COUNT(DISTINCT timestamp_ms / 60000) AS active_min
-            FROM frames
-            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
-              AND app_name IS NOT NULL AND app_name != ''
-            GROUP BY app_name
-            ORDER BY active_min DESC, frames DESC
-            LIMIT 20
-            """
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, appSQL, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, startMs)
-            sqlite3_bind_int64(stmt, 2, endMs)
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let c = sqlite3_column_text(stmt, 0) {
-                    let name = String(cString: c)
-                    let frames = Int(sqlite3_column_int(stmt, 1))
-                    let mins = Int(sqlite3_column_int(stmt, 2))
-                    appsOut.append(.init(appName: name, activeMinutes: mins, frameCount: frames))
-                }
-            }
-            sqlite3_finalize(stmt)
-        }
-
-        var winsOut: [RecentActivity.WindowCount] = []
-        let winSQL = """
-            SELECT app_name, window_name,
-                   COUNT(*) AS frames,
-                   COUNT(DISTINCT timestamp_ms / 60000) AS active_min
-            FROM frames
-            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
-              AND app_name IS NOT NULL AND app_name != ''
-              AND window_name IS NOT NULL AND window_name != ''
-            GROUP BY app_name, window_name
-            ORDER BY active_min DESC, frames DESC
-            LIMIT 20
-            """
-        if sqlite3_prepare_v2(db, winSQL, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, startMs)
-            sqlite3_bind_int64(stmt, 2, endMs)
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let appC = sqlite3_column_text(stmt, 0),
-                   let winC = sqlite3_column_text(stmt, 1) {
-                    let app = String(cString: appC)
-                    let win = String(cString: winC)
-                    let frames = Int(sqlite3_column_int(stmt, 2))
-                    let mins = Int(sqlite3_column_int(stmt, 3))
-                    winsOut.append(.init(appName: app, windowName: win,
-                                          activeMinutes: mins, frameCount: frames))
-                }
-            }
-            sqlite3_finalize(stmt)
-        }
-
-        // total_active_minutes: 整个窗口去重(任意 app),不是 sum(per-app)
-        // ——同一分钟用了多个 app 只算 1 分钟,跟 Screen Time 一致。
-        var totalMins = 0
-        let totalSQL = """
-            SELECT COUNT(DISTINCT timestamp_ms / 60000)
-            FROM frames
-            WHERE timestamp_ms >= ? AND timestamp_ms <= ?
-              AND app_name IS NOT NULL AND app_name != ''
-            """
-        if sqlite3_prepare_v2(db, totalSQL, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, startMs)
-            sqlite3_bind_int64(stmt, 2, endMs)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                totalMins = Int(sqlite3_column_int(stmt, 0))
-            }
-            sqlite3_finalize(stmt)
-        }
-
-        return .init(apps: appsOut, windows: winsOut, totalActiveMinutes: totalMins)
-    }
-
     // MARK: - Write operations (auto-delete / manual purge)
 
     struct DeleteResult: Sendable {
@@ -712,7 +581,7 @@ struct TimelineDB: Sendable {
             // 主 DatabasePool(capture 每帧写 / 转录写 / compaction 长事务)持有
             // WAL 写锁时,GRDB 默认 busyMode = .immediateError 会让这边立刻抛
             // SQLITE_BUSY → 声纹训练 / 说话人合并 / 隐私清除整笔静默失败。
-            // app 常驻采集 = 写流量持续存在,必须等锁(同 ChatStore 的 5s)。
+            // app 常驻采集 = 写流量持续存在,必须等锁(5s)。
             config.busyMode = .timeout(5)
             config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
             let queue = try DatabaseQueue(path: dbPath, configuration: config)
@@ -1083,7 +952,7 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
-        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败(同 ChatStore)。
+        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败。
         sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
         // 先查
         if let stmt = prepare(db, "SELECT id FROM speakers WHERE name = ? LIMIT 1") {
@@ -1301,7 +1170,7 @@ struct TimelineDB: Sendable {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
         defer { sqlite3_close(db) }
-        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败(同 ChatStore)。
+        // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败。
         sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {

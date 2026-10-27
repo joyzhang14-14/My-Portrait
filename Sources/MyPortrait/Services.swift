@@ -162,12 +162,6 @@ final class Services {
     /// - 订阅 settings 变化 → 启停 coordinator / audio
     /// - 用初始 settings 值同步对齐一次状态（默认都 OFF，所以两者都不启）
     func startManagedLifecycle() {
-        // 启动一次把 ~/.portrait/bin/{mp-query,mp-folders} shell wrapper 写好,
-        // 给 pi-coding-agent 用 bash 调本地数据查询 / folder 整理(SKILL.md 风格)。
-        // app 升级路径变后这里会重写。
-        _ = AIPaths.installMpQueryLink()
-        _ = AIPaths.installMpFoldersLink()
-
         // PowerWatcher 必须在 main thread 注册 IOPS run loop source。
         powerWatcher.start()
 
@@ -197,7 +191,7 @@ final class Services {
         //   2. WhisperKit 模型 (默认 base ~150MB):在下面 transcriber 启动的
         //      task 里、start() **之前**串行 prefetch —— 不能放这个并发 task
         //      (WhisperKitWrapper 契约要求调用方串行,见下)
-        //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Chat / cron job 依赖
+        //   3. Bun + Pi @mariozechner/pi-coding-agent (~30MB):Memory pipeline 的 AI 调用依赖
         Task.detached(priority: .utility) {
             await SpeakerModelStore.shared.prefetchAll()
         }

@@ -131,23 +131,6 @@ struct MyPortraitApp: App {
             FixSpeakersCLI.consolidateNoisyJoy()
             // 内部 exit。
         }
-        // `mp-query` 给 AI agent 用的本地数据查询接口(端口自 screenpipe
-        // SKILL.md REST API,改成 CLI + JSON stdout)。app 启动时会把自身
-        // symlink 成 ~/.portrait/bin/mp-query,pi-coding-agent / Claude
-        // Code agent 通过 bash 调用拿 OCR / 转录 / activity summary 数据。
-        if args.contains("--mp-query") {
-            let idx = args.firstIndex(of: "--mp-query")!
-            let rest = Array(args.dropFirst(idx + 1))
-            MPQueryCLI.run(args: rest)
-            // run() exits the process internally.
-        }
-        // `mp-folders` —— chat AI 整理 event folder 的工具面。同 mp-query 模式
-        // (shell wrapper 在 ~/.portrait/bin/ 下,exec 主二进制 + --mp-folders)。
-        if args.contains("--mp-folders") {
-            let idx = args.firstIndex(of: "--mp-folders")!
-            let rest = Array(args.dropFirst(idx + 1))
-            MPFoldersCLI.run(args: rest)
-        }
         // DEV-ONLY: `--backfill-day <yyyy-MM-dd>` runs the real Backfill for a
         // single day. Disposable — remove with EventPromptTest.swift.
         if let idx = args.firstIndex(of: "--backfill-day"), idx + 1 < args.count {
@@ -241,8 +224,8 @@ struct MyPortraitApp: App {
             PersonalityRefreshApplyCLI.run(day: args[idx + 1])
             // run() exits the process internally.
         }
-        // AI 聊天编辑工具面(--ai-* 子命令)。dispatcher 命中 → exit;
-        // 不命中 → fall through。给 chat 里的 AI 通过 Bash 调用。
+        // AI 编辑工具面(--ai-* 子命令,包 EditDraft)。dispatcher 命中 → exit;
+        // 不命中 → fall through。
         AIEditCLI.dispatch(args: args)
         // DEV-ONLY: `--repair-portrait` re-reads + re-writes every portrait /
         // event .md to fix stale on-disk frontmatter formatting.
