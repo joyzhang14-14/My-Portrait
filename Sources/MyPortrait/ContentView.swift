@@ -374,10 +374,6 @@ struct ContentView: View {
                 }
             } else {
                 DataView(scope: $dataScope,
-                             onEditEntity: { url in
-                                 chat.startEditConversation(originalURL: url)
-                                 selection = .home
-                             },
                              externalInputJump: $memoryInputJump)
             }
         case .settings:      SettingsPane(subsection: $settingsSubsection)

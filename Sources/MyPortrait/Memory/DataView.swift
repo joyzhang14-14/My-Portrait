@@ -16,9 +16,6 @@ struct DataView: View {
     /// writing-style chip → Input 跳转目标 record id;writing record 文本预览缓存。
     @State private var pendingInputRecordId: Int64? = nil
     @State private var wrPreviews: [Int64: String] = [:]
-    /// AI 编辑触发器。ContentView 注入:点击后把 chat 切到 edit 模式并
-    /// 跳转到 Home。nil = 编辑按钮隐藏(测试 / 旧调用方兼容)。
-    var onEditEntity: ((URL) -> Void)? = nil
     /// 图谱浮窗 wr chip 跳转注入(ContentView 传):非 nil → Input 定位该 record。
     /// nil = 无外部跳转,走内部 pendingInputRecordId(writing-style chip 路径)。
     var externalInputJump: Binding<Int64?>? = nil
@@ -47,6 +44,13 @@ struct DataView: View {
     /// 存相对路径而非 URL：直接拿 entries 里真实的 Entry.id 比，绕开 URL 等值表示差异。
     @State private var pendingEventRel: String? = nil
     @State private var confirmingDelete: Bool = false
+    /// 手动编辑:正在编辑的条目 + 各栏草稿。
+    @State private var editingId: Entry.ID?
+    @State private var draftTitle = ""
+    @State private var draftBody = ""
+    @State private var draftTags = ""
+    @State private var draftImpact: Double = 0
+    @State private var editError: String?
     /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
     @State private var searchText: String = ""
     /// event 右键 "Move to new folder…" 弹窗状态。
@@ -96,6 +100,10 @@ struct DataView: View {
 
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // 换了条目就退出编辑(草稿不带到别的条目上)。
+                    .onChange(of: selected) { _, new in
+                        if new != editingId { editingId = nil }
+                    }
             }
             .background(SidebarBackdrop().ignoresSafeArea())
             .task(id: scope) {
@@ -459,17 +467,18 @@ struct DataView: View {
         if let id = selected, let entry = entries.first(where: { $0.id == id }) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if editingId == entry.id {
+                        editor(entry)
+                    } else {
                     HStack(alignment: .top, spacing: 12) {
                         Text(entry.title)
                             .font(.system(size: 22, weight: .semibold))
                         Spacer()
-                        if let onEdit = onEditEntity {
-                            Button {
-                                onEdit(entry.id)
-                            } label: { Image(systemName: "bubble.left.and.text.bubble.right") }
-                            .buttonStyle(.bouncyIcon)
-                            .help("Edit with AI chat")
-                        }
+                        Button {
+                            beginEdit(entry)
+                        } label: { Image(systemName: "square.and.pencil") }
+                        .buttonStyle(.bouncyIcon)
+                        .help("Edit")
                         Button {
                             confirmingDelete = true
                         } label: { Image(systemName: "trash") }
@@ -486,6 +495,7 @@ struct DataView: View {
                     if let notes = entry.file.editNotes, !notes.isEmpty {
                         Divider().background(Color.primary.opacity(0.10))
                         editNotesBlock(notes)
+                    }
                     }
                 }
                 .padding(.horizontal, 24)
@@ -894,6 +904,95 @@ struct DataView: View {
     /// does NOT touch weight or any counter.
     private func handleSelect(entry: Entry) {
         selected = entry.id
+    }
+
+    // MARK: - 手动编辑
+
+    /// 编辑态:标题 / tags / impact(只有事件有,0–5)/ 正文各一栏,存回原文件。
+    private func editor(_ entry: Entry) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                TextField("Title", text: $draftTitle, axis: .vertical)
+                    .font(.system(size: 22, weight: .semibold))
+                    .textFieldStyle(.plain)
+                Spacer()
+                Button("Cancel") { editingId = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { Task { await saveEdit(entry) } }
+                    .keyboardShortcut("s", modifiers: .command)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 44)
+            editField("tags") {
+                TextField("comma-separated", text: $draftTags)
+                    .textFieldStyle(.roundedBorder)
+            }
+            if entry.file.impact != nil {
+                editField("impact") {
+                    HStack(spacing: 10) {
+                        Slider(value: $draftImpact, in: PortraitFile.impactRange, step: 0.1)
+                        Text(String(format: "%.1f", draftImpact))
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(width: 30, alignment: .trailing)
+                    }
+                }
+            }
+            Divider().background(Color.primary.opacity(0.10))
+            TextEditor(text: $draftBody)
+                .font(.system(size: 13))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                .frame(minHeight: 360)
+            if let editError {
+                Text(editError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func editField<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .frame(width: 130, alignment: .leading)
+            content()
+        }
+    }
+
+    private func beginEdit(_ entry: Entry) {
+        draftTitle = entry.title
+        draftBody = PortraitFile.splitHeading(entry.file.body).rest
+        draftTags = entry.file.tags.joined(separator: ", ")
+        draftImpact = entry.file.impact ?? 0
+        editError = nil
+        editingId = entry.id
+    }
+
+    @MainActor
+    private func saveEdit(_ entry: Entry) async {
+        let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { editError = "Title can't be empty."; return }
+        var seen = Set<String>()
+        let tags = draftTags.split(whereSeparator: { $0 == "," || $0 == "，" || $0 == "、" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        do {
+            // 重读盘上最新版再套用,别把这期间后台写进去的字段(weight / occurrences)冲掉。
+            let current = try PortraitFileIO.read(from: entry.id)
+            let updated = current.applyingManualEdit(
+                title: title, shownTitle: entry.title, body: draftBody, tags: tags,
+                impact: entry.file.impact == nil ? nil : draftImpact)
+            try PortraitFileIO.write(updated, to: entry.id)
+            editingId = nil
+            await reload()
+            selected = entry.id
+            actionStatus = "Saved: \(title)"
+        } catch {
+            editError = "Save failed: \(error.localizedDescription)"
+        }
     }
 
     /// Permanently delete one event's `.md` file from disk.

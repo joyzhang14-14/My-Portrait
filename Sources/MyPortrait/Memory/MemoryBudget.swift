@@ -11,7 +11,7 @@ import Foundation
 ///   1. Take all events whose latest occurrence is in the past `windowDays`.
 ///   2. Separate three groups:
 ///        protected (rawImpact ≥ peakProtection) — final = raw, untouched.
-///        frozen    (rebalanceCount ≥ maxRebalances) — leave impact alone.
+///        frozen    (rebalanceCount ≥ maxRebalances, or impact set by hand) — leave impact alone.
 ///        rebalancable (everything else)
 ///   3. Group the rebalancable events BY DAY.
 ///   4. Per day — greedy waterline:
@@ -122,7 +122,7 @@ enum MemoryBudget {
                 protectedCount += 1
                 continue
             }
-            if rebal >= params.maxRebalances {
+            if rebal >= params.maxRebalances || file.isImpactUserOverride {
                 bucketed.append(.init(url: url, file: file, kind: .frozen))
                 frozenCount += 1
                 continue

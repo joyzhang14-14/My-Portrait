@@ -95,6 +95,8 @@ final class ImpactScorer {
         candidates: [(URL, PortraitFile)], progress: ((Progress) -> Void)?
     ) async throws -> Result {
         let start = Date()
+        // 手改过 impact 的事件不再评分(被新活动 join 进来也一样)。
+        let candidates = candidates.filter { !$0.1.isImpactUserOverride }
 
         // Backfill writes event files as `unscored`; this rescore gives them a
         // real impact.

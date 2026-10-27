@@ -254,6 +254,49 @@ struct PortraitFile: Equatable {
     }
 }
 
+// MARK: - 手动编辑(Data 详情页的编辑按钮,10-26 update)
+
+extension PortraitFile {
+    /// 手改过 impact 的事件:评分(ImpactScorer)和预算(MemoryBudget)都不再动它。
+    static let userOverrideSource = "user_override"
+
+    var isImpactUserOverride: Bool { impactSource == Self.userOverrideSource }
+
+    /// 正文开头的 `# 标题` 行拆出来:编辑框里标题单独一栏,正文不带它。
+    static func splitHeading(_ body: String) -> (heading: String?, rest: String) {
+        let trimmed = body.drop { $0 == "\n" }
+        guard trimmed.hasPrefix("# ") else { return (nil, body) }
+        let line = trimmed.prefix { $0 != "\n" }
+        let rest = trimmed.dropFirst(line.count).drop { $0 == "\n" }
+        return (String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces), String(rest))
+    }
+
+    /// 套用手动编辑。`shownTitle` 是编辑前列表里显示的标题,用来判断标题改没改。
+    /// 事件:标题写 `event_title`,正文同步进 `event_summary`(下游 distill / personality /
+    /// 分类读的是它);impact 改了 → 标 user_override、重算 weight。
+    func applyingManualEdit(title: String, shownTitle: String, body: String,
+                            tags: [String], impact: Double?) -> PortraitFile {
+        var f = self
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hadHeading = Self.splitHeading(self.body).heading != nil
+        f.body = hadHeading || title != shownTitle ? "# \(title)\n\n\(body)\n" : body + "\n"
+        if !eventTitle.isEmpty {
+            f.eventTitle = title
+            f.eventSummary = body
+        }
+        f.tags = tags
+        if let impact, let old = self.impact, abs(impact - old) > 0.0001 {
+            let v = Self.clampImpact(impact)
+            f.impact = v
+            f.rawImpact = v
+            f.impactSource = Self.userOverrideSource
+            WeightCalculator.recompute(&f)
+        }
+        return f
+    }
+}
+
 /// Tiny order-preserving dedup helper.
 private extension Array where Element: Hashable {
     func uniqued() -> [Element] {
