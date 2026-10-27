@@ -418,12 +418,12 @@ struct AudioCaptureSettingsView: View {
                     }
                         SettingsDivider()
                         SettingsRow("When to transcribe",
-                                    info: "Audio always records; only transcribing waits. \"Plugged in & lid closed\" keeps running with the lid shut via a background helper — otherwise closing the lid pauses it.",
+                                    info: "Audio always records; only transcribing waits. \"Charging & lid closed\" keeps running with the lid shut via a background helper — otherwise closing the lid pauses it.",
                                     icon: "powerplug") {
                             Picker("", selection: config.binding(\.capture.audio.transcriptionPowerMode)) {
                                 Text("Always").tag(TranscriptionPowerMode.always)
-                                Text("Only while plugged in").tag(TranscriptionPowerMode.pluggedIn)
-                                Text("Only while plugged in & lid closed").tag(TranscriptionPowerMode.pluggedInLidClosed)
+                                Text("Only while charging").tag(TranscriptionPowerMode.pluggedIn)
+                                Text("Only while charging & lid closed").tag(TranscriptionPowerMode.pluggedInLidClosed)
                             }
                             .pickerStyle(.menu).labelsHidden().frame(width: 240)
                             .onChange(of: config.current.capture.audio.transcriptionPowerMode) { _, _ in

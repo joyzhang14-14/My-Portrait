@@ -1219,19 +1219,29 @@ struct LocalModelConfig: Codable, Equatable {
     }
 }
 
+/// 延后 OCR 什么时候补做。三档都要充电;合盖档里屏幕亮度调到 0 也算。
+enum OCRPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case charging
+    case chargingLidClosed = "charging_lid_closed"
+    case chargingIdle      = "charging_idle"
+}
+
 /// Settings → Workflow → Local Optimization(10-25 update)。
 struct LocalOptimizationConfig: Codable, Equatable {
     /// 采集时不做 OCR,等充电且没人在用屏幕时再补(DeferredOCRWorker)。
     var deferOCR: Bool = true
+    var ocrPowerMode: OCRPowerMode = .chargingIdle
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case deferOCR = "defer_ocr"
+        case ocrPowerMode = "ocr_power_mode"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         deferOCR = c.dflt(Bool.self, .deferOCR, deferOCR)
+        ocrPowerMode = c.dflt(OCRPowerMode.self, .ocrPowerMode, ocrPowerMode)
     }
 }
 
