@@ -464,7 +464,7 @@ CPU < 5%.
 Related invariants:
 
 - **Write the JPG and return immediately**; OCR and the DB insert fan out concurrently.
-- **OCR is deferred by default** (Settings → Workflow → Local Optimization). Frames are saved as
+- **OCR is deferred by default** (Settings → Screen Capture → Screen Text Recognition). Frames are saved as
   full-resolution HEIC and queued in `ocr_pending`; `DeferredOCRWorker` reads them while the Mac
   is charging, at the time picked on that page (any time, lid closed, or idle: lid closed,
   brightness at zero or 5 minutes without input; more than 5 GB waiting runs it whenever charging),

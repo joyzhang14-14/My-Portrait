@@ -847,6 +847,7 @@ struct ScreenCaptureSettingsView: View {
                 // 第三条 "Pause …" —— 跟上面两条同一类,并到同一张卡里。
                 protectedVideoRow
             }
+            ScreenTextRecognitionCard()
         }
     }
 

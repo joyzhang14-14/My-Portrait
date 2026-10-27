@@ -557,7 +557,7 @@ final class Services {
         let s = ConfigStore.shared.current.capture.screen
         let locked = s.pauseWhenLocked
         let dim = s.pauseAtMinBrightness
-        let deferOCR = ConfigStore.shared.current.localOptimization.deferOCR
+        let deferOCR = ConfigStore.shared.current.capture.screen.deferOCR
         Task {
             await coordinator.setCaptureGates(pauseWhenLocked: locked, pauseAtMinBrightness: dim)
             await coordinator.setDeferOCR(deferOCR)
@@ -572,16 +572,16 @@ final class Services {
         let store = ConfigStore.shared
         let seen = (store.current.capture.screen.pauseWhenLocked,
                     store.current.capture.screen.pauseAtMinBrightness,
-                    store.current.localOptimization.deferOCR)
+                    store.current.capture.screen.deferOCR)
         withObservationTracking {
             _ = store.capture.screen.pauseWhenLocked
             _ = store.capture.screen.pauseAtMinBrightness
-            _ = store.current.localOptimization.deferOCR
+            _ = store.current.capture.screen.deferOCR
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 let s = ConfigStore.shared.capture.screen
-                let d = ConfigStore.shared.current.localOptimization.deferOCR
+                let d = ConfigStore.shared.current.capture.screen.deferOCR
                 if (s.pauseWhenLocked, s.pauseAtMinBrightness, d) != seen {
                     self.pushCaptureGates()
                 }

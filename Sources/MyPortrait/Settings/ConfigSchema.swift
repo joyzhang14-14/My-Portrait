@@ -33,7 +33,6 @@ struct MyPortraitConfig: Codable, Equatable {
     var personalInfo:  PersonalInfoConfig  = .init()
     var premium:  PremiumConfig  = .init()
     var localModel:    LocalModelConfig    = .init()
-    var localOptimization: LocalOptimizationConfig = .init()
 
     init() {}
 
@@ -44,7 +43,6 @@ struct MyPortraitConfig: Codable, Equatable {
         case personalInfo = "personal_info"
         case premium = "premium"
         case localModel = "local_model"
-        case localOptimization = "local_optimization"
     }
 
     init(from decoder: Decoder) throws {
@@ -65,7 +63,6 @@ struct MyPortraitConfig: Codable, Equatable {
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         premium  = c.dflt(PremiumConfig.self, .premium, premium)
         localModel    = c.dflt(LocalModelConfig.self, .localModel, localModel)
-        localOptimization = c.dflt(LocalOptimizationConfig.self, .localOptimization, localOptimization)
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
@@ -925,11 +922,17 @@ struct ScreenConfig: Codable, Equatable {
     var pauseAtMinBrightness: Bool = true
     // (08-05 删 transparent_wallpaper 开关:壁纸回到 privacy.ignored_apps
     //  名单里那条 "Wallpaper",跟其它被遮的窗口同一套机制。)
+    /// Screen Text Recognition(10-25 update):采集时不做 OCR,按 `ocrPowerMode`
+    /// 等充电且空闲时再补(DeferredOCRWorker)。
+    var deferOCR:        Bool   = true
+    var ocrPowerMode:    OCRPowerMode = .chargingIdle
     init() {}
     enum CodingKeys: String, CodingKey {
         case enabled
         case pauseWhenLocked      = "pause_when_locked"
         case pauseAtMinBrightness = "pause_at_min_brightness"
+        case deferOCR             = "defer_ocr"
+        case ocrPowerMode         = "ocr_power_mode"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -937,6 +940,8 @@ struct ScreenConfig: Codable, Equatable {
         enabled              = c.dflt(Bool.self, .enabled, enabled)
         pauseWhenLocked      = c.dflt(Bool.self, .pauseWhenLocked, pauseWhenLocked)
         pauseAtMinBrightness = c.dflt(Bool.self, .pauseAtMinBrightness, pauseAtMinBrightness)
+        deferOCR             = c.dflt(Bool.self, .deferOCR, deferOCR)
+        ocrPowerMode         = c.dflt(OCRPowerMode.self, .ocrPowerMode, ocrPowerMode)
     }
 }
 
@@ -1226,25 +1231,6 @@ enum OCRPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
     case charging
     case chargingLidClosed = "charging_lid_closed"
     case chargingIdle      = "charging_idle"
-}
-
-/// Settings → Workflow → Local Optimization(10-25 update)。
-struct LocalOptimizationConfig: Codable, Equatable {
-    /// 采集时不做 OCR,等充电且没人在用屏幕时再补(DeferredOCRWorker)。
-    var deferOCR: Bool = true
-    var ocrPowerMode: OCRPowerMode = .chargingIdle
-
-    init() {}
-    enum CodingKeys: String, CodingKey {
-        case deferOCR = "defer_ocr"
-        case ocrPowerMode = "ocr_power_mode"
-    }
-    init(from decoder: Decoder) throws {
-        self.init()
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        deferOCR = c.dflt(Bool.self, .deferOCR, deferOCR)
-        ocrPowerMode = c.dflt(OCRPowerMode.self, .ocrPowerMode, ocrPowerMode)
-    }
 }
 
 // MARK: - Helper — `decodeIfPresent`-with-default

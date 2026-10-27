@@ -140,9 +140,9 @@ actor DeferredOCRWorker {
 
     // MARK: - 条件
 
-    /// nil = 可以跑;否则是等待原因(显示在 Local Optimization 页)。
+    /// nil = 可以跑;否则是等待原因(显示在 Screen Capture 页的 Screen Text Recognition 卡)。
     private func checkGate(backlogBytes: Int64) async -> String? {
-        let settings = await MainActor.run { ConfigStore.shared.current.localOptimization }
+        let settings = await MainActor.run { ConfigStore.shared.current.capture.screen }
         if let level = SystemMemory.pressureLevel(), level > 1 { return "Memory pressure is high" }
         guard let avail = SystemMemory.availableBytes() else { return "Can't read free memory" }
         if avail < SystemMemory.minFreeBytes { return "Not enough free memory" }
@@ -198,7 +198,7 @@ actor DeferredOCRWorker {
     }
 }
 
-/// 延后 OCR 的状态,给 Local Optimization 页和 MemoryScheduler 读。
+/// 延后 OCR 的状态,给 Screen Text Recognition 卡和 MemoryScheduler 读。
 @MainActor
 @Observable
 final class DeferredOCRStatus {
