@@ -1152,6 +1152,15 @@ enum DBSchema {
             try db.execute(sql: "CREATE INDEX idx_ocr_pending_ts ON ocr_pending(timestamp_ms)")
         }
 
+        // 还没压成 MP4 的帧(snapshot_path 非空)只有一千来行,压缩每 5 分钟找一次。
+        // 没这个索引就得按时间索引把几十万帧整表读一遍(大库一次 ~27s 磁盘读)。
+        m.registerMigration("v49_frames_snapshot_index") { db in
+            try db.execute(sql: """
+                CREATE INDEX idx_frames_snapshot ON frames(device_name, timestamp_ms)
+                WHERE snapshot_path IS NOT NULL
+                """)
+        }
+
         return m
     }
 }
