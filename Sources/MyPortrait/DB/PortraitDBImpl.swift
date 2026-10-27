@@ -855,6 +855,8 @@ actor PortraitDBImpl: PortraitDB {
                     DELETE FROM frames WHERE timestamp_ms < :beforeMs
                     """, arguments: ["beforeMs": beforeMs])
                 let framesAffected = db.changesCount
+                // ocr_pending 没有外键,删帧要顺手清掉,否则孤儿行会一直挡住事件封口。
+                try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id NOT IN (SELECT id FROM frames)")
 
                 try db.execute(sql: """
                     DELETE FROM video_chunks WHERE end_ts_ms < :beforeMs

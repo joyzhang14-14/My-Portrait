@@ -56,6 +56,7 @@ enum PurgeLoginWindowCLI {
 
             try db.execute(sql: "DELETE FROM frames WHERE app_name = 'loginwindow'")
             deletedFrames = db.changesCount
+            try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id NOT IN (SELECT id FROM frames)")
 
             // 动态变长 IN:分批 500 防参数上限;显式 StatementArguments 包装
             // (CLAUDE.md 规约:不走数组字面量隐式转换)。

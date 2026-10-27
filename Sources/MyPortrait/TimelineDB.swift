@@ -592,26 +592,6 @@ struct TimelineDB: Sendable {
         }
     }
 
-    func deleteBefore(_ cutoff: Date, mediaOnly: Bool) -> DeleteResult {
-        guard exists else { return DeleteResult() }
-        let cutoffMs = Self.dbMs(cutoff)
-        // frames + audio_transcriptions 都挂 foundation_icu 的 FTS5 触发器 ——
-        // 必须走带分词器的 GRDB 连接,否则两条 DELETE 都会触发器报错回滚。
-        let r = withTokenizerWrite { db -> DeleteResult in
-            var res = DeleteResult()
-            try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms < :ms",
-                           arguments: ["ms": cutoffMs])
-            res.frames = db.changesCount
-            if !mediaOnly {
-                try db.execute(sql: "DELETE FROM audio_transcriptions WHERE transcribed_at_ms < :ms",
-                               arguments: ["ms": cutoffMs])
-                res.audio = db.changesCount
-            }
-            return res
-        }
-        return r ?? DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
-    }
-
     /// Delete frames + audio transcriptions strictly *after* `cutoff`.
     ///
     /// 隐私删除("Delete last 15m/30m/1h")。只删 DB 行不够:
@@ -624,7 +604,8 @@ struct TimelineDB: Sendable {
     func deleteAfter(_ cutoff: Date) -> DeleteResult {
         guard exists else { return DeleteResult() }
         let cutoffMs = Self.dbMs(cutoff)
-        // 同 deleteBefore:两条 DELETE 都触发 FTS5,必须走带分词器的 GRDB 连接。
+        // frames + audio_transcriptions 都挂 foundation_icu 的 FTS5 触发器 ——
+        // 必须走带分词器的 GRDB 连接,否则 DELETE 会触发器报错回滚。
         var doomedMedia: [String] = []
         var doomedAudio: [String] = []
         let r = withTokenizerWrite { db -> DeleteResult in
@@ -647,6 +628,8 @@ struct TimelineDB: Sendable {
             try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms >= :ms",
                            arguments: ["ms": cutoffMs])
             res.frames = db.changesCount
+            // ocr_pending 没有外键,删帧要顺手清掉,否则孤儿行会一直挡住事件封口。
+            try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id NOT IN (SELECT id FROM frames)")
             try db.execute(sql: "DELETE FROM video_chunks WHERE start_ts_ms >= :ms",
                            arguments: ["ms": cutoffMs])
             try db.execute(sql: "DELETE FROM audio_chunks WHERE recorded_at_ms >= :ms",
