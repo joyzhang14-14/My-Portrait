@@ -48,22 +48,6 @@ struct DisplaySettingsView: View {
             }
 
             MenuBarLampCard()
-
-            SettingsCard(title: "Chat") {
-                SettingsRow("Compact tool call blocks",
-                            info: "Collapse a reply's thinking + tool steps into one expandable summary bar. Faster to load.",
-                            icon: "rectangle.compress.vertical") {
-                    Toggle("", isOn: config.binding(\.display.compactToolBlocks))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-                SettingsDivider()
-                SettingsRow("Hide thinking blocks",
-                            info: "Don't show the model's reasoning trace in the transcript.",
-                            icon: "brain") {
-                    Toggle("", isOn: config.binding(\.display.hideModelReasoning))
-                        .labelsHidden().toggleStyle(.switch)
-                }
-            }
         }
     }
 }

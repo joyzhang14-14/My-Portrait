@@ -121,10 +121,8 @@ final class ConfigStore {
     var notifications: NotificationsConfig { get { current.notifications } set { mutate { $0.notifications = newValue } } }
     var memory:        MemoryConfig        { get { current.memory }        set { mutate { $0.memory = newValue } } }
     var scheduler:     SchedulerSettings   { get { current.scheduler }     set { mutate { $0.scheduler = newValue } } }
-    var usage:         UsageConfig         { get { current.usage }         set { mutate { $0.usage = newValue } } }
     var privacy:       PrivacyConfig       { get { current.privacy }       set { mutate { $0.privacy = newValue } } }
     var storage:       StorageConfig       { get { current.storage }       set { mutate { $0.storage = newValue } } }
-    var chat:          ChatConfig          { get { current.chat }          set { mutate { $0.chat = newValue } } }
 
     /// Force-flush any pending debounced write immediately (caller awaits it).
     func saveNow() {
@@ -258,11 +256,9 @@ final class ConfigStore {
             let raw = try String(contentsOf: path, encoding: .utf8)
             // 一次性 key 迁移。下次保存即写新 key,此后这些 replace 是 no-op。
             //   [recording.*] → [capture.*]
-            //   pipe_alerts → cron_job_alerts
             let migrated = raw
                 .replacingOccurrences(of: "[recording]",  with: "[capture]")
                 .replacingOccurrences(of: "[recording.", with: "[capture.")
-                .replacingOccurrences(of: "pipe_alerts",  with: "cron_job_alerts")
             let decoded = try TOMLDecoder().decode(MyPortraitConfig.self, from: migrated)
             current = applySchemaMigration(decoded)
             loadError = nil
@@ -365,7 +361,6 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.theme")                  { c.display.theme = v }
         // chatAlwaysOnTop 字段已下线(窗口固定 .normal 层级),旧 UserDefaults 不再迁移。
         // translucentSidebar 字段已下线(侧栏固定实色),旧 UserDefaults 不再迁移。
-        c.display.hideModelReasoning      = bool(ud, "Settings.hideModelReasoning",    default: c.display.hideModelReasoning)
         if let v = ud.string(forKey: "Settings.appName")                { c.display.appName = v }
         if let v = ud.string(forKey: "Settings.customDockIcon")         { c.display.customDockIcon = v }
         c.display.showInMenuBar           = bool(ud, "Settings.showInMenuBar",         default: c.display.showInMenuBar)
@@ -392,11 +387,7 @@ final class ConfigStore {
 
         // — Notifications
         c.notifications.appUpdates       = bool(ud, "Settings.notifyAppUpdates",      default: c.notifications.appUpdates)
-        c.notifications.cronJobAlerts       = bool(ud, "Settings.notifyPipeAlerts",      default: c.notifications.cronJobAlerts)
         c.notifications.captureStalls    = bool(ud, "Settings.notifyCaptureStalls",   default: c.notifications.captureStalls)
-
-        // — Usage
-        if let v = ud.string(forKey: "Settings.usageRange") { c.usage.range = v }
 
         // — Privacy
         c.privacy.recordAudioWhileLocked = bool(ud, "Settings.recordAudioWhileLocked", default: c.privacy.recordAudioWhileLocked)
@@ -407,9 +398,6 @@ final class ConfigStore {
         if let v = ud.string(forKey: "Settings.dataDirectory")  { c.storage.dataDirectory = v }
         if let v = ud.string(forKey: "Settings.retentionDays")  { c.storage.retentionDays = v }
         if let v = ud.string(forKey: "Settings.autoDeleteMode") { c.storage.autoDeleteMode = v }
-
-        // — Chat (HomeView shield)
-        c.chat.redactPii = bool(ud, "MyPortrait.redactPII", default: c.chat.redactPii)
 
         // — AI presets (was JSON in UserDefaults under "Settings.aiPresets.v1")
         if let blob = ud.data(forKey: "Settings.aiPresets.v1"),

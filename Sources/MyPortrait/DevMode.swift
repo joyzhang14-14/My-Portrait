@@ -9,7 +9,7 @@ import Foundation
 /// 1. **capture 永远写 `~/.portrait`** —— dev mode 期间一帧都不能少。
 /// 2. **pipeline 定时任务永远读写 `~/.portrait`** —— 它产出的是真实记忆。
 /// 3. **config 按 section 切**:界面类(display / general / aiModels /
-///    notifications / usage / chat / personalInfo)跟 dev 走;后台类
+///    notifications / personalInfo)跟 dev 走;后台类
 ///    (capture / privacy / storage / scheduler / memory)永远读真实值,
 ///    且在 dev mode 下**只读**(ConfigStore.mutate 会把改动丢弃)。
 ///    这条线画在配置项上而不是调用方上,是因为后者要人工判断 ~85 处读取点,

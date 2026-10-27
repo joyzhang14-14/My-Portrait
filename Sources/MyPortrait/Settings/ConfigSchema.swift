@@ -26,10 +26,8 @@ struct MyPortraitConfig: Codable, Equatable {
     var notifications: NotificationsConfig = .init()
     var memory:        MemoryConfig        = .init()
     var scheduler:     SchedulerSettings   = .init()
-    var usage:         UsageConfig         = .init()
     var privacy:       PrivacyConfig       = .init()
     var storage:       StorageConfig       = .init()
-    var chat:          ChatConfig          = .init()
     var personalInfo:  PersonalInfoConfig  = .init()
     var premium:  PremiumConfig  = .init()
     var localModel:    LocalModelConfig    = .init()
@@ -39,7 +37,7 @@ struct MyPortraitConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
         case display, general, aiModels = "ai_models", capture, notifications
-        case memory, scheduler, usage, privacy, storage, chat
+        case memory, scheduler, privacy, storage
         case personalInfo = "personal_info"
         case premium = "premium"
         case localModel = "local_model"
@@ -56,10 +54,8 @@ struct MyPortraitConfig: Codable, Equatable {
         notifications = c.dflt(NotificationsConfig.self, .notifications, notifications)
         memory        = c.dflt(MemoryConfig.self, .memory, memory)
         scheduler     = c.dflt(SchedulerSettings.self, .scheduler, scheduler)
-        usage         = c.dflt(UsageConfig.self, .usage, usage)
         privacy       = c.dflt(PrivacyConfig.self, .privacy, privacy)
         storage       = c.dflt(StorageConfig.self, .storage, storage)
-        chat          = c.dflt(ChatConfig.self, .chat, chat)
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         premium  = c.dflt(PremiumConfig.self, .premium, premium)
         localModel    = c.dflt(LocalModelConfig.self, .localModel, localModel)
@@ -67,29 +63,6 @@ struct MyPortraitConfig: Codable, Equatable {
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
         migrateSeedAuthApps()
-        migrateCronHistoryToDisplay(from: c)
-    }
-
-    /// 一次性迁移(08-09 update):`cron_job_history_limit` 从 `[general]` 搬到
-    /// `[display]` —— 设置项挪到了 Display 页最下面,key 不跟着搬的话,
-    /// 那一页右上角的 Reset 重置不到它,General 页的 Reset 反而会。
-    ///
-    /// 只在 `[display]` 里**没有**这个 key 时才从 `[general]` 取:两边都有
-    /// (只可能发生在迁移当次到保存之间)时以新位置为准,不让旧值倒灌。
-    /// 读完不回写旧 key —— GeneralConfig 已经不再编码它,下次保存自动消失。
-    private mutating func migrateCronHistoryToDisplay(
-        from c: KeyedDecodingContainer<CodingKeys>
-    ) {
-        enum LegacyKeys: String, CodingKey {
-            case cronJobHistoryLimit = "cron_job_history_limit"
-        }
-        // 新位置已经有值 → 什么都不做。
-        if let disp = try? c.nestedContainer(keyedBy: LegacyKeys.self, forKey: .display),
-           disp.contains(.cronJobHistoryLimit) { return }
-        guard let gen = try? c.nestedContainer(keyedBy: LegacyKeys.self, forKey: .general),
-              let old = try? gen.decode(Int.self, forKey: .cronJobHistoryLimit)
-        else { return }
-        display.cronJobHistoryLimit = old
     }
 
     /// 一次性迁移(08-09 update):把认证界面补进 `privacy.ignored_apps`。
@@ -554,10 +527,6 @@ enum SpeedLevel: String, Codable, CaseIterable, Identifiable, Equatable {
 
 struct DisplayConfig: Codable, Equatable {
     var theme:                   String = "system"
-    var hideModelReasoning:      Bool   = false
-    /// AI chat:把一条回复里所有 thinking + 工具块压成一个可展开的汇总栏,
-    /// 只留最终文本在外。默认开(减少历史消息一次性渲染的块数,更流畅)。
-    var compactToolBlocks:       Bool   = true
     var appName:                 String = "My Portrait"
     var customDockIcon:          String = ""
     // 08-01 删 customTrayIcon:菜单栏图标改成三盏实时采集灯,不再可替换。
@@ -590,19 +559,10 @@ struct DisplayConfig: Codable, Equatable {
     var lastPage:                String = ""
     /// Settings 上次停在哪个子页,同上。值取 `SettingsSubsection.id`,认不出回落 General。
     var lastSettingsPage:        String = ""
-    /// CronJob 历史记录保留上限 —— sidebar CRON JOB HISTORY 区只显示前 N 条,
-    /// CronJobStore.appendRun 按这个值裁 runs.json。
-    /// 0 = no limit(runs.json 会无限增长,慎选)。
-    /// 合法值:5 / 10 / 20 / 50 / 0,UI 下拉只暴露这几档。
-    /// 08-09 从 `[general]` 搬来(设置项挪到 Display 页最下面),
-    /// 老 config 由 `migrateCronHistoryToDisplay` 搬值。
-    var cronJobHistoryLimit:     Int = 20
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case theme
-        case hideModelReasoning       = "hide_model_reasoning"
-        case compactToolBlocks        = "compact_tool_blocks"
         case appName                  = "app_name"
         case customDockIcon           = "custom_dock_icon"
         case showInMenuBar            = "show_in_menu_bar"
@@ -615,14 +575,11 @@ struct DisplayConfig: Codable, Equatable {
         case memoryLastViewMode       = "memory_last_view_mode"
         case lastPage                 = "last_page"
         case lastSettingsPage         = "last_settings_page"
-        case cronJobHistoryLimit      = "cron_job_history_limit"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         theme                   = c.dflt(String.self, .theme, theme)
-        hideModelReasoning      = c.dflt(Bool.self,   .hideModelReasoning, hideModelReasoning)
-        compactToolBlocks       = c.dflt(Bool.self,   .compactToolBlocks, compactToolBlocks)
         appName                 = c.dflt(String.self, .appName, appName)
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
@@ -635,7 +592,6 @@ struct DisplayConfig: Codable, Equatable {
         memoryLastViewMode      = c.dflt(String.self, .memoryLastViewMode, memoryLastViewMode)
         lastPage                = c.dflt(String.self, .lastPage, lastPage)
         lastSettingsPage        = c.dflt(String.self, .lastSettingsPage, lastSettingsPage)
-        cronJobHistoryLimit     = c.dflt(Int.self, .cronJobHistoryLimit, cronJobHistoryLimit)
     }
 }
 
@@ -649,10 +605,6 @@ struct GeneralConfig: Codable, Equatable {
     /// 默认 false → 全新安装自动看到 onboarding。Settings → General → Onboarding
     /// 里的 "Show" 按钮不动这个 flag,只临时预览。
     var onboardingCompleted: Bool = false
-    // cron_job_history_limit 08-09 搬去 `[display]`(设置项挪到 Display 页
-    // 最下面,右上角 Reset 要跟着 display 走)。老 config 里那一行由
-    // MyPortraitConfig.migrateCronHistoryToDisplay 搬值,读完不回写,下次
-    // 保存自动从文件消失。
     // auto_scan_imports 已下线(07-28 update):Import 页固定手动模式 ——
     // 每个来源显示「未扫描」+ Scan 按钮,点了才扫。旧 config.toml 里
     // 残留的这个键会被忽略(dflt 解码只认 CodingKeys 里列出的键)。
@@ -962,7 +914,6 @@ struct SystemConfig: Codable, Equatable {
 
 struct NotificationsConfig: Codable, Equatable {
     var appUpdates:             Bool     = true
-    var cronJobAlerts:             Bool     = true
     var captureStalls:          Bool     = false
     /// Pipeline **progress** 通知:跑完(⚙️)+ 中断后自动重启(🔁)。告知性,
     /// 不需要用户做什么。默认 ON。toml key 沿用 `scheduler_alerts`(老字段)
@@ -979,7 +930,6 @@ struct NotificationsConfig: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case appUpdates             = "app_updates"
-        case cronJobAlerts             = "cron_job_alerts"
         case captureStalls          = "capture_stalls"
         case schedulerAlerts        = "scheduler_alerts"
         case pipelineErrorAlerts    = "pipeline_error_alerts"
@@ -989,24 +939,10 @@ struct NotificationsConfig: Codable, Equatable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         appUpdates             = c.dflt(Bool.self,     .appUpdates, appUpdates)
-        cronJobAlerts             = c.dflt(Bool.self,     .cronJobAlerts, cronJobAlerts)
         captureStalls          = c.dflt(Bool.self,     .captureStalls, captureStalls)
         schedulerAlerts        = c.dflt(Bool.self,     .schedulerAlerts, schedulerAlerts)
         pipelineErrorAlerts    = c.dflt(Bool.self,     .pipelineErrorAlerts, pipelineErrorAlerts)
         credentialExpiryAlerts = c.dflt(Bool.self,     .credentialExpiryAlerts, credentialExpiryAlerts)
-    }
-}
-
-// MARK: - Usage
-
-struct UsageConfig: Codable, Equatable {
-    var range: String = "last7d"
-    init() {}
-    enum CodingKeys: String, CodingKey { case range }
-    init(from decoder: Decoder) throws {
-        self.init()
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        range = c.dflt(String.self, .range, range)
     }
 }
 
@@ -1161,19 +1097,6 @@ struct StorageConfig: Codable, Equatable {
         retentionDays  = c.dflt(String.self, .retentionDays, retentionDays)
         autoDeleteMode = c.dflt(String.self, .autoDeleteMode, autoDeleteMode)
         waitForTranscription = c.dflt(Bool.self, .waitForTranscription, waitForTranscription)
-    }
-}
-
-// MARK: - Chat
-
-struct ChatConfig: Codable, Equatable {
-    var redactPii: Bool = false
-    init() {}
-    enum CodingKeys: String, CodingKey { case redactPii = "redact_pii" }
-    init(from decoder: Decoder) throws {
-        self.init()
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        redactPii = c.dflt(Bool.self, .redactPii, redactPii)
     }
 }
 

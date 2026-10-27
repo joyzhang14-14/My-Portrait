@@ -146,17 +146,6 @@ enum AudioEngine: String, CaseIterable, Identifiable {
     }
 }
 
-enum UsageRange: String, CaseIterable, Identifiable {
-    case last24h, last7d, last30d, all
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .last24h: return "24h"; case .last7d: return "7d"
-        case .last30d: return "30d"; case .all: return "all"
-        }
-    }
-}
-
 enum PowerMode: String, CaseIterable, Identifiable {
     case auto, performance, balanced, batterySaver
     var id: String { rawValue }
