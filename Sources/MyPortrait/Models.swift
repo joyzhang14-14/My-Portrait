@@ -444,6 +444,20 @@ final class AppState {
         return Provider.from(integrationId: id)?.defaultModel ?? ""
     }
 
+    /// 不绑某条 conv 时用的 provider + model:AI preset 标了 default 优先,
+    /// 否则全局 picker 选的;都没有 → ChatGPT。chat 和 cron 共用。
+    @MainActor
+    func defaultProvider() -> (Provider, String, String?) {
+        if let preset = ConfigStore.shared.aiModels.presets.first(where: { $0.isDefault }),
+           let p = Provider(rawValue: preset.provider) {
+            return (p, preset.model, preset.apiKeyRef.isEmpty ? nil : preset.apiKeyRef)
+        }
+        guard let id = activeAIId,
+              let p = Provider.from(integrationId: id)
+        else { return (.chatgpt, Provider.chatgpt.defaultModel, nil) }
+        return (p, currentModel(forIntegrationId: id), nil)
+    }
+
     func setModel(_ model: String, forIntegrationId id: String) {
         modelByIntegration[id] = model
         saveModelChoices()

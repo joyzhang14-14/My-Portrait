@@ -17,7 +17,7 @@ struct GeneralSettingsView: View {
 
             SettingsCard(title: "Startup") {
                 SettingsRow("Auto-start",
-                            info: "Open My Portrait automatically when you log in.",
+                            info: "Start My Portrait automatically when you log in. It runs in the background without opening its window; open it from the menu bar.",
                             icon: "power") {
                     Toggle("", isOn: config.binding(\.general.launchAtLogin)).labelsHidden().toggleStyle(.switch)
                 }

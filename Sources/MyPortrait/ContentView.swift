@@ -220,30 +220,17 @@ struct ContentView: View {
                    let p = Provider(rawValue: pid) {
                     return (p, model, nil)
                 }
-                if let preset = ConfigStore.shared.aiModels.presets.first(where: { $0.isDefault }),
-                   let p = Provider(rawValue: preset.provider) {
-                    return (p, preset.model, preset.apiKeyRef.isEmpty ? nil : preset.apiKeyRef)
-                }
-                guard let id = appState.activeAIId,
-                      let p = Provider.from(integrationId: id)
-                else { return (.chatgpt, Provider.chatgpt.defaultModel, nil) }
-                return (p, appState.currentModel(forIntegrationId: id), nil)
+                return appState.defaultProvider()
             }
             chat.providerResolver = resolver
 
-            // Wire the scheduler so it can fire templates + cronJobs into the
-            // chat / cronJob-store when their cadence ticks.
+            // 模板定时要往 chat 里发,接上 chat 后补跑到点的模板。cron 不依赖界面,
+            // app 启动时就在跑(AppDelegate)。
             ScheduleRunner.shared.dispatch = { template in
                 chat.switchTo(nil)
                 let chips = [template.window.resolveChip()].compactMap { $0 }
                 chat.send(template.prompt, chips: chips)
             }
-            ScheduleRunner.shared.dispatchCronJob = { cronJob in
-                CronJobExecutor.run(cronJob)
-            }
-            // CronJobExecutor 不属于任何 conv,永远走全局(nil convId 让
-            // resolver 跳过 per-conv lock 那条分支)。
-            CronJobExecutor.providerResolver = { resolver(nil) }
             // cron 跑的时候每次落盘 → 若用户正看这条 conv,live 重读让前端
             // 像普通 chat 一样逐段刷 thinking / 指令。
             CronJobExecutor.onConvUpdated = { convId in

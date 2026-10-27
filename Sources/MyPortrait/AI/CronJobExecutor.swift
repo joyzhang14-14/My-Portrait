@@ -13,9 +13,9 @@ import os.log
 enum CronJobExecutor {
     private static let logger = Logger(subsystem: "com.myportrait", category: "cron")
 
-    /// Override at boot — supplies the same provider+model as the chat.
+    /// 每次 fire 现读设置(跟 chat 不绑 conv 时同一套),不依赖界面。
     static var providerResolver: () -> (Provider, String, String?) = {
-        (.chatgpt, Provider.chatgpt.defaultModel, nil)
+        AppState().defaultProvider()
     }
 
     /// Override at boot(ContentView)。cron 每次把流式增量落盘后调一次,

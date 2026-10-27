@@ -57,9 +57,9 @@ final class NotificationCenterService {
     /// 当前可见的通知列表(最旧在前,最新在后)。Overlay view observe 这个。
     private(set) var active: [InAppNotification] = []
 
-    /// 点击 cron job 通知时的回调。app 启动时由 ContentView 接进来:
-    /// 通常是 "切到 .home + chat.switchTo(convId) + 主窗口拉到前台"。
-    var onCronJobTap: (UUID) -> Void = { _ in }
+    /// 点击 cron job 通知时的回调。ContentView 接进来:
+    /// "切到 .home + chat.switchTo(convId) + 主窗口拉到前台"。还没开过窗口时只把窗口拉出来。
+    var onCronJobTap: (UUID) -> Void = { _ in AppDelegate.current?.showMainWindow() }
 
     private let log = Logger(subsystem: "com.myportrait", category: "notifications")
     private let defaultTimeout: TimeInterval = 20

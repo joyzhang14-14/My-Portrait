@@ -504,6 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// 主窗口内容(SwiftUI 视图树)当前是否装着。关窗/隐藏卸掉,重开重建。
     private var mainContentInstalled = false
+    /// 开机自启(登录项)拉起的:不建视图树、不显示窗口,只在后台采集。
+    private var launchedAtLogin = false
 
     /// SwiftUI 生命周期下 `NSApp.delegate` 是 SwiftUI 自己的转发壳
     /// (SwiftUI.AppDelegate),`as? AppDelegate` 永远 nil。要拿真实例走这里。
@@ -521,6 +523,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated(unsafe) private static var sigintSource: DispatchSourceSignal?
 
     private let lifecycleLog = Logger(subsystem: "com.myportrait", category: "lifecycle")
+
+    /// 登录项拉起时,启动 Apple event 带 keyAELaunchedAsLogInItem。只在 willFinish 读得到。
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        launchedAtLogin = event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.current = self
@@ -653,8 +662,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.isRestorable = false
         window.setContentSize(NSSize(width: 1200, height: 835))
 
-        // Host the SwiftUI ContentView inside the AppKit window.
-        installMainContent()
+        // Host the SwiftUI ContentView inside the AppKit window. 开机自启不建,
+        // 等用户从菜单栏 / Dock 打开(showMainWindow)时再建。
+        if launchedAtLogin {
+            HealthMonitor.shared.windowVisible = false
+            lifecycleLog.notice("launched at login — capturing in the background, window not shown")
+        } else {
+            installMainContent()
+        }
 
         // 红绿灯关窗 = 只隐藏窗口（app 继续在后台跑采集 / 转录管线）。
         // 配合 applicationShouldTerminateAfterLastWindowClosed = false。
@@ -689,8 +704,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         window.center()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if !launchedAtLogin {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         // Wire config → window/app chrome. Theme / app name
         // / Dock icon / launch-at-login all flow through this once ConfigStore
@@ -704,6 +721,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    - coordinator / audio **由 settings 驱动**：默认开关都 OFF →
         //      首启不弹屏幕录制 / 麦克风权限。用户在 Settings 面板打开后才启。
         services.startManagedLifecycle()
+        // cron 不依赖界面,开机自启没开窗口也照跑。模板等 ContentView 接上 chat 再补跑。
+        ScheduleRunner.shared.start()
 
         // 4. Full Disk Access 启动检查。FDA 没有 request API,只能 deep-link
         // 到 System Settings。第一轮 refresh 是同步的,刚才 startManagedLifecycle
