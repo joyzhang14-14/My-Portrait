@@ -564,7 +564,7 @@ enum DiagnosticBundle {
     private static func writeDbStats(mode: DiagnosticBundleMode, to url: URL) throws {
         var dict: [String: Any] = [:]
         if mode == .privateSupport {
-            dict["db_path"] = "~/.portrait/portrait.db"
+            dict["db_path"] = "~/.portrait/portrait.sqlite"
         }
         dict["db_size_bytes"] = fileSize(Storage.portraitDBPath)
         dict["table_row_counts"] = readTableCounts()
@@ -592,8 +592,9 @@ enum DiagnosticBundle {
         let tables = [
             "frames", "video_chunks",
             "audio_chunks", "audio_transcriptions",
-            "typing_events", "keystroke_log", "writing_records",
-            "processing_log", "speakers", "speaker_samples",
+            "typing_events", "keystroke_log", "mouse_log", "writing_records",
+            "processing_log", "event_intervals", "personality_days",
+            "speakers", "speaker_embeddings",
         ]
         var out: [String: Int] = [:]
         for t in tables {
