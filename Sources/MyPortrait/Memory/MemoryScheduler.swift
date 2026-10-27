@@ -1019,26 +1019,29 @@ final class MemoryScheduler {
         guard pauseGen == pauseGeneration else { return .busy }
 
         // weight / rebalance / 归档只在这一轮真处理完至少一个区间(event + impact 都 complete)
-        // 时结算 —— 流水线没跑成,weight 和归档状态保持原样(10-26 update)。
-        let settled = keys.contains {
-            let r = ledgerRow($0)
+        // 时结算,「现在」取处理完的区间里最晚的结束时间 —— 流水线没跑成,weight 和归档
+        // 状态保持原样(10-27 update)。
+        let settledEnd = intervals.filter {
+            let r = ledgerRow($0.id)
             return r?.event == .complete && r?.impact == .complete
-        }
-        if settled {
+        }.map(\.endMs).max()
+        if let settledEnd {
+            let at = PipelineSettle.eventsClock(through: Date(timeIntervalSince1970: Double(settledEnd) / 1000))
+
             // weight pass：跟 rebalance 一样，整个 event 处理跑完只跑一次。
             // pause 中止时跟 rebalance 一起被上面的 guard 跳过；个别区间失败不影响它跑。
             eventProgress = StepProgress(fraction: 0.98, stage: "Recomputing weights")
-            await Backfill.weightPass()
+            await Task.detached(priority: .userInitiated) { _ = Backfill.weightPass(now: at) }.value
 
             // 周预算 rebalance：整个 event 处理跑完只跑一次（不是按区间跑 N 次，
             // 否则一次 run 就把 rebalance_count 烧到 maxRebalances 把事件冻死）。
             eventProgress = StepProgress(fraction: 0.99, stage: "Rebalancing")
-            _ = MemoryBudget_applyToDisk()
+            _ = MemoryBudget_applyToDisk(now: at)
 
             // weight 刚算好 → 归档冷掉的老 event;放在 classify 前,归档的不会再被分进 folder。
             eventProgress = StepProgress(fraction: 0.993, stage: "Archiving events")
-            await Task.detached(priority: .userInitiated) { Archiver.runEvents() }.value
-            PipelineSettle.markEvents()
+            await Task.detached(priority: .userInitiated) { Archiver.runEvents(now: at) }.value
+            PipelineSettle.markEvents(at)
 
             // 新事件到了 → distill 锚点重新标 pending,下一次 tick 自动 catch up。
             // personality 按本地日自己判就绪(EventIntervalStore.readyPersonalityDays)。

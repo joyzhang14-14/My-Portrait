@@ -408,13 +408,6 @@ enum Backfill {
         return out
     }
 
-    /// MemoryScheduler.runEventJob 在所有区间跑完后调一次(跟 rebalance 同模式)。
-    nonisolated static func weightPass() async {
-        await Task.detached(priority: .userInitiated) {
-            _ = weightPass(now: Date())
-        }.value
-    }
-
     /// 按 `now` 重算 events/ 下全部 weight,返回改写的文件数。
     /// 只对 events/ 跑 WeightCalculator —— portrait 走 PortraitWeight。
     /// (NSEnumerator 不能在 async 里迭代,所以是同步函数。)

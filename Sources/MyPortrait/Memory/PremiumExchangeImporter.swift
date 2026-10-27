@@ -35,6 +35,10 @@ enum PremiumExchangeImporter {
         var deleted = 0
         var conflicts: [String] = []
         var summary: [String: Int] = [:]
+        /// 本包处理完的区间(event + impact 都 complete)里最晚的结束时间;没有则 nil。
+        var settledEndMs: Int64?
+        /// 本包的 distill 跑成了。
+        var distilled = false
 
         var line: String {
             var parts = ["\(written) file(s) updated"]
@@ -123,11 +127,20 @@ enum PremiumExchangeImporter {
                     userMessage: err.localizedDescription))
             }
         }
-        // Premium 写回的 event 也要过一遍归档(event 链在 Premium 时本机不跑 event job)。
-        if !imported.isEmpty {
-            await Task.detached(priority: .utility) { Archiver.runEvents() }.value
-            PipelineSettle.markEvents()
-            PipelineSettle.markPortrait()
+        // Premium 写回的结果按料的时间结算(event 链在 Premium 时本机不跑 event job):
+        // 区间处理完 → events weight 重算 + 归档;distill 跑成 → portrait weight 重算(10-27 update)。
+        if let end = reports.compactMap(\.settledEndMs).max() {
+            let at = PipelineSettle.eventsClock(through: Date(timeIntervalSince1970: Double(end) / 1000))
+            await Task.detached(priority: .utility) {
+                _ = Backfill.weightPass(now: at)
+                Archiver.runEvents(now: at)
+            }.value
+            PipelineSettle.markEvents(at)
+        }
+        if reports.contains(where: \.distilled) {
+            let at = PipelineSettle.portraitClock
+            await Task.detached(priority: .utility) { PortraitWeight.refreshDistillCategories(now: at) }.value
+            PipelineSettle.markPortrait(at)
         }
         scheduler.releaseAllLocks()
         lock.release()
@@ -239,6 +252,24 @@ enum PremiumExchangeImporter {
         } catch {
             try? restoreTrees(from: safety, root: root)
             throw error
+        }
+
+        // 结算用:本包处理完的区间截至哪个时间、distill 有没有跑成。
+        let done = ProcessingStatus.complete.rawValue
+        let ivIds = (ops.eventIntervals ?? []).map(\.id)
+        if !ivIds.isEmpty {
+            let marks = ivIds.indices.map { ":i\($0)" }.joined(separator: ", ")
+            var args: [String: (any DatabaseValueConvertible)?] = ["done": done]
+            for (i, v) in ivIds.enumerated() { args["i\(i)"] = v }
+            report.settledEndMs = try? dbPool.read { db in
+                try Int64.fetchOne(db, sql: """
+                    SELECT MAX(end_ms) FROM event_intervals
+                    WHERE id IN (\(marks)) AND event_status = :done AND impact_status = :done
+                    """, arguments: StatementArguments(args))
+            }
+        }
+        report.distilled = (ops.processingLog ?? []).contains {
+            $0.date == ProcessingLogStore.distillAnchorDate && $0.distillStatus == done
         }
 
         // 4. 事务外的附带写入(失败只记日志)。

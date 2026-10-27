@@ -182,12 +182,14 @@ final class PortraitDistiller {
         // 蒸馏后扫一遍 portrait/ 归档（程序化、无 LLM）。放在 distill 之后
         // 是因为归档动的就是 portrait 文件、distill 刚更新完它们；用 Settings
         // 配置的阈值（archive_max_weight / archive_min_days_idle）。
-        // 只在各分类都跑成时结算:weight 按当前时间随 lastModified 衰减(本轮 LLM
-        // 没动的 entry 也一样)+ 归档。distill 没跑成,画像保持原样(10-26 update)。
-        if failed == 0 { PortraitWeight.refreshDistillCategories() }
-        let archive = failed == 0 ? try Archiver.run(rule: .fromConfig)
+        // 只在各分类都跑成时结算:weight 按 portrait 结算时刻(本轮读到的事件截至哪天)随
+        // lastModified 衰减(本轮 LLM 没动的 entry 也一样)+ 归档。distill 没跑成,画像
+        // 保持原样(10-27 update)。
+        let settleAt = PipelineSettle.portraitClock
+        if failed == 0 { PortraitWeight.refreshDistillCategories(now: settleAt) }
+        let archive = failed == 0 ? try Archiver.run(rule: .fromConfig, now: settleAt)
             : Archiver.Result(archivedCount: 0, skippedCount: 0, plans: [])
-        if failed == 0 { PipelineSettle.markPortrait() }
+        if failed == 0 { PipelineSettle.markPortrait(settleAt) }
 
         return Result(
             categoriesProcessed: categories.count,

@@ -1,13 +1,15 @@
 import Foundation
 
-/// 结算时刻:流水线上次真跑完的时间(10-26 update)。
+/// 结算时刻:流水线处理到的料截至哪个时间(10-27 update)。
 ///
-/// weight 的时间衰减、归档、事件图谱时间轴的终点都以它为「现在」—— 流水线不跑,
-/// 界面上的 weight 和可拖的天数保持原样;跑完一轮才按日历结算到当时。
-///   - events:本机 event job 至少处理完一个区间,或 Premium 导入成功;
-///   - portrait:本机 distill 各分类都跑成,或 Premium 导入成功。
-/// 没记录过(刚升级)时,从文件内容里的日期推一次(事件取最后一次发生日,画像取
-/// last_modified),不看文件 mtime —— 手动编辑也会改 mtime。
+/// weight 的时间衰减、周预算、归档、事件图谱时间轴的终点都以它为「现在」—— 按料的时间
+/// 算,不按流水线是哪天跑的:料处理到 10-02,整套 weight 就按 10-02 重算。流水线不跑,
+/// 界面上的 weight 和可拖的天数保持原样。只往前走,补跑旧区间不会把它拨回去。
+///   - events:本机 event job 或 Premium 导入处理完的区间(event + impact 都 complete)
+///     里最晚的结束时间;
+///   - portrait:distill 跑成时读的是截至 events 结算时刻的事件,所以跟到 events。
+/// 没记录过(刚升级)时,events 从事件内容里的最后一次发生日推一次(不看文件 mtime ——
+/// 手动编辑也会改 mtime),portrait 取 events。
 enum PipelineSettle {
 
     private static let eventsKey = "memory.settled.events"
@@ -17,11 +19,19 @@ enum PipelineSettle {
         read(eventsKey) ?? seed(eventsKey, from: Storage.eventsDir) { $0.lastOccurrence ?? $0.created }
     }
     static var portrait: Date {
-        read(portraitKey) ?? seed(portraitKey, from: Storage.portraitDir) { $0.lastModified ?? $0.created }
+        if let t = read(portraitKey) { return t }
+        let at = events
+        markPortrait(at)
+        return at
     }
 
-    static func markEvents(_ at: Date = Date()) { UserDefaults.standard.set(at.timeIntervalSince1970, forKey: eventsKey) }
-    static func markPortrait(_ at: Date = Date()) { UserDefaults.standard.set(at.timeIntervalSince1970, forKey: portraitKey) }
+    /// 这轮处理完的料截至 `material` → 本轮 events 结算用的「现在」。
+    static func eventsClock(through material: Date) -> Date { max(events, material) }
+    /// distill 跑成后 portrait 结算用的「现在」。
+    static var portraitClock: Date { max(portrait, events) }
+
+    static func markEvents(_ at: Date) { UserDefaults.standard.set(at.timeIntervalSince1970, forKey: eventsKey) }
+    static func markPortrait(_ at: Date) { UserDefaults.standard.set(at.timeIntervalSince1970, forKey: portraitKey) }
 
     private static func read(_ key: String) -> Date? {
         let t = UserDefaults.standard.double(forKey: key)
