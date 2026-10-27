@@ -347,10 +347,14 @@ final class PortraitDistiller {
 
     // MARK: - Response parsing
 
-    /// 解析失败时把 LLM 原始响应落盘(~/.portrait/llm_dump/),修复逻辑跟不上
-    /// 模型格式新花样时,直接看原文排查。best-effort,失败静默。
+    /// 解析失败时把 LLM 原始响应落盘(`Storage.llmDumpDir`),修复逻辑跟不上
+    /// 模型格式新花样时,直接看原文排查。空回复没什么可看的,只打一行日志。best-effort,失败静默。
     nonisolated private static func dumpParseFailure(response: String, category: String) {
-        let dir = Storage.rootURL.appendingPathComponent("llm_dump", isDirectory: true)
+        guard !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("[Distill] \(category): empty response, nothing to dump")
+            return
+        }
+        let dir = Storage.llmDumpDir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ms = Int64(Date().timeIntervalSince1970 * 1000)
         let url = dir.appendingPathComponent("distill_parsefail_\(category)_\(ms).txt")

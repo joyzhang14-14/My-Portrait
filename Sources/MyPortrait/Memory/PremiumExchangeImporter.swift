@@ -285,8 +285,9 @@ enum PremiumExchangeImporter {
         applyLastRunDays(ops.lastRunDays, defaults: defaults)
         for (name, text) in ops.llmDumps ?? [:] {
             let safe = (name as NSString).lastPathComponent
-            guard !safe.isEmpty, !safe.hasPrefix(".") else { continue }
-            let url = root.appendingPathComponent("llm_dump/\(safe)")
+            guard !safe.isEmpty, !safe.hasPrefix("."),
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let url = root.appendingPathComponent("pipeline/llm_dump/\(safe)")
             try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try? Data(text.utf8).write(to: url, options: .atomic)
         }

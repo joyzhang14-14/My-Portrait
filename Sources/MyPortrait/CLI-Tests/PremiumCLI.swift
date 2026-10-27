@@ -1440,7 +1440,7 @@ enum PremiumImportSelfTest {
               "pipeline_runs row with trigger premium")
         check(read(root.appendingPathComponent("pipeline/logs/2026-01-02.md"))?.contains("selftest") == true,
               "journal appended")
-        check(fm.fileExists(atPath: root.appendingPathComponent("llm_dump/distill_parsefail_selftest.txt").path),
+        check(fm.fileExists(atPath: root.appendingPathComponent("pipeline/llm_dump/distill_parsefail_selftest.txt").path),
               "llm_dump written")
         check(defaults.string(forKey: "scheduler.lastEventRun") != nil, "lastEventRun written")
         check(PremiumRemote.readState(root).lastImport?.outcome == "complete", "ledger last_import = complete")

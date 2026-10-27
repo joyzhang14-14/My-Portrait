@@ -75,6 +75,12 @@ enum Storage {
         rootURL.appendingPathComponent("pipeline/logs", isDirectory: true)
     }
 
+    /// 模型回复解析不了时存的原始回复,排查用(`~/.portrait/pipeline/llm_dump/`,
+    /// 10-27 update,原 `~/.portrait/llm_dump/`)。空回复不存。
+    static var llmDumpDir: URL {
+        rootURL.appendingPathComponent("pipeline/llm_dump", isDirectory: true)
+    }
+
     // MARK: - Capture layer (Capture/ module)
 
     /// Raw data produced by the capture layer (screen frames + MP4 chunks).

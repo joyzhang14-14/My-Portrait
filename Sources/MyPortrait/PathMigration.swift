@@ -65,6 +65,8 @@ enum PathMigration {
                                 withIntermediateDirectories: true)
         moveIfNeeded(from: target.appendingPathComponent("journal", isDirectory: true),
                      to: Storage.pipelineLogsDir)
+        moveIfNeeded(from: target.appendingPathComponent("llm_dump", isDirectory: true),
+                     to: Storage.llmDumpDir)
 
         // 2. AI 子系统: ~/Library/Application Support/MyPortrait/ → ~/.portrait/
         guard let appSupportBase = try? fm.url(for: .applicationSupportDirectory,
