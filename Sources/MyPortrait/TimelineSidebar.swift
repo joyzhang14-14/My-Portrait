@@ -8,17 +8,15 @@ import AppKit
 ///   - Audio: transcript chunks within the recent window (favours -120s..+30s)
 ///
 /// When the user is not on the Timeline section, body shows the relevant
-/// list (Recents / Memories scope / Settings) or a friendly
+/// list (Memories scope / Settings) or a friendly
 /// placeholder.
 struct TimelineSidebar: View {
     let state: TimelineState
     @Binding var selection: SidebarSection?
-    let chat: ChatController
     @Binding var dataScope: DataScope
     @Binding var dataViewMode: DataViewMode
     @Binding var settingsSubsection: SettingsSubsection?
 
-    @Environment(ChatStore.self) private var chatStore
     @Environment(\.services) private var services
     @Environment(\.colorScheme) private var colorScheme
 
@@ -27,12 +25,6 @@ struct TimelineSidebar: View {
     @State private var loading: Bool = false
     /// reload 代际号 —— 丢弃慢的旧结果,避免盖掉新的(防 stale clobber)。
     @State private var reloadToken = 0
-    @State private var recentsSearch: String = ""
-    @State private var recentsSearchOpen: Bool = false
-    /// RECENTS 折叠态。默认展开(false)—— 它是侧栏主入口。
-    @State private var recentsCollapsed: Bool = false
-    @State private var renamingConvId: UUID? = nil
-    @State private var renameDraft: String = ""
 
     private var focusedFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -62,8 +54,6 @@ struct TimelineSidebar: View {
                                 symbol: "clock",
                                 text: "Pick a moment in the timeline\nto see context.")
                         }
-                    } else if selection == .home {
-                        recentsSection
                     } else if selection == .data {
                         // text/Neural Graph 模式切换钮:独立小卡,放 scope 卡上方。
                         // 卡比 sectionCard 更瘦(padding 6 vs 12,07-01 update),钮本身不变。
@@ -116,7 +106,7 @@ struct TimelineSidebar: View {
                 .foregroundStyle(Theme.textPrimary)
 
             HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .home, .data, .settings], id: \.self) { item in
+                ForEach([SidebarSection.timeline, .data, .settings], id: \.self) { item in
                     NavIconButton(section: item, isSelected: selection == item) {
                         // ⚠️ 这里曾经每次点开 Memory 都强制回 Neural Graph +
                         // Events。**别加回来** —— Memories 现在记住你上次停在
@@ -232,121 +222,6 @@ struct TimelineSidebar: View {
                 proxy.scrollTo(active.id, anchor: .center)
             }
         }
-    }
-
-    // MARK: Recents (chat conversations)
-
-    private var recentsSection: some View {
-        sectionCard {
-            HStack(spacing: Theme.Space.sm) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        recentsCollapsed.toggle()
-                        if recentsCollapsed {
-                            recentsSearchOpen = false
-                            recentsSearch = ""
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: recentsCollapsed ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 10)
-                        SectionHeader(title: "RECENTS", count: filteredConversations.count)
-                    }
-                    // 整行可点折叠 + y 轴命中区靠 minHeight 撑(同 CRON JOB HISTORY)。
-                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // 搜索只在展开时显示(折叠态搜索无意义)。
-                if !recentsCollapsed {
-                    SidebarIconButton(
-                        systemName: recentsSearchOpen ? "xmark" : "magnifyingglass",
-                        help: "Search chats"
-                    ) {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            recentsSearchOpen.toggle()
-                            if !recentsSearchOpen { recentsSearch = "" }
-                        }
-                    }
-                }
-                // 新建 ➕ 常驻 —— 折叠态也能直接开新对话,不跟着折叠隐藏。
-                SidebarIconButton(systemName: "plus", help: "New chat") {
-                    chat.switchTo(nil)
-                }
-            }
-            .frame(minHeight: 24)
-
-            if !recentsCollapsed {
-              if recentsSearchOpen {
-                HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textSecondary)
-                    TextField("filter chats…", text: $recentsSearch)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                }
-                .padding(.horizontal, Theme.Space.sm)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                            .strokeBorder(Theme.stroke, lineWidth: 0.7))
-                )
-                .transition(.opacity)
-              }
-
-              if filteredConversations.isEmpty {
-                EmptyRow(text: recentsSearch.isEmpty
-                         ? "No chats yet — start typing below."
-                         : "No chats match \"\(recentsSearch)\".")
-              } else {
-                VStack(spacing: 2) {
-                    ForEach(filteredConversations) { conv in
-                        RecentRow(
-                            conv: conv,
-                            isActive: chat.currentConvId == conv.id,
-                            isRenaming: renamingConvId == conv.id,
-                            renameDraft: $renameDraft,
-                            onTap: {
-                                if renamingConvId == nil {
-                                    chat.switchTo(conv.id)
-                                }
-                            },
-                            onStartRename: {
-                                renameDraft = conv.title
-                                renamingConvId = conv.id
-                            },
-                            onCommitRename: {
-                                if !renameDraft.trimmingCharacters(in: .whitespaces).isEmpty {
-                                    chatStore.renameConversation(conv.id, to: renameDraft.trimmingCharacters(in: .whitespaces))
-                                }
-                                renamingConvId = nil
-                            },
-                            onCancelRename: { renamingConvId = nil },
-                            onTogglePin: { chatStore.togglePinned(conv.id) },
-                            onDelete: {
-                                let wasActive = chat.currentConvId == conv.id
-                                chatStore.deleteConversation(conv.id)
-                                if wasActive { chat.switchTo(nil) }
-                            }
-                        )
-                    }
-                }
-              }
-            }   // if !recentsCollapsed
-        }
-    }
-
-    private var filteredConversations: [Conversation] {
-        let q = recentsSearch.trimmingCharacters(in: .whitespaces).lowercased()
-        let base = chatStore.conversations
-        guard !q.isEmpty else { return base }
-        return base.filter { $0.title.lowercased().contains(q) }
     }
 
     /// text/Neural Graph 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
@@ -480,7 +355,7 @@ struct TimelineSidebar: View {
             )
             // 整行(含 Spacer 空白区)都可点击,而不只是 icon + text 像素。
             // Button 默认 hit-test 只在 label 内容上,不加这条只能点 icon
-            // 或文字才选中。跟 RecentRow / SettingsSidebarRow
+            // 或文字才选中。跟 SettingsSidebarRow
             // 同款修法。(#7)
             .contentShape(Rectangle())
         }
@@ -769,93 +644,5 @@ private struct AudioRow: View {
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
                     .strokeBorder(isNearFocus ? Theme.accent.opacity(0.30) : .clear, lineWidth: 1))
         )
-    }
-}
-
-// MARK: - Recents row
-
-/// One conversation row. Click the row body to switch; double-click the
-/// title (or right-click → Rename) to rename in place; hover surfaces
-/// pin + delete; pin button toggles pinned state.
-private struct RecentRow: View {
-    let conv: Conversation
-    let isActive: Bool
-    let isRenaming: Bool
-    @Binding var renameDraft: String
-    let onTap: () -> Void
-    let onStartRename: () -> Void
-    let onCommitRename: () -> Void
-    let onCancelRename: () -> Void
-    let onTogglePin: () -> Void
-    let onDelete: () -> Void
-
-    @State private var hover = false
-    @FocusState private var renameFocused: Bool
-
-    var body: some View {
-        HStack(spacing: Theme.Space.sm) {
-            if conv.pinned {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Theme.accent)
-            }
-            if isRenaming {
-                TextField("", text: $renameDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textPrimary)
-                    .focused($renameFocused)
-                    .onSubmit { onCommitRename() }
-                    .onExitCommand { onCancelRename() }
-                    .onAppear { renameFocused = true }
-            } else {
-                Text(conv.title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundStyle(isActive ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            Spacer(minLength: 0)
-            if hover, !isRenaming {
-                Button(action: onTogglePin) {
-                    Image(systemName: conv.pinned ? "pin.slash" : "pin")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .buttonStyle(.bouncyIcon)
-                .help(conv.pinned ? "Unpin" : "Pin")
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.textSecondary)
-                }
-                .buttonStyle(.bouncyIcon)
-                .help("Delete")
-            }
-        }
-        .padding(.horizontal, Theme.Space.sm)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                .fill(isActive ? Theme.accent.opacity(0.16)
-                      : hover ? Theme.hover
-                      : Color.clear)
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                    .strokeBorder(isActive ? Theme.accent.opacity(0.35) : .clear, lineWidth: 1))
-        )
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if !isRenaming { onStartRename() }
-        }
-        .onTapGesture(count: 1) {
-            if !isRenaming { onTap() }
-        }
-        .onHover { hover = $0 }
-        .contextMenu {
-            Button("Rename", action: onStartRename)
-            Button(conv.pinned ? "Unpin" : "Pin", action: onTogglePin)
-            Divider()
-            Button("Delete", role: .destructive, action: onDelete)
-        }
     }
 }

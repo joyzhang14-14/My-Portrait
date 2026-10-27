@@ -745,8 +745,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainContentInstalled = false
         ImageThumbnailCache.shared.removeAll()
         AppNameIconCache.shared.removeAll()
-        MDInline.removeAllCached()
-        MarkdownParser.removeAllCached()
         window.contentView = NSView(frame: window.frame)
         lifecycleLog.notice("main content torn down (window hidden)")
         MemoryTrim.ifHidden()

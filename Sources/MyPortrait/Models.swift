@@ -91,11 +91,10 @@ enum DataViewMode: String, Hashable {
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case home, timeline, data, settings
+    case timeline, data, settings
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .home: return "AI helper"
         case .timeline: return "Timeline"
         case .data: return "Data"
         case .settings: return "Settings"
@@ -103,7 +102,6 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     }
     var symbol: String {
         switch self {
-        case .home: return "plus.message"
         case .timeline: return "clock.arrow.circlepath"
         case .data: return "sparkles"
         case .settings: return "gearshape"
@@ -500,67 +498,6 @@ final class AppState {
     var activeAI: Integration? {
         guard let id = activeAIId else { return nil }
         return IntegrationRegistry.all.first { $0.id == id }
-    }
-}
-
-// MARK: - Home greeting
-
-struct SuggestionCard: Identifiable, Hashable {
-    let id = UUID()
-    let emoji: String
-    let title: String
-    let subtitle: String
-}
-
-struct ActivityChip: Identifiable, Hashable {
-    let id = UUID()
-    let text: String
-    let hint: String?
-}
-
-enum Mock {
-    static let suggestionCards: [SuggestionCard] = [
-        .init(emoji: "⚡️", title: "Automate My Work",     subtitle: "Analyze your habits and…"),
-        .init(emoji: "📋", title: "Day Recap",             subtitle: "Today's accomplishments, ke…"),
-        .init(emoji: "🏢", title: "Standup Update",        subtitle: "What you did, what's next, an…"),
-        .init(emoji: "💡", title: "What's Top of Mind",    subtitle: "Recurring topics and themes…"),
-        .init(emoji: "✨", title: "Custom Summary",        subtitle: "Build your own"),
-        .init(emoji: "🔍", title: "Discover",              subtitle: "6 more ›")
-    ]
-
-    static let activityChips: [ActivityChip] = [
-        .init(text: "summarize my coding session", hint: nil),
-        .init(text: "any errors or warnings in my…", hint: "check Terminal output"),
-        .init(text: "what commands did I run in Terminal?", hint: nil),
-        .init(text: "how much time did I spend coding today?", hint: nil),
-        .init(text: "summarize my day so far", hint: nil),
-        .init(text: "which apps did I use most today", hint: nil)
-    ]
-
-    static let recents: [String] = [
-        "帮我看看我最近一个小时和终…", "todo-list-assistant #218", "search timeline for what …",
-        "go to x.com", "todo-list-assistant #195", "search timeline for what …",
-        "todo-list-assistant #194", "todo-list-assistant #193", "what did I work on in the last…",
-        "todo-list-assistant #111", "我这一个小时都在干什么?", "我这几天都在做什么?",
-        "todo-list-assistant #109", "todo-list-assistant #106", "todo-list-assistant #105",
-        "todo-list-assistant #104", "todo-list-assistant #103"
-    ]
-
-    static func canned(for userText: String) -> String {
-        let lower = userText.lowercased()
-        if lower.contains("terminal") {
-            return "在过去 30 分钟里你在 Terminal 中主要在跑 `claude --dangerously-skip-permissions`，以及一些 `cargo check / swift build` 的编译命令。没有看到任何 panic 或编译错误。"
-        }
-        if lower.contains("summar") || lower.contains("总结") || lower.contains("做什么") {
-            return "今天你主要在 My-Orphies 项目上工作，集中在 transcription/whisper 的修复和一个 Swift demo 项目的搭建。共编辑 17 个文件，提交 2 次。"
-        }
-        if lower.contains("time") || lower.contains("spend") || lower.contains("时间") {
-            return "今天到现在为止你的活跃时间约 6h 12m：编辑器 (3h 40m) · Terminal (1h 50m) · 浏览器 (38m)。"
-        }
-        if lower.contains("app") || lower.contains("which") {
-            return "今天使用最多的 App 是 Cursor (2h 14m)、Terminal (1h 50m)、Chrome (38m) 和 Obsidian (22m)。"
-        }
-        return "（demo 模式：未连接真实模型）我会根据你的屏幕活动来回答。当你在 Connections 里接入 ChatGPT / Claude 后，这里会变成真实回答。"
     }
 }
 

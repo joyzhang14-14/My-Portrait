@@ -43,8 +43,6 @@ struct ContentView: View {
         SidebarSection(rawValue: ConfigStore.shared.current.display.lastPage) ?? .timeline
     @State private var appState = AppState()
     @State private var timeline = TimelineState()
-    @State private var chat = ChatController()
-    @State private var chatStore = ChatStore.shared
     /// Memories 上次停在哪 —— 从 config 恢复,切换时写回(见
     /// `persistMemoryLanding`)。切走再切回不会被扔回 Events。
     @State private var dataScope: DataScope = MemoryLanding.restoredScope()
@@ -88,8 +86,6 @@ struct ContentView: View {
             }
         }
         .environment(appState)
-        .environment(chat)
-        .environment(chatStore)
         .environment(ConfigStore.shared)
         // **SwiftUI colorScheme 必须显式 .preferredColorScheme()** 强制 ——
         // ConfigApplier 设了 NSApp.appearance 影响 AppKit chrome,但 SwiftUI
@@ -99,7 +95,9 @@ struct ContentView: View {
         .preferredColorScheme(Self.preferredScheme(configStore.current.display.theme,
                                                    systemIsDark: systemAppearance.isDark))
         .onAppear {
-            bindProviderResolver()
+            // 存量 folder 颜色一次性固化(07-10 update:没设色的 folder 此前每次
+            // 启动换色,详见 EventFolderStore.migrateAssignColors)。幂等。
+            EventFolderStore.migrateAssignColors()
             HealthMonitor.shared.currentPage = pageName
         }
         // 内存采样行(health.log 的 MEM)要标当前页面 —— 切页/切图谱模式时更新。
@@ -119,11 +117,6 @@ struct ContentView: View {
             dataViewMode = .neuralGraph
             dataScope = .input
             memoryInputJump = id
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToTimelineAt)) { notif in
-            guard let date = notif.object as? Date else { return }
-            selection = .timeline
-            timeline.seek(to: date)
         }
         // Memories 停在哪就记在哪。**两个都要监听** —— 只记 scope 的话,
         // 用户在 Events 上切到图谱视图,下次回来又是文字视图。
@@ -195,36 +188,6 @@ struct ContentView: View {
         }
     }
 
-    /// Provider resolver / scheduler / 通知路由接线 —— 原样搬自 body 的
-    /// .onAppear 大闭包(纯副作用,无 view 语义)。onboarding 分支拆成独立
-    /// 属性后,body 的修饰符链不便再挂这个长闭包,挪成方法一行调用。
-    private func bindProviderResolver() {
-            // Bind chat.providerResolver to the live appState so each new
-            // PiAgent spawns against whichever provider the user picked in
-            // Connections.
-            //
-            // 优先级:
-            //   1. 当前 conv 有锁定 (providerId/model 非 NULL) → 用 conv 的
-            //      这条让"切回老 conv,picker 显示当时选过的 model"成立。
-            //   2. AI preset 标了 default → 用 preset(单一全局默认)
-            //   3. fallback appState.activeAIId(全局 picker 选择)
-            let resolver: (UUID?) -> (Provider, String, String?) = { convId in
-                if let convId,
-                   case let (lockedProvider, lockedModel) = chatStore.conversationModel(id: convId),
-                   let pid = lockedProvider,
-                   let model = lockedModel,
-                   let p = Provider(rawValue: pid) {
-                    return (p, model, nil)
-                }
-                return appState.defaultProvider()
-            }
-            chat.providerResolver = resolver
-
-            // 存量 folder 颜色一次性固化(07-10 update:没设色的 folder 此前每次
-            // 启动换色,详见 EventFolderStore.migrateAssignColors)。幂等。
-            EventFolderStore.migrateAssignColors()
-    }
-
     /// 把 config.display.theme 字符串("system" / "light" / "dark")映射到
      /// SwiftUI 的 preferredColorScheme。"system" → nil(跟 macOS 走)。
     /// **system 也返回具体值,不返回 nil** —— 见 SystemAppearanceMonitor 顶部
@@ -270,7 +233,7 @@ struct ContentView: View {
     ///   - Notifications → 跟真实配置跑
     /// 灰不掉也不该灰,所以改成把风险写在脸上。
     private var paneTouchesRealData: Bool {
-        switch selection ?? .home {
+        switch selection ?? .timeline {
         case .settings:
             switch settingsSubsection ?? .app(.general) {
             case .app(.connections), .app(.downloads), .app(.notifications):
@@ -287,7 +250,6 @@ struct ContentView: View {
         HStack(spacing: 0) {
             TimelineSidebar(state: timeline,
                             selection: $selection,
-                            chat: chat,
                             dataScope: $dataScope,
                             dataViewMode: $dataViewMode,
                             settingsSubsection: $settingsSubsection)
@@ -305,10 +267,6 @@ struct ContentView: View {
 
             mainPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 仅 chat 区(Home)启用全区域文件 / 图片拖拽接收靶。
-                // 把文件 / 图片拖到 sidebar 之外的任何 chat 空白处都 OK,
-                // 拖到输入框 / 消息上也 OK(allowsHitTesting=false 不挡)。
-                .chatDropZone(enabled: (selection ?? .home) == .home)
                 // 右侧画布拖窗。底图(SidebarBackdrop / AmbientBackground)上
                 // 那份手势只在没有 ScrollView 压着时才收得到事件 —— 设置类
                 // 页面整页都是 ScrollView,画布空白因此拖不动。挂在 pane 这
@@ -324,8 +282,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainPane: some View {
-        switch selection ?? .home {
-        case .home:          HomeView()
+        switch selection ?? .timeline {
         case .timeline:      TimelineView(state: timeline)
         case .data:
             // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
