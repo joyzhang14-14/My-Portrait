@@ -91,12 +91,11 @@ enum DataViewMode: String, Hashable {
 }
 
 enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
-    case home, cronJobs, timeline, data, settings
+    case home, timeline, data, settings
     var id: String { rawValue }
     var label: String {
         switch self {
         case .home: return "AI helper"
-        case .cronJobs: return "Cron Jobs"
         case .timeline: return "Timeline"
         case .data: return "Data"
         case .settings: return "Settings"
@@ -105,7 +104,6 @@ enum SidebarSection: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .home: return "plus.message"
-        case .cronJobs: return "puzzlepiece.extension"
         case .timeline: return "clock.arrow.circlepath"
         case .data: return "sparkles"
         case .settings: return "gearshape"

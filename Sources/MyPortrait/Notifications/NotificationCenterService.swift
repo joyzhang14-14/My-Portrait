@@ -16,7 +16,6 @@ final class NotificationCenterService {
     static let shared = NotificationCenterService()
 
     enum Kind: Sendable {
-        case cronJobRun(jobId: UUID, jobName: String, body: String, convId: UUID)
         case appUpdate(version: String)
         case captureStall(reason: String)
         /// scheduler 自动跑完一条 memory pipeline(event / portrait /
@@ -57,10 +56,6 @@ final class NotificationCenterService {
     /// 当前可见的通知列表(最旧在前,最新在后)。Overlay view observe 这个。
     private(set) var active: [InAppNotification] = []
 
-    /// 点击 cron job 通知时的回调。ContentView 接进来:
-    /// "切到 .home + chat.switchTo(convId) + 主窗口拉到前台"。还没开过窗口时只把窗口拉出来。
-    var onCronJobTap: (UUID) -> Void = { _ in AppDelegate.current?.showMainWindow() }
-
     private let log = Logger(subsystem: "com.myportrait", category: "notifications")
     private let defaultTimeout: TimeInterval = 20
 
@@ -73,24 +68,8 @@ final class NotificationCenterService {
         var onTap: (() -> Void)?
         var onTimeout: (() -> Void)? = nil
         var timeout = defaultTimeout
-        var cronJobId: UUID? = nil
 
         switch kind {
-        case let .cronJobRun(jobId, jobName, body_, convId):
-            guard n.cronJobAlerts else {
-                log.notice("post skipped: cronJobAlerts is OFF"); return
-            }
-            // Mute 拦截:按 cron job id 查 CronJobStore.cronJobs.muted。
-            // 改名不丢状态,跟旧 byName 名单完全脱钩。
-            let muted = CronJobStore.shared.cronJobs.first { $0.id == jobId }?.muted ?? false
-            guard !muted else {
-                log.notice("post skipped: '\(jobName, privacy: .public)' muted by user"); return
-            }
-            title = "🛰️ \(jobName)"
-            body = body_
-            cronJobId = jobId
-            onTap = { [weak self] in self?.onCronJobTap(convId) }
-
         case let .appUpdate(version):
             guard n.appUpdates else { return }
             title = "My Portrait \(version) available"
@@ -164,7 +143,6 @@ final class NotificationCenterService {
             body: body,
             createdAt: Date(),
             timeout: timeout,
-            cronJobId: cronJobId,
             onTap: onTap,
             onTimeout: onTimeout
         )
@@ -208,9 +186,6 @@ struct InAppNotification: Identifiable {
     let body: String
     let createdAt: Date
     let timeout: TimeInterval
-    /// 非 nil = 这条通知是 cron job 跑出来的,jobId 是源任务 id。
-    /// NotificationCardView 用它决定是否在 banner 上画 "Mute" 按钮。
-    let cronJobId: UUID?
     let onTap: (() -> Void)?
     /// 倒计时跑完(用户没 dismiss 也没 tap)时调。给 updateCountdown 用 ——
     /// 触发 NSApp.terminate → Sparkle install-on-quit 链路。

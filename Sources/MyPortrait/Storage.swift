@@ -99,10 +99,6 @@ enum Storage {
     /// `~/.portrait/models/`.
     static var modelsDir: URL { rootURL.appendingPathComponent("models", isDirectory: true) }
 
-    /// AI cron jobs — one directory per cron job (`<slug>/cron_job.md` + `runs.json`).
-    /// `~/.portrait/cron_jobs/`.
-    static var cronJobsDir: URL { rootURL.appendingPathComponent("cron_jobs", isDirectory: true) }
-
     /// Voice training 录音 WAV (`<speaker_id>.wav`)。每次重训覆盖。
     /// 给 SpeakersView 试听 + 给 maintainer 排查训练质量用。
     static var voiceTrainingDir: URL {

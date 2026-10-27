@@ -32,7 +32,6 @@ enum MPQueryCLI {
         case "memories":          runMemories(args: rest)
         case "read":              runRead(args: rest)
         case "audio":             runAudio(args: rest)
-        case "cronjob":           MPQueryCronJobCLI.run(args: rest)
         case "help", "--help", "-h":
             printUsage()
             exit(0)
@@ -448,7 +447,6 @@ enum MPQueryCLI {
           read              read a single .md file's full content
                             (--path <rel> from a `memories` hit; portrait/ or events/ only)
           audio             audio transcriptions over a time range
-          cronjob           manage scheduled AI cron jobs (add / list / remove)
 
         COMMON OPTIONS
           --start <time>    "30m ago" | "1h ago" | "today" | ISO 8601

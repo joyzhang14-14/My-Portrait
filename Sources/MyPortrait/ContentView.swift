@@ -52,7 +52,6 @@ struct ContentView: View {
     @State private var dataViewMode: DataViewMode = MemoryLanding.restoredViewMode()
     /// 图谱浮窗 wr chip 跳转注入:切回 text/Input 后要定位的 record id。
     @State private var memoryInputJump: Int64? = nil
-    @State private var cronJobSelection: UUID? = nil
     @State private var settingsSubsection: SettingsSubsection? = {
         let raw = ConfigStore.shared.current.display.lastSettingsPage
         return SettingsSubsection.allCases.first { $0.id == raw } ?? .app(.general)
@@ -112,9 +111,6 @@ struct ContentView: View {
             if let sub { ConfigStore.shared.mutate { $0.display.lastSettingsPage = sub.id } }
         }
         .onChange(of: dataViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToHome)) { _ in
-            selection = .home
-        }
         // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)
         // 并定位该 record。
         .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
@@ -224,30 +220,9 @@ struct ContentView: View {
             }
             chat.providerResolver = resolver
 
-            // 模板定时要往 chat 里发,接上 chat 后补跑到点的模板。cron 不依赖界面,
-            // app 启动时就在跑(AppDelegate)。
-            ScheduleRunner.shared.dispatch = { template in
-                chat.switchTo(nil)
-                let chips = [template.window.resolveChip()].compactMap { $0 }
-                chat.send(template.prompt, chips: chips)
-            }
-            // cron 跑的时候每次落盘 → 若用户正看这条 conv,live 重读让前端
-            // 像普通 chat 一样逐段刷 thinking / 指令。
-            CronJobExecutor.onConvUpdated = { convId in
-                chat.liveReloadIfViewing(convId)
-            }
-            ScheduleRunner.shared.start()
-
             // 存量 folder 颜色一次性固化(07-10 update:没设色的 folder 此前每次
             // 启动换色,详见 EventFolderStore.migrateAssignColors)。幂等。
             EventFolderStore.migrateAssignColors()
-
-            // 点 cron job 通知卡片 → 切 conv + 主窗口拉到前台。
-            NotificationCenterService.shared.onCronJobTap = { convId in
-                chat.switchTo(convId)
-                selection = .home
-                AppDelegate.current?.showMainWindow()
-            }
     }
 
     /// 把 config.display.theme 字符串("system" / "light" / "dark")映射到
@@ -292,13 +267,10 @@ struct ContentView: View {
     /// chat 三份数据",这几处不在保护范围内、且是有意为之:
     ///   - Connections / Downloads → 凭据在 `secrets.sqlite`,**永远是真实那份**
     ///     (这正是"切过去不用重新绑定供应商"的前提)
-    ///   - Cron Jobs / Notifications → `cron_jobs/` 跟真实配置跑(08-09 update),
-    ///     dev mode 期间你本人的定时任务照常出结果
+    ///   - Notifications → 跟真实配置跑
     /// 灰不掉也不该灰,所以改成把风险写在脸上。
     private var paneTouchesRealData: Bool {
         switch selection ?? .home {
-        case .cronJobs:
-            return true
         case .settings:
             switch settingsSubsection ?? .app(.general) {
             case .app(.connections), .app(.downloads), .app(.notifications):
@@ -318,7 +290,6 @@ struct ContentView: View {
                             chat: chat,
                             dataScope: $dataScope,
                             dataViewMode: $dataViewMode,
-                            cronJobSelection: $cronJobSelection,
                             settingsSubsection: $settingsSubsection)
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
@@ -356,7 +327,6 @@ struct ContentView: View {
         switch selection ?? .home {
         case .home:          HomeView()
         case .timeline:      TimelineView(state: timeline)
-        case .cronJobs:         CronJobsView(selection: $cronJobSelection)
         case .data:
             // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
             if dataViewMode == .text, dataScope == .textSettings {

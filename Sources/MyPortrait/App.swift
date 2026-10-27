@@ -275,12 +275,6 @@ struct MyPortraitApp: App {
         }
         // EventClassifier 由 MemoryScheduler 固定接在 event job 后执行；
         // 不再暴露独立的 --classify-dry-run / --classify-run dispatch。
-        // `--import-default-cron-jobs` seeds the built-in cronJobs into
-        // CronJobStore. Idempotent (matches by name). Exits when done.
-        if args.contains("--import-default-cron-jobs") {
-            DefaultCronJobsImportCLI.run()
-            // run() exits the process internally.
-        }
         // DEV-ONLY: MemoryScheduler 崩溃恢复 / retry / dead_letter 测试入口。
         // 见 SchedulerTestCLI.swift。各子命令内部 exit；--sched-lock 永久挂起。
         if args.contains("--sched-dump") {
@@ -687,8 +681,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //    - coordinator / audio **由 settings 驱动**：默认开关都 OFF →
         //      首启不弹屏幕录制 / 麦克风权限。用户在 Settings 面板打开后才启。
         services.startManagedLifecycle()
-        // cron 不依赖界面,开机自启没开窗口也照跑。模板等 ContentView 接上 chat 再补跑。
-        ScheduleRunner.shared.start()
 
         // 4. Full Disk Access 启动检查。FDA 没有 request API,只能 deep-link
         // 到 System Settings。第一轮 refresh 是同步的,刚才 startManagedLifecycle

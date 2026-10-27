@@ -8,7 +8,7 @@ import AppKit
 ///   - Audio: transcript chunks within the recent window (favours -120s..+30s)
 ///
 /// When the user is not on the Timeline section, body shows the relevant
-/// list (Recents / Memories scope / Cron Jobs / Settings) or a friendly
+/// list (Recents / Memories scope / Settings) or a friendly
 /// placeholder.
 struct TimelineSidebar: View {
     let state: TimelineState
@@ -16,11 +16,7 @@ struct TimelineSidebar: View {
     let chat: ChatController
     @Binding var dataScope: DataScope
     @Binding var dataViewMode: DataViewMode
-    @Binding var cronJobSelection: UUID?
     @Binding var settingsSubsection: SettingsSubsection?
-
-    @State private var cronJobStore = CronJobStore.shared
-    @State private var editingCronJob: CronJob? = nil
 
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.services) private var services
@@ -33,15 +29,10 @@ struct TimelineSidebar: View {
     @State private var reloadToken = 0
     @State private var recentsSearch: String = ""
     @State private var recentsSearchOpen: Bool = false
-    /// RECENTS 折叠态。默认展开(false)—— 它是侧栏主入口,不像 cron history 那样
-    /// 默认收起。
+    /// RECENTS 折叠态。默认展开(false)—— 它是侧栏主入口。
     @State private var recentsCollapsed: Bool = false
     @State private var renamingConvId: UUID? = nil
     @State private var renameDraft: String = ""
-    @State private var cronJobHistoryCollapsed: Bool = true
-    @State private var cronHistorySearch: String = ""
-    @State private var cronHistorySearchOpen: Bool = false
-    @State private var confirmingClearCronHistory: Bool = false
 
     private var focusedFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
@@ -71,9 +62,7 @@ struct TimelineSidebar: View {
                                 symbol: "clock",
                                 text: "Pick a moment in the timeline\nto see context.")
                         }
-                    } else if selection == .home || selection == .cronJobs {
-                        cronJobsSection
-                        cronJobHistorySection
+                    } else if selection == .home {
                         recentsSection
                     } else if selection == .data {
                         // text/Neural Graph 模式切换钮:独立小卡,放 scope 卡上方。
@@ -326,8 +315,6 @@ struct TimelineSidebar: View {
                             onTap: {
                                 if renamingConvId == nil {
                                     chat.switchTo(conv.id)
-                                    // 若主面板正停在 CronJobsView,切回 Home 让聊天显示出来。
-                                    if selection == .cronJobs { selection = .home }
                                 }
                             },
                             onStartRename: {
@@ -355,37 +342,11 @@ struct TimelineSidebar: View {
         }
     }
 
-    /// 所有 cron job 跑过的 conv id 集合 —— 用来从 RECENTS 里过滤掉、单独
-    /// 归到 CRON JOB HISTORY 分区。
-    private var cronJobConvIds: Set<UUID> {
-        Set(cronJobStore.cronJobs.flatMap { $0.runs.map { $0.convId } })
-    }
-
-    /// RECENTS:只留普通聊天,把 cron job 跑出来的 conv 排除掉。
     private var filteredConversations: [Conversation] {
         let q = recentsSearch.trimmingCharacters(in: .whitespaces).lowercased()
-        let base = chatStore.conversations.filter { !cronJobConvIds.contains($0.id) }
+        let base = chatStore.conversations
         guard !q.isEmpty else { return base }
         return base.filter { $0.title.lowercased().contains(q) }
-    }
-
-    /// CRON JOB HISTORY:仅 cron job 跑出来的 conv,按 ChatStore 的时间序。
-    /// cronHistorySearch 非空时按标题模糊过滤(case-insensitive)。
-    /// 受 Settings → General → CronJob history limit 截断,0 = 不截。
-    private var cronJobHistoryConversations: [Conversation] {
-        let q = cronHistorySearch.trimmingCharacters(in: .whitespaces).lowercased()
-        let base = chatStore.conversations.filter { cronJobConvIds.contains($0.id) }
-        let filtered: [Conversation]
-        if q.isEmpty {
-            filtered = base
-        } else {
-            filtered = base.filter { $0.title.lowercased().contains(q) }
-        }
-        let cap = ConfigStore.shared.current.display.cronJobHistoryLimit
-        if cap > 0, filtered.count > cap {
-            return Array(filtered.prefix(cap))
-        }
-        return filtered
     }
 
     /// text/Neural Graph 切换钮的瘦身卡:同 sectionCard 的 fill/stroke,padding 减半
@@ -519,196 +480,11 @@ struct TimelineSidebar: View {
             )
             // 整行(含 Spacer 空白区)都可点击,而不只是 icon + text 像素。
             // Button 默认 hit-test 只在 label 内容上,不加这条只能点 icon
-            // 或文字才选中。跟 RecentRow / CronJobSidebarRow / SettingsSidebarRow
+            // 或文字才选中。跟 RecentRow / SettingsSidebarRow
             // 同款修法。(#7)
             .contentShape(Rectangle())
         }
         .buttonStyle(.bouncyIcon)
-    }
-
-    // MARK: Cron Job History (折叠分区,跟 RECENTS 同样的标题行样式)
-
-    private var cronJobHistorySection: some View {
-        sectionCard {
-            // 标题 + 折叠箭头 + 搜索 + 一键清除(展开时才显示后两个,
-            // 避免折叠态噪声)
-            HStack(spacing: Theme.Space.sm) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        cronJobHistoryCollapsed.toggle()
-                        // 折叠时顺手关搜索 + 清空 query
-                        if cronJobHistoryCollapsed {
-                            cronHistorySearchOpen = false
-                            cronHistorySearch = ""
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: cronJobHistoryCollapsed ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 10)
-                        SectionHeader(title: "CRON JOB HISTORY", count: cronJobHistoryConversations.count)
-                    }
-                    // 整个标题行(含右侧空白)都可点折叠 —— Button 默认 hit-test
-                    // 只在 chevron+文字像素上,点标题右边的空白没反应,显得"不灵敏"。
-                    // 撑满 + contentShape 让整条都是命中区。y 轴命中区靠下面
-                    // header HStack 的 minHeight(24)撑出来,**不再用 padding 撑高
-                    // 卡片本身** —— padding 会把卡片实际变高。
-                    // 命中形状用 minHeight 高度的 Rectangle,撑满整个 header 行。
-                    .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                // 折叠 Button 已 maxWidth:.infinity 撑满左侧,这里不再加贪婪
-                // Spacer —— 两个都贪婪会平分宽度,把 button 命中区压到半行。
-                if !cronJobHistoryCollapsed {
-                    SidebarIconButton(
-                        systemName: cronHistorySearchOpen ? "xmark" : "magnifyingglass",
-                        help: "Search history"
-                    ) {
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            cronHistorySearchOpen.toggle()
-                            if !cronHistorySearchOpen { cronHistorySearch = "" }
-                        }
-                    }
-                    SidebarIconButton(systemName: "trash", help: "Clear all history") {
-                        confirmingClearCronHistory = true
-                    }
-                }
-            }
-            // header 行锁定最小高 24(= SidebarIconButton 高)。展开时搜索/垃圾桶
-            // 图标(24pt)才出现,不锁高度的话 header 会从"一行小字"撑到 24pt,
-            // 把下面内容往下顶(展开时观感是往下蹭一点)。
-            .frame(minHeight: 24)
-
-            if !cronJobHistoryCollapsed {
-                if cronHistorySearchOpen {
-                    HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textSecondary)
-                        TextField("filter history…", text: $cronHistorySearch)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                    }
-                    .padding(.horizontal, Theme.Space.sm)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                            .fill(Color.white.opacity(0.04))
-                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                                .strokeBorder(Theme.stroke, lineWidth: 0.7))
-                    )
-                    // 纯淡入,不要 .move(edge:.top) —— 位移会让展开瞬间整块往下
-                    // "蹭"一下再回弹。opacity 只渐显不移位。
-                    .transition(.opacity)
-                }
-
-                if cronJobHistoryConversations.isEmpty {
-                    EmptyRow(text: cronHistorySearch.isEmpty
-                             ? "No runs yet."
-                             : "No history matches \"\(cronHistorySearch)\".")
-                } else {
-                    VStack(spacing: 2) {
-                        ForEach(cronJobHistoryConversations) { conv in
-                            RecentRow(
-                                conv: conv,
-                                isActive: chat.currentConvId == conv.id,
-                                isRenaming: renamingConvId == conv.id,
-                                renameDraft: $renameDraft,
-                                onTap: {
-                                    if renamingConvId == nil {
-                                        chat.switchTo(conv.id)
-                                        if selection == .cronJobs { selection = .home }
-                                    }
-                                },
-                                onStartRename: {
-                                    renameDraft = conv.title
-                                    renamingConvId = conv.id
-                                },
-                                onCommitRename: {
-                                    let v = renameDraft.trimmingCharacters(in: .whitespaces)
-                                    if !v.isEmpty {
-                                        chatStore.renameConversation(conv.id, to: v)
-                                    }
-                                    renamingConvId = nil
-                                },
-                                onCancelRename: { renamingConvId = nil },
-                                onTogglePin: { chatStore.togglePinned(conv.id) },
-                                onDelete: {
-                                    let wasActive = chat.currentConvId == conv.id
-                                    chatStore.deleteConversation(conv.id)
-                                    if wasActive { chat.switchTo(nil) }
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        .confirmationDialog(
-            "Clear all cron job history?",
-            isPresented: $confirmingClearCronHistory,
-            titleVisibility: .visible
-        ) {
-            Button("Clear \(Set(chatStore.conversations.map(\.id)).intersection(cronJobConvIds).count) run(s)", role: .destructive) {
-                // 删**全部** cron-run 对话(uncapped/unfiltered),不只是分页/搜索后那
-                // 一截 —— 否则超 cronJobHistoryLimit 的那些删不掉、UI 看不到却仍占库,
-                // 跟对话框承诺的「删除全部」相悖。
-                let active = chat.currentConvId
-                let ids = Set(chatStore.conversations.map(\.id)).intersection(cronJobConvIds)
-                for id in ids { chatStore.deleteConversation(id) }
-                if let a = active, ids.contains(a) { chat.switchTo(nil) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently deletes every cron job run conversation. The cron jobs themselves stay.")
-        }
-    }
-
-    // MARK: Cron Jobs (background AI workers)
-
-    private var cronJobsSection: some View {
-        sectionCard {
-            HStack(spacing: Theme.Space.sm) {
-                SectionHeader(title: "CRON JOBS", count: cronJobStore.cronJobs.count)
-                SidebarIconButton(systemName: "plus", help: "New cron job") {
-                    editingCronJob = CronJobsView.blankCronJob()
-                }
-            }
-
-            if cronJobStore.cronJobs.isEmpty {
-                EmptyRow(text: "No cron jobs yet — click + to create one.")
-            } else {
-                VStack(spacing: 2) {
-                    ForEach(cronJobStore.cronJobs) { p in
-                        CronJobSidebarRow(
-                            cronJob: p,
-                            isActive: cronJobSelection == p.id,
-                            onTap: {
-                                cronJobSelection = p.id
-                                selection = .cronJobs
-                            },
-                            onToggle: { cronJobStore.toggleEnabled(p.id) }
-                        )
-                    }
-                }
-            }
-        }
-        .sheet(item: $editingCronJob) { cronJob in
-            // Inline edit sheet so user can create a cronJob directly from the
-            // sidebar — same content the main pane uses.
-            CronJobQuickEditor(initial: cronJob) { saved in
-                if cronJobStore.cronJobs.contains(where: { $0.id == saved.id }) {
-                    cronJobStore.update(saved)
-                } else {
-                    cronJobStore.add(saved)
-                }
-                editingCronJob = nil
-                cronJobSelection = saved.id
-            } onCancel: { editingCronJob = nil }
-        }
     }
 
     // MARK: Settings (subsections grouped in the rail)

@@ -64,29 +64,6 @@ struct DisplaySettingsView: View {
                         .labelsHidden().toggleStyle(.switch)
                 }
             }
-
-            // CronJob 历史保留条数。改下拉立刻 applyHistoryLimit 把 runs.json
-            // 裁短(选 10 → 每条 cronJob 最多留 10 条 run)。0 = no limit。
-            //
-            SettingsCard(title: "Cron Jobs") {
-                SettingsRow("History per cron job",
-                            info: "How many recent runs to keep for each cron job.",
-                            icon: "clock.arrow.trianglehead.counterclockwise.rotate.90") {
-                    Picker("", selection: config.binding(\.display.cronJobHistoryLimit)) {
-                        Text("5").tag(5)
-                        Text("10").tag(10)
-                        Text("20").tag(20)
-                        Text("50").tag(50)
-                        Text("No limit").tag(0)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 110)
-                }
-            }
-            .onChange(of: config.current.display.cronJobHistoryLimit) { _, _ in
-                CronJobStore.shared.applyHistoryLimit()
-            }
         }
     }
 }
