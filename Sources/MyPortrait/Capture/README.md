@@ -53,7 +53,7 @@ SnapshotWriter.enqueue ─► JPG URL (立即返回)
 | `Events/` | 事件驱动调度（NSWorkspace / CGEventTap / Pasteboard） | P2 |
 | `Compaction/` | JPG → MP4 后台压缩 | P3 |
 | `Audio/` | AVAudioEngine + VAD + WhisperKit | P4 |
-| `Power/` | IOKit AC/电池监听 + 延迟转录调度 + `SystemMemory`(后台重活的内存闸) | P4 |
+| `Power/` | IOKit AC/电池监听 + 延迟转录调度 + `SystemMemory`(后台重活的内存闸)+ `MemoryTrim`(窗口没显示时,关窗和后台任务跑完后把 SQLite 缓存 / 空闲内存还给系统) | P4 |
 
 ## TODO（后续阶段升级时一并处理）
 

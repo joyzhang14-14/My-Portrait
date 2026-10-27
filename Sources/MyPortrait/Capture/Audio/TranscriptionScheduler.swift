@@ -357,6 +357,8 @@ actor TranscriptionScheduler {
             KeepAwakeAssertion.shared.set(false, owner: "transcription")
             SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
         }
+        // 这轮真转过(lastFrontId 只在拿到一批时才设)。
+        if lastFrontId != nil { MemoryTrim.ifHidden() }
     }
 
     /// 转录设置快照（引擎 + 语言 + 词汇 + 云引擎凭据）。

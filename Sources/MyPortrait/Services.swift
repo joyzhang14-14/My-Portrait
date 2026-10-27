@@ -76,6 +76,7 @@ final class Services {
         self.db = dbImpl
         // 共用同一个 DatabasePool（WAL 多 reader 安全）。
         MemoryScheduler.useLedgerPool(dbImpl.dbPool)
+        MemoryTrim.dbPool = dbImpl.dbPool
         // 旧帧词框小数截到 5 位,后台一次性跑完(进度在库里,中途退出下次接着跑)。
         let pool = dbImpl.dbPool
         Task.detached(priority: .background) { await OCRWordsSlimmer.run(dbPool: pool) }

@@ -1393,6 +1393,7 @@ final class MemoryScheduler {
 
         applyOutcome(date: date, stage: stage, outcome: outcome)
         ledgerRelease(date)
+        MemoryTrim.ifHidden()
     }
 
     /// runStep 60min timer 到点回调 —— **只杀本 pipeline(owner)的 LLM 子进程**,

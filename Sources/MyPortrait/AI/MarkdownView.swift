@@ -221,6 +221,9 @@ enum MDInline {
         return c
     }()
 
+    /// 关窗时清。
+    static func removeAllCached() { cache.removeAllObjects() }
+
     static func attributed(_ s: String) -> AttributedString {
         let key = s as NSString
         if let hit = cache.object(forKey: key) { return hit.v }
@@ -329,6 +332,9 @@ enum MarkdownParser {
         c.countLimit = 128
         return c
     }()
+
+    /// 关窗时清。
+    static func removeAllCached() { cache.removeAllObjects() }
 
     static func parse(_ source: String) -> [MDBlock] {
         let key = source as NSString

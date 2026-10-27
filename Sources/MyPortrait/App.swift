@@ -767,8 +767,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window, !HealthMonitor.shared.windowVisible, !window.isVisible else { return }
         mainContentInstalled = false
         ImageThumbnailCache.shared.removeAll()
+        AppNameIconCache.shared.removeAll()
+        MDInline.removeAllCached()
+        MarkdownParser.removeAllCached()
         window.contentView = NSView(frame: window.frame)
         lifecycleLog.notice("main content torn down (window hidden)")
+        MemoryTrim.ifHidden()
     }
 
     /// 启动时如果 FDA 没授权,弹一个 NSAlert 引导用户去 System Settings 加

@@ -620,4 +620,6 @@ final class AppNameIconCache {
     func store(_ image: NSImage?, for name: String) {
         if let image { hits[name] = image } else { misses.insert(name) }
     }
+    /// 关窗时清(重开按需再探)。
+    func removeAll() { hits.removeAll(); misses.removeAll() }
 }

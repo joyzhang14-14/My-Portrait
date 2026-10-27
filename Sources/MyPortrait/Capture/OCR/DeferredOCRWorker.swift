@@ -87,7 +87,10 @@ actor DeferredOCRWorker {
             }
         }
         await holdAwake(false)
-        if done > 0 { logger.notice("drained \(done, privacy: .public) frame(s)") }
+        if done > 0 {
+            logger.notice("drained \(done, privacy: .public) frame(s)")
+            MemoryTrim.ifHidden()
+        }
         let s = await refreshSummary(force: done > 0)
         let gate = await checkGate(backlogBytes: s.bytes)
         await publish(running: false, waiting: s.count > 0 ? gate : nil)

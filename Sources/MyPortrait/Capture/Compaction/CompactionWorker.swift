@@ -97,6 +97,7 @@ actor CompactionWorker {
             let sorted = group.sorted { $0.timestampMs < $1.timestampMs }
             await compactDevice(device: device, frames: sorted)
         }
+        MemoryTrim.ifHidden()
     }
 
     // MARK: - 孤儿媒体清扫
