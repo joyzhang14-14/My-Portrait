@@ -67,6 +67,11 @@ enum PathMigration {
                      to: Storage.pipelineLogsDir)
         moveIfNeeded(from: target.appendingPathComponent("llm_dump", isDirectory: true),
                      to: Storage.llmDumpDir)
+        // 调度器的失败记录: ~/.portrait/scheduler/last_failures.json → ~/.portrait/pipeline/。
+        let oldScheduler = target.appendingPathComponent("scheduler", isDirectory: true)
+        moveIfNeeded(from: oldScheduler.appendingPathComponent("last_failures.json"),
+                     to: target.appendingPathComponent("pipeline/last_failures.json"))
+        removeIfEmpty(oldScheduler)
 
         // 2. AI 子系统: ~/Library/Application Support/MyPortrait/ → ~/.portrait/
         guard let appSupportBase = try? fm.url(for: .applicationSupportDirectory,

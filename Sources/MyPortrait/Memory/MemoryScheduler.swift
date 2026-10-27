@@ -169,15 +169,14 @@ final class MemoryScheduler {
         stopRequestedOwners.remove(owner) != nil
     }
 
-    /// 每行每阶段最近一次失败的分类。**持久化到 ~/.portrait/scheduler/
+    /// 每行每阶段最近一次失败的分类。**持久化到 ~/.portrait/pipeline/
     /// last_failures.json** —— 进程重启不丢,UI 一直能显示具体 kind。
     /// 单一真相:in-memory dict,任何写都同步落盘;启动时从盘加载。
     /// 文件格式:`{ "<date>": { "<stage.rawValue>": <LLMFailureKind json> } }`
     private var lastFailureByRowStage: [String: [ProcessingStage: LLMFailureKind]] = [:]
-    /// 持久化文件 url。`~/.portrait/scheduler/last_failures.json`。
+    /// 持久化文件 url。`~/.portrait/pipeline/last_failures.json`(10-27 update,原 `scheduler/` 下)。
     private static var lastFailuresURL: URL {
-        Storage.rootURL.appendingPathComponent("scheduler", isDirectory: true)
-            .appendingPathComponent("last_failures.json")
+        Storage.rootURL.appendingPathComponent("pipeline/last_failures.json")
     }
 
     /// UI / 通知层查最近失败 kind。nil = 没有失败记录。
