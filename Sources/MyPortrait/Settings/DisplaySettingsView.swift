@@ -158,6 +158,11 @@ private struct AppCustomizeCard: View {
     /// 立刻被下面 NSApp.terminate 杀掉,配置没真落盘,新 instance 启动
     /// 看到老值,"重启后又变回去"。
     private func saveAndRestart() {
+        // 重置成默认图标 → 存着的那张也删掉,不留没人用的图(10-27 update)。
+        if dockIconPath.isEmpty {
+            try? FileManager.default.removeItem(
+                at: AIPaths.supportDir.appendingPathComponent("customize/dock.png"))
+        }
         config.mutate {
             $0.display.customDockIcon = dockIconPath
         }
@@ -211,7 +216,7 @@ private struct IconSlot: View {
     let title: String
     @Binding var path: String
     /// On-disk file name to use when copying the picked image into our
-    /// support dir (e.g. "dock.png" / "tray.png").
+    /// support dir (e.g. "dock.png").
     let fileName: String
 
     @State private var preview: NSImage? = nil
@@ -293,11 +298,8 @@ private struct IconSlot: View {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: dest)
-        // dock.png 走 macOS squircle 模板裁剪;tray.png 中心 crop + resize 不圆。
-        // 仿 My-Orphies app-customize-card.tsx 的 squareCropResize。
-        let success: Bool = (fileName == "dock.png")
-            ? Self.writeDockIcon(src: src, dest: dest)
-            : Self.writeTrayIcon(src: src, dest: dest)
+        // 走 macOS squircle 模板裁剪(仿 My-Orphies app-customize-card.tsx)。
+        let success = Self.writeDockIcon(src: src, dest: dest)
         if success {
             path = dest.path
         } else {
@@ -323,9 +325,6 @@ private struct IconSlot: View {
     /// 圆角 ≈ body 边长的 22.5%(不是 canvas 边)。macOS squircle 常数。
     private static let dockCornerRadiusRatio: CGFloat = 0.225
 
-    /// tray icon 单纯 center-crop + resize,不圆,菜单栏渲染要 flush。
-    private static let trayTargetSize: Int = 128
-
     /// 把用户上传的图裁成 macOS Dock squircle 模板的 1024×1024 PNG。
     /// 失败返回 false,UI 回退到"无自定义图"。
     static func writeDockIcon(src: URL, dest: URL) -> Bool {
@@ -350,18 +349,6 @@ private struct IconSlot: View {
         ctx.clip()
         ctx.draw(cropped, in: bodyRect)
         ctx.restoreGState()
-        guard let finalCG = ctx.makeImage() else { return false }
-        return writePNG(cg: finalCG, to: dest)
-    }
-
-    /// tray icon:center-crop + resize 128×128,无圆角无 padding。
-    static func writeTrayIcon(src: URL, dest: URL) -> Bool {
-        guard let srcCG = loadCGImage(src) else { return false }
-        let cropped = centerSquareCrop(srcCG)
-        let target = trayTargetSize
-        guard let ctx = makeARGBContext(width: target, height: target) else { return false }
-        ctx.interpolationQuality = .high
-        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: target, height: target))
         guard let finalCG = ctx.makeImage() else { return false }
         return writePNG(cg: finalCG, to: dest)
     }
