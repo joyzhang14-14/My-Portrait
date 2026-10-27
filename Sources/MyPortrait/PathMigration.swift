@@ -51,6 +51,15 @@ enum PathMigration {
             logger.notice("migrated ~/.portrait/pipes/ → ~/.portrait/cron_jobs/")
         }
 
+        // 1.6. 凭据: ~/.portrait/{master.key, secrets.sqlite(-wal/-shm)} → ~/.portrait/secrets/(10-27 update)。
+        //      主密钥先搬:它和库必须在同一处,否则 SecretStore 会新生成一把钥匙、旧凭据就解不开了。
+        //      -wal 跟主文件一起改名,WAL 里没合并的内容不丢。
+        try? fm.createDirectory(at: AIPaths.secretsDir, withIntermediateDirectories: true)
+        for name in ["master.key", "secrets.sqlite", "secrets.sqlite-wal", "secrets.sqlite-shm"] {
+            moveIfNeeded(from: target.appendingPathComponent(name),
+                         to: AIPaths.secretsDir.appendingPathComponent(name))
+        }
+
         // 2. AI 子系统: ~/Library/Application Support/MyPortrait/ → ~/.portrait/
         guard let appSupportBase = try? fm.url(for: .applicationSupportDirectory,
                                                in: .userDomainMask,

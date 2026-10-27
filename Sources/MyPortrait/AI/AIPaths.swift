@@ -8,7 +8,10 @@ enum AIPaths {
     /// ⚠️ **凭据永远留在真实目录**。dev mode 不切它 —— 这样演示配置拷过去就
     /// 直接能用(TOML 里只有引用名),既不用重新绑定供应商,也不会把 API key
     /// 多复制一份到演示目录里。
-    static var secretsDB: URL { supportDir.appendingPathComponent("secrets.sqlite") }
+    static var secretsDir: URL { supportDir.appendingPathComponent("secrets", isDirectory: true) }
+    static var secretsDB: URL { secretsDir.appendingPathComponent("secrets.sqlite") }
+    /// secrets.sqlite 的 AES 主密钥(0600)。
+    static var masterKey: URL { secretsDir.appendingPathComponent("master.key") }
     static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }
     static var piDir: URL     { supportDir.appendingPathComponent("pi-agent", isDirectory: true) }
@@ -21,6 +24,7 @@ enum AIPaths {
     static func ensureExists() throws {
         let fm = FileManager.default
         try fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: secretsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: binDir, withIntermediateDirectories: true)
     }
 }

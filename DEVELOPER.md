@@ -135,7 +135,7 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 ~/.portrait/
 ├── config.toml                     # user-editable TOML  (Settings/ConfigStore)
 ├── portrait.sqlite                 # frames / video_chunks / OCR / audio / transcriptions / FTS
-├── secrets.sqlite                  # provider credentials
+├── secrets/                        # provider credentials: secrets.sqlite + its AES master.key
 ├── portrait/<category>/            # long-term distilled portrait (one dir per category)
 ├── events/<yyyy-MM-dd>/            # semantic event files (one .md per event)
 ├── personality_daily/<date>.md

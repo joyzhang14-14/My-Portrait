@@ -167,7 +167,7 @@ final class SecretStore: @unchecked Sendable {
 
     private static func masterKeyURL() -> URL {
         try? AIPaths.ensureExists()
-        return AIPaths.supportDir.appendingPathComponent("master.key")
+        return AIPaths.masterKey
     }
 
     /// Write the key with 0600 perms (owner-only RW).
