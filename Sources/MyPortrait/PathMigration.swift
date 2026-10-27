@@ -67,6 +67,14 @@ enum PathMigration {
                      to: Storage.pipelineLogsDir)
         moveIfNeeded(from: target.appendingPathComponent("llm_dump", isDirectory: true),
                      to: Storage.llmDumpDir)
+        // 1.8. 运行程序: ~/.portrait/{bun, pi-agent, bin} → ~/.portrait/runtime/(10-27 update)。
+        //      里面没有写死的绝对路径,改名即可;搬失败的下次启动由 installer 重新装。
+        try? fm.createDirectory(at: AIPaths.runtimeDir, withIntermediateDirectories: true)
+        for name in ["bun", "pi-agent", "bin"] {
+            moveIfNeeded(from: target.appendingPathComponent(name, isDirectory: true),
+                         to: AIPaths.runtimeDir.appendingPathComponent(name, isDirectory: true))
+        }
+
         // 调度器的失败记录: ~/.portrait/scheduler/last_failures.json → ~/.portrait/pipeline/。
         let oldScheduler = target.appendingPathComponent("scheduler", isDirectory: true)
         moveIfNeeded(from: oldScheduler.appendingPathComponent("last_failures.json"),

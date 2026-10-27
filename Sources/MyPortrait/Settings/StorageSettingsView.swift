@@ -346,9 +346,7 @@ private struct StorageStats {
         // app 本体在 ~/.portrait 之外(/Applications 之类),单独量。
         let bundleBytes = directorySize(Bundle.main.bundleURL)
         // 首次启动下载的 AI 运行时:Bun + pi-agent 包 + 注入 PATH 的小 wrapper。
-        let runtimeBytes = directorySize(root.appendingPathComponent("bun"))
-                         + directorySize(root.appendingPathComponent("pi-agent"))
-                         + directorySize(root.appendingPathComponent("bin"))
+        let runtimeBytes = directorySize(root.appendingPathComponent("runtime"))
 
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: 0, freeBytes: free,

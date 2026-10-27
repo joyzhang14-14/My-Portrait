@@ -12,14 +12,17 @@ enum AIPaths {
     static var secretsDB: URL { secretsDir.appendingPathComponent("secrets.sqlite") }
     /// secrets.sqlite 的 AES 主密钥(0600)。
     static var masterKey: URL { secretsDir.appendingPathComponent("master.key") }
-    static var bunDir: URL    { supportDir.appendingPathComponent("bun", isDirectory: true) }
+    /// 首次启动自动下载的运行程序(Bun、pi-agent 包、PATH 目录),跟数据分开放;
+    /// 删了会按原逻辑重新安装(10-27 update,原来直接在 `~/.portrait/` 下)。
+    static var runtimeDir: URL { supportDir.appendingPathComponent("runtime", isDirectory: true) }
+    static var bunDir: URL    { runtimeDir.appendingPathComponent("bun", isDirectory: true) }
     static var bunBinary: URL { bunDir.appendingPathComponent("bin/bun") }
-    static var piDir: URL     { supportDir.appendingPathComponent("pi-agent", isDirectory: true) }
+    static var piDir: URL     { runtimeDir.appendingPathComponent("pi-agent", isDirectory: true) }
     static var piCliJS: URL   { piDir.appendingPathComponent("node_modules/@earendil-works/pi-coding-agent/dist/cli.js") }
     static var piModelsJSON: URL { piDir.appendingPathComponent("models.json") }
 
     /// AI agent 用的 CLI 工具目录(注入到 spawned subprocess 的 PATH 里)。
-    static var binDir: URL { supportDir.appendingPathComponent("bin", isDirectory: true) }
+    static var binDir: URL { runtimeDir.appendingPathComponent("bin", isDirectory: true) }
 
     static func ensureExists() throws {
         let fm = FileManager.default

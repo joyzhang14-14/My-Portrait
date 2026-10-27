@@ -53,7 +53,7 @@ enum CacheHousekeeper {
 
     // MARK: - 1. bun 的 npm 下载缓存
 
-    /// `BUN_INSTALL` 指到 `~/.portrait/bun`,所以 bun 的包缓存落在
+    /// `BUN_INSTALL` 指到 `~/.portrait/runtime/bun`,所以 bun 的包缓存落在
     /// `bun/install/cache`。它只在装 / 升级包时用得上,`pi-agent` 装好之后
     /// 就是纯粹的历史包袱。
     private static func bunInstallCacheTargets() -> [URL] {
