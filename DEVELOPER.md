@@ -138,7 +138,7 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 ├── secrets/                        # provider credentials: secrets.sqlite + its AES master.key
 ├── portrait/<category>/            # long-term distilled portrait (one dir per category)
 ├── events/<yyyy-MM-dd>/            # semantic event files (one .md per event)
-├── journal/                        # append-only action log
+├── pipeline/logs/                  # append-only pipeline maintenance log (budget, archive)
 ├── logs/                           # daily raw JSON
 ├── raw_data/
 │   ├── frames/<date>/{ts_ms}_m{monitor}.jpg    # hot JPG tier

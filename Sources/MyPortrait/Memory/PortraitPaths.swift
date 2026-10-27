@@ -110,7 +110,7 @@ enum PortraitPaths {
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(identifier: "UTC")
         let name = f.string(from: Date()) + ".md"
-        return Storage.journalDir.appendingPathComponent(name)
+        return Storage.pipelineLogsDir.appendingPathComponent(name)
     }
 
     /// Create the seed taxonomy on disk + an INDEX.md per category.

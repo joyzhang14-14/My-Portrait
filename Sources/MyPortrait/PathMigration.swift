@@ -60,6 +60,12 @@ enum PathMigration {
                          to: AIPaths.secretsDir.appendingPathComponent(name))
         }
 
+        // 1.7. 流水线日志: ~/.portrait/journal/ → ~/.portrait/pipeline/logs/(10-27 update)。
+        try? fm.createDirectory(at: Storage.pipelineLogsDir.deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+        moveIfNeeded(from: target.appendingPathComponent("journal", isDirectory: true),
+                     to: Storage.pipelineLogsDir)
+
         // 2. AI 子系统: ~/Library/Application Support/MyPortrait/ → ~/.portrait/
         guard let appSupportBase = try? fm.url(for: .applicationSupportDirectory,
                                                in: .userDomainMask,

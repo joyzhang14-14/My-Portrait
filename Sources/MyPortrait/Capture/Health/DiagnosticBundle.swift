@@ -578,7 +578,7 @@ enum DiagnosticBundle {
             ("frames",          Storage.framesDir),
             ("video",           Storage.videoDir),
             ("logs",            Storage.dailyLogsDir),
-            ("journal",         Storage.journalDir),
+            ("pipeline_logs",   Storage.pipelineLogsDir),
         ] {
             dirs[name] = directorySize(url)
         }

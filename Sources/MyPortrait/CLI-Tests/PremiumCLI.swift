@@ -1438,7 +1438,7 @@ enum PremiumImportSelfTest {
               "writing_records marked processed")
         check(try count(pool, "SELECT COUNT(*) FROM pipeline_runs WHERE trigger='premium'") == 1,
               "pipeline_runs row with trigger premium")
-        check(read(root.appendingPathComponent("journal/2026-01-02.md"))?.contains("selftest") == true,
+        check(read(root.appendingPathComponent("pipeline/logs/2026-01-02.md"))?.contains("selftest") == true,
               "journal appended")
         check(fm.fileExists(atPath: root.appendingPathComponent("llm_dump/distill_parsefail_selftest.txt").path),
               "llm_dump written")
@@ -1459,7 +1459,7 @@ enum PremiumImportSelfTest {
         check(try count(pool, "SELECT COUNT(*) FROM writing_style_runs") == 1, "run not duplicated")
         check(try count(pool, "SELECT COUNT(*) FROM pipeline_runs WHERE trigger='premium'") == 1,
               "pipeline_runs not duplicated")
-        let journal = read(root.appendingPathComponent("journal/2026-01-02.md")) ?? ""
+        let journal = read(root.appendingPathComponent("pipeline/logs/2026-01-02.md")) ?? ""
         check(journal.components(separatedBy: "selftest").count == 2, "journal not duplicated")
 
         // 4. 回滚:回到首次导入前。

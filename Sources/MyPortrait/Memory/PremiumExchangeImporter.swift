@@ -544,8 +544,8 @@ enum PremiumExchangeImporter {
 
     private static func appendJournal(day: String, text: String, root: URL) {
         guard ProcessingLogStore.day(from: day) != nil, !text.isEmpty else { return }
-        let url = root.appendingPathComponent("journal/\(day).md")
-        // 新建 journal 时先写标题行,与 MemoryBudget / Archiver 的写法一致。
+        let url = root.appendingPathComponent("pipeline/logs/\(day).md")
+        // 新建日志时先写标题行,与 MemoryBudget / Archiver 的写法一致。
         let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? "# 记忆维护日志 \(day)\n"
         guard !existing.contains(text) else { return }
         do {

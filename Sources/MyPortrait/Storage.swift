@@ -69,9 +69,11 @@ enum Storage {
     /// Daily raw JSON logs (one file per day, batched at sleep).
     static var dailyLogsDir: URL { rootURL.appendingPathComponent("logs", isDirectory: true) }
 
-    /// Append-only daily action logs from the Memory pipeline (merges,
-    /// archives, supersede decisions, weight passes). See design doc 6.6.
-    static var journalDir: URL { rootURL.appendingPathComponent("journal", isDirectory: true) }
+    /// 流水线的维护日志(周预算 rebalance、归档等),一天一个 `<UTC 日>.md`,只追加。
+    /// `~/.portrait/pipeline/logs/`(10-27 update,原 `~/.portrait/journal/`)。
+    static var pipelineLogsDir: URL {
+        rootURL.appendingPathComponent("pipeline/logs", isDirectory: true)
+    }
 
     // MARK: - Capture layer (Capture/ module)
 
@@ -113,7 +115,7 @@ enum Storage {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            journalDir, transcriptDir, rawDataDir, framesDir, videoDir,
+            pipelineLogsDir, transcriptDir, rawDataDir, framesDir, videoDir,
             voiceTrainingDir,
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
