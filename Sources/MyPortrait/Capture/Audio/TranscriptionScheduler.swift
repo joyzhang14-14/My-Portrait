@@ -278,6 +278,19 @@ actor TranscriptionScheduler {
                 }
                 return
             }
+            // 选了 Qwen 但模型不在磁盘(缓存目录可能被系统清掉)→ 不消费队列:chunk 留在
+            // pending,不耗重试次数;状态栏亮红提示去 AI models 下载,下载回来自动接着转。
+            if engine == "qwen", !qwen.isModelOnDisk {
+                await MainActor.run {
+                    HealthMonitor.shared.report(
+                        component: Self.modelMissingComponent,
+                        reason: "Qwen3-ASR model isn't downloaded. Download it in Settings → AI models.")
+                    KeepAwakeAssertion.shared.set(false, owner: "transcription")
+                    SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
+                }
+                return
+            }
+            await MainActor.run { HealthMonitor.shared.clear(component: Self.modelMissingComponent) }
             // 电源档位不满足(电池 / 开盖但要求合盖等)→ 不转录:释放模型 + 放行睡眠 +
             // 标记 intentional pause(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
             if !powerShouldRun() {
@@ -414,6 +427,17 @@ actor TranscriptionScheduler {
         }
     }
 
+    private static let modelMissingComponent = "transcription.model"
+
+    /// 模型缺失不算这段失败:退回 pending,等模型回来再转。
+    private func recordFailure(_ chunkId: Int64, _ error: Error) async {
+        if case Qwen3ASRError.modelNotDownloaded = error {
+            try? await db.updateAudioChunkStatus(chunkId: chunkId, status: .pending)
+        } else {
+            try? await db.recordAudioChunkFailure(chunkId: chunkId)
+        }
+    }
+
     private func transcribeOne(chunk: AudioChunkRecord) async {
         guard let chunkId = chunk.id else { return }
 
@@ -450,7 +474,7 @@ actor TranscriptionScheduler {
                     "engine":    settings.engine,
                     "err":       String(describing: error),
                 ])
-                try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                await recordFailure(chunkId, error)
                 return
             }
             if !text.isEmpty {
@@ -467,7 +491,7 @@ actor TranscriptionScheduler {
                     text = try await transcribeSamples(seg.samples, settings)
                 } catch {
                     logger.error("transcribe (segment) failed for \(chunk.filePath, privacy: .public): \(String(describing: error), privacy: .public)")
-                    try? await db.recordAudioChunkFailure(chunkId: chunkId)
+                    await recordFailure(chunkId, error)
                     return
                 }
                 guard !text.isEmpty else { continue }

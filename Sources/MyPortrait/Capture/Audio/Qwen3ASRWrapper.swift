@@ -67,6 +67,9 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
         return FileManager.default.fileExists(atPath: dir.appendingPathComponent("model.safetensors").path)
     }
 
+    /// 本实例用的模型在不在磁盘。
+    var isModelOnDisk: Bool { Self.isOnDisk(modelId: modelId) }
+
     /// 从磁盘删除某个 Qwen 模型目录 —— Downloads 页 Uninstall 按钮用。
     /// 删的是 `.../qwen3-speech/models/<org>/<repo>/` 整个目录。
     nonisolated static func deleteFromDisk(modelId: String) {
