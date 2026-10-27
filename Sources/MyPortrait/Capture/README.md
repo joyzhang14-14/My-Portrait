@@ -30,10 +30,6 @@ SnapshotWriter.enqueue ─► JPG URL (立即返回)
                                        ▼
                               （若先 insertFrame 占位）
                               PortraitDB.updateFrameOCR
-                                       │
-                                       ▼
-                      Coordinator 通过 frameEvents AsyncStream
-                      把 FrameEvent 推给订阅方（日志 Agent / UI / 画像距离器）
 ```
 
 ## 各文件职责
@@ -42,7 +38,7 @@ SnapshotWriter.enqueue ─► JPG URL (立即返回)
 |---|---|---|
 | `CaptureError.swift` | 统一错误类型（含 notImplemented） | P0 |
 | `UnimplementedReporter.swift` | stub 命中上报中枢（log + 状态栏 + 计数） | P0 |
-| `Coordinator/CaptureCoordinator.swift` | actor 总调度 + `frameEvents: AsyncStream<FrameEvent>` | P0 |
+| `Coordinator/CaptureCoordinator.swift` | actor 总调度 | P0 |
 | `Coordinator/CaptureConfig.swift` | 所有阈值/参数中心配置 | P0 |
 | `Screen/ScreenCaptureService.swift` | ScreenCaptureKit 单帧抓取 | P0 |
 | `Screen/FrameComparer.swift` | Hellinger 直方图去重 | P0 |

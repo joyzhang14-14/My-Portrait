@@ -8,7 +8,6 @@ import os.log
 ///   1. 持有 ScreenCaptureService / OCRService / FocusProbe / FrameComparer /
 ///      SnapshotWriter / EventSources
 ///   2. 启停采集流水线
-///   3. 把每帧入库完成事件通过 `frameEvents` AsyncStream 推给订阅方
 ///
 /// 事件驱动：订阅 EventSources.stream → 每个 trigger 触发一次抓帧。
 ///   重复 / 高频事件由 minCaptureIntervalMs 防抖 + FrameComparer 去重吸收。
@@ -53,12 +52,6 @@ actor CaptureCoordinator {
     private let settleTimeoutMs = 3_000
     private let settlePollMs = 100
 
-    /// 帧入库事件输出流。stop() 会 finish 它;coordinator 被 Services 跨 capture
-    /// off/on toggle 复用,故 start() 每次重建(镜像 EventSources/DRMWatcher),否则
-    /// toggle 一次后订阅方收不到事件。
-    private(set) var frameEvents: AsyncStream<FrameEvent>
-    private var _continuation: AsyncStream<FrameEvent>.Continuation
-
     init(db: PortraitDB, reporter: UnimplementedReporter, config: CaptureConfig = .default) {
         self.db = db
         self.reporter = reporter
@@ -79,12 +72,6 @@ actor CaptureCoordinator {
         let focusInstance = self.focus
         self.drmWatcher = DRMWatcher(focus: focusInstance, gate: drmGate)
         self.sleepWakeBox = SleepWakeBox()
-
-        var c: AsyncStream<FrameEvent>.Continuation!
-        self.frameEvents = AsyncStream<FrameEvent> { cont in
-            c = cont
-        }
-        self._continuation = c
     }
 
     var isRunning: Bool { captureTask != nil }
@@ -134,13 +121,6 @@ actor CaptureCoordinator {
     /// 失败抛错；调用方 catch 后状态栏会自动亮红点。
     func start() async throws {
         guard captureTask == nil else { return }
-
-        // 重建 stop() finish 掉的输出流 —— 复用 coordinator 跨 toggle 时旧流已死。
-        // 镜像 EventSources.start() / DRMWatcher.start() 的「start 重建流」模式。
-        _continuation.finish()
-        var fc: AsyncStream<FrameEvent>.Continuation!
-        frameEvents = AsyncStream<FrameEvent> { cont in fc = cont }
-        _continuation = fc
 
         // 健康度起点。StallDetector 需要 uptime > 120s 才会判 stall(warmup)。
         await VisionMetrics.shared.markStarted()
@@ -205,7 +185,6 @@ actor CaptureCoordinator {
         comparer.reset()
         await snapshot.reset()
 
-        _continuation.finish()
         logger.info("CaptureCoordinator stopped")
     }
 
@@ -395,12 +374,11 @@ actor CaptureCoordinator {
             visibleWindows: front.visibleWindowsJSON
         )
 
-        let frameId: Int64
         do {
-            frameId = deferred ? try await db.insertFramePendingOCR(record)
-                               : try await db.insertFrameWithOCR(record, ocr: ocrResult)
+            _ = deferred ? try await db.insertFramePendingOCR(record)
+                         : try await db.insertFrameWithOCR(record, ocr: ocrResult)
         } catch {
-            // DB 写失败 → 静默丢弃这帧的事件（避免下游收到无效 frameId）。
+            // DB 写失败 → 这帧不入库。
             // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。
             // 不调 recordPersisted —— silent_loss 自动 +1 反映真"沉默丢失"。
             logger.error("DB insertFrameWithOCR failed: \(String(describing: error), privacy: .public)")
@@ -415,19 +393,6 @@ actor CaptureCoordinator {
         // 健康度埋点:真落库成功 → lastDbWriteMs 跳。StallDetector 拿这个
         // 跟 lastAttemptMs 比,差 > 60s 且非 dedup → vision_db_write stall。
         await VisionMetrics.shared.recordPersisted()
-
-        // 10. 发事件。
-        let event = FrameEvent(
-            frameId: frameId,
-            timestampMs: record.timestampMs,
-            appName: record.appName,
-            windowName: record.windowName,
-            browserUrl: record.browserUrl,
-            snapshotPath: record.snapshotPath,
-            ocrText: ocrResult?.fullText,
-            captureTrigger: record.captureTrigger
-        )
-        _continuation.yield(event)
 
         // 不 await writeTask —— 主路径不等磁盘 IO 完成。
         _ = writeTask
@@ -466,17 +431,4 @@ actor CaptureCoordinator {
 private struct SendableCGImage: @unchecked Sendable {
     let image: CGImage
     init(_ image: CGImage) { self.image = image }
-}
-
-/// 一帧入库完成（含 OCR 完成或确认空）后由 Coordinator 发出。
-public struct FrameEvent: Sendable {
-    public let frameId: Int64
-    public let timestampMs: Int64
-    public let appName: String
-    public let windowName: String?
-    public let browserUrl: String?
-    public let snapshotPath: String
-    /// `nil` = OCR 失败或被跳过。订阅方按需 poll DB。
-    public let ocrText: String?
-    public let captureTrigger: String
 }
