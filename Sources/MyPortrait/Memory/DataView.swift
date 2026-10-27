@@ -48,7 +48,7 @@ struct DataView: View {
     @State private var editingId: Entry.ID?
     @State private var draftTitle = ""
     @State private var draftBody = ""
-    @State private var draftTags = ""
+    @State private var draftTags: [TagCapsuleEditor.Item] = []
     @State private var draftImpact: Double = 0
     @State private var editError: String?
     /// 标题模糊搜(case-insensitive)。空 = 不过滤。切 scope 时清空。
@@ -924,8 +924,7 @@ struct DataView: View {
             }
             .padding(.top, 44)
             editField("tags") {
-                TextField("comma-separated", text: $draftTags)
-                    .textFieldStyle(.roundedBorder)
+                TagCapsuleEditor(items: $draftTags)
             }
             if entry.file.impact != nil {
                 editField("impact") {
@@ -953,7 +952,7 @@ struct DataView: View {
     }
 
     private func editField<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
-        HStack(alignment: .center, spacing: 0) {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(label)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(.tertiary)
@@ -965,7 +964,7 @@ struct DataView: View {
     private func beginEdit(_ entry: Entry) {
         draftTitle = entry.title
         draftBody = PortraitFile.splitHeading(entry.file.body).rest
-        draftTags = entry.file.tags.joined(separator: ", ")
+        draftTags = entry.file.tags.map { TagCapsuleEditor.Item(text: $0) }
         draftImpact = entry.file.impact ?? 0
         editError = nil
         editingId = entry.id
@@ -976,8 +975,7 @@ struct DataView: View {
         let title = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { editError = "Title can't be empty."; return }
         var seen = Set<String>()
-        let tags = draftTags.split(whereSeparator: { $0 == "," || $0 == "，" || $0 == "、" })
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let tags = draftTags.map { $0.text.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
         do {
             // 重读盘上最新版再套用,别把这期间后台写进去的字段(weight / occurrences)冲掉。
@@ -1613,6 +1611,66 @@ private struct FolderDisclosureRow: View {
                 }
             }
         }
+    }
+}
+
+/// 编辑态的 tag:一个个胶囊,点进胶囊直接改,× 删,+ 加一个空胶囊并聚焦。
+/// FlowLayout 换行排,tag 再多也全显示。空胶囊保存时丢掉。
+struct TagCapsuleEditor: View {
+    struct Item: Identifiable {
+        let id = UUID()
+        var text: String
+    }
+
+    @Binding var items: [Item]
+    @FocusState private var focused: UUID?
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach($items) { $item in
+                HStack(spacing: 4) {
+                    // 透明 Text 撑宽度,TextField 叠上去 —— 胶囊跟着字长缩放。
+                    Text(item.text.isEmpty ? "tag" : item.text + " ")
+                        .font(.system(size: 11, design: .monospaced))
+                        .opacity(0)
+                        .overlay(alignment: .leading) {
+                            TextField("tag", text: $item.text)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11, design: .monospaced))
+                                .focused($focused, equals: item.id)
+                                .onSubmit { focused = nil }
+                        }
+                    Button {
+                        let id = item.id
+                        focused = nil
+                        items.removeAll { $0.id == id }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                .overlay(Capsule().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+            }
+            Button {
+                let new = Item(text: "")
+                items.append(new)
+                focused = new.id
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .overlay(Capsule().stroke(Color.primary.opacity(0.20),
+                                              style: StrokeStyle(lineWidth: 1, dash: [3])))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Add a tag")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
