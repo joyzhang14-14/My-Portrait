@@ -362,6 +362,11 @@ enum PremiumExchangeExporter {
                     await report(redo, day, .init(sent: false, empty: true, skipped: skipped))
                     continue
                 }
+                // workflow 第 1 层没做完(那天还有帧在等 OCR)→ 先不发也不回报,下次检查再来。
+                guard try !redoDayWaitsForOCR(dbPool: dbPool, day: day) else {
+                    exportLog.notice("reprocess \(day, privacy: .public): screen text not read yet, waiting")
+                    continue
+                }
                 var mine = redo
                 mine.chains = keep
                 input = try gatherRedoInput(dbPool: dbPool, redo: mine, day: day,
@@ -403,6 +408,15 @@ enum PremiumExchangeExporter {
         let (_, w) = try redoDayWindow(EventIntervalStore(dbPool: dbPool), day)
         return try dbPool.read { db in
             try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM frames WHERE timestamp_ms >= :s AND timestamp_ms < :e)",
+                              arguments: ["s": w.start, "e": w.end]) ?? false
+        }
+    }
+
+    /// 那天还有帧在等延后 OCR(`ocr_pending`)。
+    static func redoDayWaitsForOCR(dbPool: DatabasePool, day: String) throws -> Bool {
+        let (_, w) = try redoDayWindow(EventIntervalStore(dbPool: dbPool), day)
+        return try dbPool.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS (SELECT 1 FROM ocr_pending WHERE timestamp_ms >= :s AND timestamp_ms < :e)",
                               arguments: ["s": w.start, "e": w.end]) ?? false
         }
     }
