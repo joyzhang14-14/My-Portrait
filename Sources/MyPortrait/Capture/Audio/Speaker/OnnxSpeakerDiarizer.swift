@@ -72,6 +72,13 @@ actor OnnxSpeakerDiarizer: SpeakerDiarizer {
         return out
     }
 
+    func unload() {
+        guard segModel != nil || embModel != nil else { return }
+        segModel = nil
+        embModel = nil
+        logger.info("speaker models unloaded")
+    }
+
     // MARK: - 私有
 
     private func ensureModels(embChoice: String) async -> (SpeakerSegmentationModel, SpeakerEmbeddingExtractor)? {

@@ -25,9 +25,13 @@ protocol SpeakerDiarizer: Sendable {
     ///
     /// `isInput`：该段是否来自麦克风输入设备（用于把单一说话人自动命名为用户）。
     func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment]
+
+    /// 释放已加载的模型。转录一轮结束时跟转录模型一起放,下次 diarize 再加载。
+    func unload() async
 }
 
 /// 默认 stub —— 始终返回空数组（说话人分离未启用时用）。
 struct NoopSpeakerDiarizer: SpeakerDiarizer {
     func diarize(wavPath: String, isInput: Bool) async -> [DiarizedSegment] { [] }
+    func unload() async {}
 }

@@ -160,6 +160,7 @@ actor TranscriptionScheduler {
         if !isDraining {
             whisper.unload()
             qwen.unload()
+            Task { [speaker] in await speaker.unload() }
         }
         // 任务取消后不会再有 processQueueOnce 来 refresh —— 这里显式放行睡眠(两 owner)。
         Task { @MainActor in
@@ -271,6 +272,7 @@ actor TranscriptionScheduler {
             if engine == "disabled" {
                 whisper.unload()
                 qwen.unload()
+                await speaker.unload()
                 await MainActor.run {
                     IntentionalPauseState.shared.audioTranscriptionPaused = true
                     KeepAwakeAssertion.shared.set(false, owner: "transcription")
@@ -281,6 +283,7 @@ actor TranscriptionScheduler {
             // 选了 Qwen 但模型不在磁盘(缓存目录可能被系统清掉)→ 不消费队列:chunk 留在
             // pending,不耗重试次数;状态栏亮红提示去 AI models 下载,下载回来自动接着转。
             if engine == "qwen", !qwen.isModelOnDisk {
+                await speaker.unload()
                 await MainActor.run {
                     HealthMonitor.shared.report(
                         component: Self.modelMissingComponent,
@@ -296,6 +299,7 @@ actor TranscriptionScheduler {
             if !powerShouldRun() {
                 whisper.unload()
                 qwen.unload()
+                await speaker.unload()
                 await MainActor.run {
                     IntentionalPauseState.shared.audioTranscriptionPaused = true
                     KeepAwakeAssertion.shared.set(false, owner: "transcription")
@@ -348,6 +352,7 @@ actor TranscriptionScheduler {
         // 退出 drain(清空 / 取消 / 出错 / 无进展)→ 释放模型 + 放行系统睡眠(两 owner)。
         whisper.unload()
         qwen.unload()
+        await speaker.unload()
         await MainActor.run {
             KeepAwakeAssertion.shared.set(false, owner: "transcription")
             SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
