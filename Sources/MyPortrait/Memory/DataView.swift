@@ -423,31 +423,20 @@ struct DataView: View {
         )
 
         let allFolders = EventFolderStore.loadAll()
-        // folder 存活门(07-28,与 Neural Graph 同一口径):核心事件
-        // (currentWeight ≥ beltWeightMax)不足 folderMinCoreEvents 的 folder
-        // 散架 —— 不成组,其全部事件掉进 ungrouped 继续显示,数据不动。
-        var dissolvedPaths: Set<String> = []
+        // 文本列表显示全部 folder(空的也显示,手建的 folder 建完就能看到)。
+        // Neural Graph 另有存活门(核心事件不足 folderMinCoreEvents 不上画布)。
         let folderGroups: [FolderGroup] = allFolders
-            .compactMap { f -> FolderGroup? in
+            .map { f -> FolderGroup in
                 // 内部事件跟随 Text settings 的 Memory sort order(weight / created /
                 // last occurrence),与主列表口径一致。folder.events 的原序
                 // (LLM 输出顺序)信息量低,按设置排更符合直觉。
                 let entries = Self.sortedByConfig(f.events.compactMap { byPath[$0] }, order: order)
-                let core = entries.filter {
-                    $0.currentWeight >= GraphConstants.beltWeightMax
-                }.count
-                guard core >= GraphConstants.folderMinCoreEvents else {
-                    dissolvedPaths.formUnion(f.events)
-                    return nil
-                }
                 return FolderGroup(id: "folder:" + f.slug, slug: f.slug, title: f.name,
                                    colorHex: f.colorHex, entries: entries)
             }
-            .filter { !$0.entries.isEmpty }
             .sorted { $0.entries.count > $1.entries.count }
 
         let classifiedPaths = Set(allFolders.flatMap { $0.events })
-            .subtracting(dissolvedPaths)
         let ungrouped = entries.filter { !classifiedPaths.contains(relPath(of: $0.id)) }
         return (folderGroups, ungrouped)
     }
