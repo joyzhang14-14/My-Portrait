@@ -1,12 +1,12 @@
 # DEVELOPER.md
 
 Engineering guide for **My Portrait** — a macOS-native Swift app that runs a 24/7 personal
-capture pipeline and distills it into a long-term "portrait" you can chat with.
+capture pipeline and distills it into a long-term "portrait".
 
 This is the companion to the user-facing [README](./README.md): read that first for _what the
 app does_, then read this for _how it is built, where it currently stands, and how to debug it_.
 
-> **Scale, for calibration:** ~90k lines of Swift across 4 SwiftPM targets, 277 source files.
+> **Scale, for calibration:** ~90k lines of Swift across 4 SwiftPM targets, 258 source files.
 > The two heaviest modules are `Memory/` (70 files) and `Capture/` (66 files).
 
 ---
@@ -63,7 +63,7 @@ Read this before picking something up — it is the difference between "add a fe
 | Personality refresher                      | **Shipped**                               | **Cloud LLM**      | Gated on on-screen evidence — the strictest filter in the system.                                |
 | Writing-style distiller                    | **Shipped, newest**                       | **Cloud LLM**      | Consumes rebuilt writing records, not raw keystrokes.                                            |
 | Neural Graph                               | **Shipped**                               | On-device          | Custom force-directed engine in its own target (`GraphPhysics`).                                 |
-| Chat, agents, cron jobs                    | **Shipped**                               | Provider-dependent | Multi-provider; agents shell out to a bundled runtime.                                           |
+| Agents (pipeline LLM calls)                | **Shipped**                               | Provider-dependent | Multi-provider; agents shell out to a bundled runtime. Chat and cron jobs live in My Proxy.      |
 | Dev mode                                   | **Shipped** (developer tool)              | —                  | See §5.4.                                                                                        |
 | **Local-model migration**                  | **In progress — the main open work**      | —                  | See below.                                                                                       |
 
@@ -114,14 +114,14 @@ Five SwiftPM targets, one product:
 | ------------------------------------------- | ----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Capture/`                                  |    66 | 24/7 perf-first capture. `Screen/` (capture service, frame dedupe, snapshot writer, DRM/ignore/permission gates), `Audio/` (mic + system audio, Silero VAD, WhisperKit / Qwen3-ASR / cloud engines, transcription scheduler, `Speaker/` diarization via ONNX), `OCR/`, `Compaction/` (JPG→HEVC), `Events/` (triggers, idle/workspace/pasteboard watchers), `Coordinator/`, `Health/` (metrics, stall detection), `Power/`, `DB/` (the `PortraitDB` **protocol** — implementation lives in `DB/`, dependency inversion). |
 | `Memory/`                                   |    66 | The understanding layer. Event building/classification/foldering; portrait, personality and writing-style distillers; `WritingCaptureStore` / `WritingCaptureBrowse` (keystroke reads for Data → Input); `MemoryScheduler` / `MemoryBudget` / `MemoryStaging` (orchestration + the approve/reject flow); `PortraitPaths` / `PortraitFileIO` (the on-disk portrait tree); weight/decay/archival; `Graph/` (Neural Graph rendering, hit-testing, camera, scene building).                                                             |
-| `AI/`                                       |    36 | Chat + agents + cron. Multi-provider chat, agent runners (bundled JS runtime subprocess, and a CLI-based agent), credentials in `secrets.sqlite`, cron job store/executor/scheduler, PII redaction, timeline-context building.                                                                                                                                                                                                                                                                                          |
+| `AI/`                                       |    16 | Agents + credentials. Multi-provider agent runners (bundled JS runtime subprocess, and a CLI-based agent) used by the memory pipelines, credentials in `secrets.sqlite`, OAuth / sign-in helpers, local model store.                                                                                                                                                                                                                                                                                                    |
 | `Settings/`                                 |    26 | SwiftUI settings panes + the TOML config layer (`ConfigStore` / `ConfigSchema` / `ConfigApplier` own `~/.portrait/config.toml`).                                                                                                                                                                                                                                                                                                                                                                                        |
 | `DB/`                                       |    13 | GRDB + SQLite + WAL + FTS5. `PortraitDBImpl` (implements `Capture/DB`'s protocol), schema + migrations, row types, FTS search engine, retention worker, screenpipe importer.                                                                                                                                                                                                                                                                                                                                            |
 | `Typing/`                                   |    14 | Keystroke and AX capture, IME state machine, text diffing, pasteboard monitoring, privacy filtering.                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `CLI-Tests/`                                |    18 | Maintenance and diagnostic entry points (§5.2).                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `CLI-Skills/`                               |     4 | CLI bridges the _agents_ call (`mp-query`, `mp-folders`, cron管理).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `CLI-Skills/`                               |     1 | `AIEditCLI` — the `--ai-*` edit-draft entry points over `EditDraft`.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `Onboarding/`, `Notifications/`, `Updater/` |     4 | First-run flow; in-app + system notifications; Sparkle wrapper.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| root `*.swift`                              |    21 | App shell and shared UI: `App.swift`, `ContentView`, `HomeView`, `TimelineView` + `TimelineSidebar` + `TimelineFeed`, `ConnectionsView`, `CronJobsView`, `DesignSystem`, `Storage.swift`, `DevMode.swift`, `Services`, `StatusBarMenu`, `PathMigration`.                                                                                                                                                                                                                                                                |
+| root `*.swift`                              |    19 | App shell and shared UI: `App.swift`, `ContentView`, `TimelineView` + `TimelineSidebar` + `TimelineFeed`, `ConnectionsView`, `DesignSystem`, `Storage.swift`, `DevMode.swift`, `Services`, `StatusBarMenu`, `PathMigration`.                                                                                                                                                                                                                                                                                            |
 
 Six sub-modules carry their own design docs — see §7.
 
@@ -136,7 +136,6 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 ├── config.toml                     # user-editable TOML  (Settings/ConfigStore)
 ├── portrait.sqlite                 # frames / video_chunks / OCR / audio / transcriptions / FTS
 ├── secrets.sqlite                  # provider credentials
-├── chat.sqlite                     # conversations
 ├── portrait/<category>/            # long-term distilled portrait (one dir per category)
 ├── events/<yyyy-MM-dd>/            # semantic event files (one .md per event)
 ├── personality_daily/<date>.md
@@ -147,14 +146,12 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 │   └── video/<date>/m{id}_{startTs}.mp4        # HEVC compaction tier
 ├── audio_queue/                    # VAD-segmented WAV + deferred-transcription queue
 ├── voice_training/<speaker_id>.wav
-├── bin/mp-query                    # shell wrapper that exec's the app binary (NOT a symlink — §6.4)
+├── bin/                            # PATH dir handed to spawned agents
 ├── bun/, pi-agent/                 # bundled agent runtime
-├── agent_sessions/<convId>.jsonl
-├── cron_jobs/<slug>/               # cron_job.md + runs.json
 └── models/                         # local model cache
 ```
 
-All three SQLite databases run **WAL**. All timestamps are **INTEGER UTC milliseconds** (§6.1).
+Both SQLite databases run **WAL**. All timestamps are **INTEGER UTC milliseconds** (§6.1).
 
 ### End-to-end dataflow
 
@@ -176,9 +173,6 @@ Keystrokes + AX ──► IME state machine ──► diff ──► writing rec
                        (per category)     (on-screen evidence      distiller          (read-only
                              │              gate)                      │               rendering)
                              └──────────────► portrait/<category>/ ◄───┘
-                                                    │
-                                                    ▼
-                                       Chat / agents / cron jobs
 ```
 
 Every LLM-producing stage writes to a **staging area first** and waits for approval
@@ -335,12 +329,11 @@ it and see the change without rebuilding.
 
 | Follows dev mode                             | Always real                                     |
 | -------------------------------------------- | ----------------------------------------------- |
-| `Storage.uiRootURL` — events, portrait, chat | `Storage.rootURL` — the capture DB, `raw_data/` |
-| UI-facing config sections                    | `cron_jobs/`, credentials (`secrets.sqlite`)    |
+| `Storage.uiRootURL` — events, portrait       | `Storage.rootURL` — the capture DB, `raw_data/` |
+| UI-facing config sections                    | credentials (`secrets.sqlite`)                  |
 
-Two paths that must not disagree are the classic bug source here: cron jobs live in the _real_
-root but chat conversations follow dev mode, so a background job writing a conversation through
-the UI-facing store lands in the wrong database (§6.5). When you touch a background writer, ask
+Two paths that must not disagree are the classic bug source here: a background job writing
+through a UI-facing store lands in the wrong root (§6.5). When you touch a background writer, ask
 which root it belongs to and use the explicit accessor — never `uiRootURL` by default.
 
 ### 5.5 Poking the database
@@ -503,14 +496,6 @@ changes on upgrade.
 — but it means two subsystems can legitimately sit on opposite sides, and code that assumes they
 agree breaks in a way that is invisible until you look at the data.
 
-Real example (fixed): cron jobs live under the always-real root, while chat conversations follow
-the UI root. A cron run therefore wrote its conversation into the _demo_ database while
-recording the run in the _real_ `runs.json`. Two consequences, both silent: history entries that
-open to nothing, and — when the history cap trimmed an entry, deleting a conversation that did
-not exist in the demo database — real conversations surviving with no owning run, so they
-resurfaced in the normal chat list. The fix was an explicit always-real store for background
-writers.
-
 **Rule:** when writing from a background/scheduled path, name the root explicitly. Reserve
 `uiRootURL` for code that is rendering something a human is looking at.
 
@@ -554,11 +539,11 @@ builds show the letter tile),
 authenticated with a per-user key kept in SecretStore (`premium.key`); Premium keeps every
 user's bundles and processes all of them in one run each night at 03:00 (a user's backlog merged
 into one job, see *Server*). `SchedulerSettings.offloadedChains`
-lists the offloaded chains; chat and cron jobs are unaffected.
+lists the offloaded chains.
 
 **Provider.** `Provider.premium` is a marker, not a callable model: `MemoryAgentFactory.make`
 and `PiAgent.init` trap on it, it has no Pi entry, and `Provider.from(integrationId:)` does not
-map it, so chat and cron jobs cannot select it. It shows up in the pipeline provider pickers once
+map it, so no agent can select it. It shows up in the pipeline provider pickers once
 the Premium tile is connected.
 
 **Connections → My Portrait Premium.** While the tile is not connected, the card takes the key, plus a server
