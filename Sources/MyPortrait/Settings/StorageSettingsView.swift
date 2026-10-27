@@ -108,8 +108,6 @@ struct StorageSettingsView: View {
             Group {
                 autoDeleteCard
 
-                waitForTranscriptionCard
-
                 deleteRecentCard
             }
         }
@@ -173,16 +171,6 @@ struct StorageSettingsView: View {
                         ? "Video and audio are almost all of the disk usage, and they're the part you're least likely to go back to. Dropping them keeps the OCR text and transcripts — so your timeline stays searchable and the memory pipelines still have something to read.\n\nEverything deletes those too: past the retention window, that day is simply gone."
                         : nil
                 ) { config.mutate { $0.storage.autoDeleteMode = mode.rawValue } }
-            }
-        }
-    }
-
-    private var waitForTranscriptionCard: some View {
-        SettingsCard {
-            SettingsRow("Wait for transcription",
-                        info: "Audio that hasn't been transcribed yet is kept past the retention window until its text is saved.\n\nWithout this, a backlog of un-transcribed recordings can age out and be deleted before they're ever turned into text — the audio is gone and so is what was said in it.",
-                        icon: "text.bubble") {
-                Toggle("", isOn: config.binding(\.storage.waitForTranscription)).labelsHidden().toggleStyle(.switch)
             }
         }
     }

@@ -317,7 +317,8 @@ actor PortraitDBImpl: PortraitDB {
     func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
         try await dbPool.read { db in
             try AudioChunkRow
-                .filter(Column("status") == AudioChunkStatus.done.rawValue)
+                .filter(Column("status") == AudioChunkStatus.done.rawValue
+                        || (Column("status") == AudioChunkStatus.failed.rawValue && Column("retry_count") >= 3))
                 .filter(Column("file_path").like("audio_queue/%"))
                 .order(Column("recorded_at_ms"))
                 .limit(limit)
@@ -644,7 +645,7 @@ actor PortraitDBImpl: PortraitDB {
 
     // MARK: - Retention
 
-    func mediaPathsBefore(ms: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionFileList {
+    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
         try await dbPool.read { db in
             // Pull raw paths from each table, then resolve. Files that
             // already vanished off disk are dropped — retention has
@@ -657,23 +658,18 @@ actor PortraitDBImpl: PortraitDB {
                 SELECT file_path FROM video_chunks
                 WHERE end_ts_ms < :ms
                 """, arguments: ["ms": ms])
-            // wait_for_transcription 开 → 只删「转录完(done)或永久放弃
-            // (failed 且重试次数耗尽,见 resetRetryableFailedAudioChunks 的
-            // retry_count < 3)」的音频;pending / in_progress / 还会重试的
-            // failed 留到转录产出文本后的下一轮。
+            // 只删「转录完(done)或永久放弃(failed 且重试次数耗尽,见
+            // resetRetryableFailedAudioChunks 的 retry_count < 3)」的音频 —— 这些已经从
+            // audio_queue 搬进 raw_data/audio;待转录的留在队列里不动。
             // **id 一并取回**:applyRetention 按这批 id 快照删行,不二次求值
             // status(文件清单与行删除之间 status 会被转录管线推进)。
-            let audioFilter = excludeUntranscribedAudio
-                ? "AND (status = :done OR (status = :failed AND retry_count >= 3))"
-                : ""
             let audioRows = try Row.fetchAll(db, sql: """
                 SELECT id, file_path FROM audio_chunks
-                WHERE recorded_at_ms < :ms \(audioFilter)
-                """, arguments: excludeUntranscribedAudio
-                    ? ["ms": ms,
-                       "done": AudioChunkStatus.done.rawValue,
-                       "failed": AudioChunkStatus.failed.rawValue]
-                    : ["ms": ms])
+                WHERE recorded_at_ms < :ms
+                  AND (status = :done OR (status = :failed AND retry_count >= 3))
+                """, arguments: ["ms": ms,
+                                  "done": AudioChunkStatus.done.rawValue,
+                                  "failed": AudioChunkStatus.failed.rawValue])
             // id 不跟文件存在性挂钩:文件已丢的行照样要删(否则永远残留)。
             let audioIds = audioRows.compactMap { $0["id"] as Int64? }
             let rawAudio = audioRows.compactMap { $0["file_path"] as String? }
@@ -682,6 +678,7 @@ actor PortraitDBImpl: PortraitDB {
                 snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
                 videoChunkPaths: rawVideoChunks.compactMap(AssetPath.resolve),
                 audioPaths: rawAudio.compactMap(AssetPath.resolve),
+                transcriptPaths: rawAudio.compactMap { Storage.transcriptURL(forAudio: $0)?.path },
                 audioChunkIds: audioIds
             )
         }

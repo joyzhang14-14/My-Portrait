@@ -77,7 +77,7 @@ protocol PortraitDB: Sendable {
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
-    /// 已转录完、文件还在 `audio_queue/` 下的段(等着搬进 raw_data/audio)。
+    /// 转录完或彻底失败(重试用完)、文件还在 `audio_queue/` 下的段(等着搬进 raw_data/audio)。
     func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
     /// 改一段的文件路径(搬家后)。`path` 存相对 root 的形式。
     func updateAudioChunkPath(chunkId: Int64, path: String) async throws
@@ -147,11 +147,9 @@ protocol PortraitDB: Sendable {
 
     /// 早于 `ms` 的所有媒体文件路径快照。
     /// RetentionWorker 先用这个清单删盘上文件，再调 `applyRetention(...)` 清 DB。
-    /// `excludeUntranscribedAudio` 开(wait_for_transcription 设置,默认开)→
-    /// 还没转录完的音频(pending / in_progress / 还会重试的 failed)不进清单,
-    /// 等转录产出文本后下一轮再删 —— 否则转录积压超过保留期时,mediaOnly
-    /// 承诺保留的文本随文件一起永久丢失。
-    func mediaPathsBefore(ms: Int64, excludeUntranscribedAudio: Bool) async throws -> RetentionFileList
+    /// 音频只清转录完或彻底失败的(也就是已经搬进 raw_data/audio 的);`audio_queue/` 里
+    /// 待转录的不进清单,转录产出文本后下一轮再删(10-27 update)。
+    func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList
 
     /// 按 `mode` 清 DB：
     /// - `.mediaOnly`：NULL 掉 frames.snapshot_path / video_chunk_id；DELETE 旧 video_chunks。
@@ -295,17 +293,21 @@ enum RetentionMode: String, Sendable {
 struct RetentionFileList: Sendable {
     let snapshotPaths: [String]    // .jpg
     let videoChunkPaths: [String]  // .mp4
-    let audioPaths: [String]       // .wav (+ 配套 .meta.json / .transcript.json 由 worker 推断)
+    let audioPaths: [String]       // .wav (+ 同目录的 .meta.json 由 worker 推断)
+    /// 这批录音的转录副本(metadata/transcript/);只在 `.everything` 时删,mediaOnly 留着文字。
+    let transcriptPaths: [String]
     /// 进清单那一刻命中删除条件的 audio_chunks 行 id 快照。applyRetention
     /// (.everything) 按这批 id 删行,而不是再按 status 重新求值 —— 文件清单
     /// 与行删除之间隔着耗时的 deleteFiles,期间转录管线会推进 status,
     /// 两次独立求值会出现「行删了文件没删」的永久孤儿 wav。
     let audioChunkIds: [Int64]
 
-    init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String], audioChunkIds: [Int64]) {
+    init(snapshotPaths: [String], videoChunkPaths: [String], audioPaths: [String],
+         transcriptPaths: [String], audioChunkIds: [Int64]) {
         self.snapshotPaths = snapshotPaths
         self.videoChunkPaths = videoChunkPaths
         self.audioPaths = audioPaths
+        self.transcriptPaths = transcriptPaths
         self.audioChunkIds = audioChunkIds
     }
 }

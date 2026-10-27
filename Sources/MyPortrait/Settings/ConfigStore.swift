@@ -151,8 +151,6 @@ final class ConfigStore {
              dataDirectory: current.storage.dataDirectory,
              retentionDays: current.storage.retentionDays,
              autoDeleteMode: current.storage.autoDeleteMode,
-             waitForTranscription: current.storage.waitForTranscription,
-             audioEngine: current.capture.audio.engine,
              preferredInputDeviceUID: current.capture.audio.preferredInputDeviceUID,
              localModelBaseURL: current.localModel.baseURL,
              localModelName: current.localModel.model,

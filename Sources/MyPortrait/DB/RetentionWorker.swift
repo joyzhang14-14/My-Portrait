@@ -11,7 +11,7 @@ import os.log
 ///   1. retentionDays = forever 或 mode = off → 立即 return
 ///   2. cutoff = now - retentionDays * 86400_000
 ///   3. db.mediaPathsBefore(cutoff) 拿盘上文件清单
-///   4. 删盘上文件（jpg + mp4 + wav + 配套 .meta.json / .transcript.json）
+///   4. 删盘上文件（jpg + mp4 + wav + 配套 .meta.json;everything 模式连转录副本一起删）
 ///   5. db.applyRetention(mode:, beforeMs:) 清 DB
 ///   6. 写 log（删了多少 + 模式 + 耗时）
 ///
@@ -57,7 +57,7 @@ actor RetentionWorker {
         // 没人再引用的附件,是垃圾不是用户数据,用户选 Off 也照清。
         await CacheHousekeeper.run()
 
-        let (days, mode, waitForTranscription) = readSettings()
+        let (days, mode) = readSettings()
         guard let cutoffDays = days, mode != .off else {
             // forever 或 off → 不动数据
             return
@@ -66,14 +66,13 @@ actor RetentionWorker {
         let cutoffMs = Int64(now.timeIntervalSince1970 * 1000) - Int64(cutoffDays * 86400 * 1000)
         let modeRetention: RetentionMode = (mode == .mediaOnly) ? .mediaOnly : .everything
 
-        logger.info("retention pass starting: mode=\(mode.rawValue, privacy: .public), cutoff_days=\(cutoffDays), cutoff_ms=\(cutoffMs), wait_for_transcription=\(waitForTranscription, privacy: .public)")
+        logger.info("retention pass starting: mode=\(mode.rawValue, privacy: .public), cutoff_days=\(cutoffDays), cutoff_ms=\(cutoffMs)")
         let started = Date()
 
-        // 1. 拿文件清单(wait_for_transcription 开 → 未转录音频不进清单,
-        //    等转录产出文本后下一轮再删)
+        // 1. 拿文件清单(音频只含转录完的,待转录的留在 audio_queue 不动)
         let files: RetentionFileList
         do {
-            files = try await db.mediaPathsBefore(ms: cutoffMs, excludeUntranscribedAudio: waitForTranscription)
+            files = try await db.mediaPathsBefore(ms: cutoffMs)
         } catch {
             logger.error("mediaPathsBefore failed: \(String(describing: error), privacy: .public)")
             return
@@ -81,7 +80,7 @@ actor RetentionWorker {
 
         // 2. 删盘上文件
         let totalFiles = files.snapshotPaths.count + files.videoChunkPaths.count + files.audioPaths.count
-        deleteFiles(files)
+        deleteFiles(files, dropTranscripts: modeRetention == .everything)
 
         // 3. 清 DB(audio 行按步骤 1 的 id 快照删,与文件删除严格同批 ——
         //    两次独立按 status 求值会因转录管线并发推进 status 产生孤儿 wav)
@@ -99,7 +98,7 @@ actor RetentionWorker {
 
     // MARK: - 私有
 
-    private func readSettings() -> (days: Int?, mode: AutoDeleteMode, waitForTranscription: Bool) {
+    private func readSettings() -> (days: Int?, mode: AutoDeleteMode) {
         let s = ConfigStore.snapshot
 
         let retention = RetentionDays(rawValue: s.retentionDays) ?? .d30
@@ -115,16 +114,10 @@ actor RetentionWorker {
         }()
 
         let mode = AutoDeleteMode(rawValue: s.autoDeleteMode) ?? .off
-
-        // 「等转录」只在真的会有转录时才有意义:引擎 disabled = 没有可等的,
-        // 到期照删 —— 否则引擎长期关闭 + 采集照跑时,保留期对音频永久失效,
-        // 磁盘无限增长且无任何告警。
-        let wait = s.waitForTranscription && s.audioEngine != "disabled"
-
-        return (days, mode, wait)
+        return (days, mode)
     }
 
-    private func deleteFiles(_ files: RetentionFileList) {
+    private func deleteFiles(_ files: RetentionFileList, dropTranscripts: Bool) {
         let fm = FileManager.default
 
         // 硬护栏:retention 只删 ~/.portrait 树内的文件。早期 screenpipe import 的
@@ -147,14 +140,15 @@ actor RetentionWorker {
         // 视频块 mp4
         for path in files.videoChunkPaths { safeRemove(path) }
 
-        // 音频 wav + 配套 sidecar
+        // 音频 wav + 同目录的 .meta.json
         for path in files.audioPaths {
             safeRemove(path)
-            // 同时删 .meta.json 和 .transcript.json（同名兄弟）
-            let url = URL(fileURLWithPath: path)
-            let base = url.deletingPathExtension()
-            safeRemove(base.appendingPathExtension("meta.json").path)
-            safeRemove(base.appendingPathExtension("transcript.json").path)
+            safeRemove(URL(fileURLWithPath: path).deletingPathExtension()
+                .appendingPathExtension("meta.json").path)
+        }
+        // 转录副本:everything 模式数据库里的文字也删了,副本跟着删;mediaOnly 留着文字。
+        if dropTranscripts {
+            for path in files.transcriptPaths { safeRemove(path) }
         }
     }
 }
