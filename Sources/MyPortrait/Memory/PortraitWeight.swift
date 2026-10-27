@@ -26,10 +26,9 @@ enum PortraitWeight {
     ///
     /// - Parameter extractRefCount: 从 body 抽 ref count 的回调。不同类目的
     ///   link 格式不同(`- [[id]]` vs `[[wr:id]]`),由调用方传具体抽法。
-    static func refresh(in dir: URL, extractRefCount: (String) -> Int) {
+    static func refresh(in dir: URL, now: Date = Date(), extractRefCount: (String) -> Int) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
-        let now = Date()
         for name in items where name.hasSuffix(".md") && name != "INDEX.md" {
             let url = dir.appendingPathComponent(name)
             guard var file = try? PortraitFileIO.read(from: url) else { continue }
@@ -73,10 +72,10 @@ enum PortraitWeight {
     // MARK: - 顶层 refresh 入口
 
     /// 刷 PortraitPaths.distillCategories 下所有目录的 weight。
-    /// PortraitDistiller.distill() 入口调一次。
-    static func refreshDistillCategories() {
+    /// PortraitDistiller.distill() 各分类都跑成后调一次(结算)。
+    static func refreshDistillCategories(now: Date = Date()) {
         for cat in PortraitPaths.distillCategories {
-            refresh(in: PortraitPaths.categoryDir(cat), extractRefCount: extractDistillRefCount)
+            refresh(in: PortraitPaths.categoryDir(cat), now: now, extractRefCount: extractDistillRefCount)
         }
     }
 

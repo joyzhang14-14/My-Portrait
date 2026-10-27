@@ -403,13 +403,13 @@ struct MyPortraitApp: App {
             let pathArg: String? = (nextArg?.hasPrefix("/") == true) ? nextArg : nil
             ScreenpipeImportCLI.run(sourcePath: pathArg)
         }
-        // 一次性触发 PortraitWeight.refreshDistillCategories() —— 不调 LLM,
-        // 只按当前公式重算 social/background/experiences/interests/skills/
-        // emotions 下所有 .md 的 weight。writing_style 顺手刷一遍。
-        if args.contains("--portrait-weight-refresh") {
-            PortraitWeight.refreshDistillCategories()
-            PortraitWeight.refreshWritingStyle()
-            print("[portrait-weight] refreshed distill categories + writing_style")
+        // 按结算时刻(PipelineSettle)重算 weight,不调 LLM:events 按事件结算日,
+        // social/background/experiences/interests/skills/emotions 按画像结算日。
+        if args.contains("--resettle-weights") {
+            let ev = PipelineSettle.events, po = PipelineSettle.portrait
+            let n = Backfill.weightPass(now: ev)
+            PortraitWeight.refreshDistillCategories(now: po)
+            print("[resettle-weights] events as of \(ev) (\(n) rewritten), portrait as of \(po)")
             exit(0)
         }
         AppKeyboard.install()

@@ -411,27 +411,27 @@ enum Backfill {
     /// MemoryScheduler.runEventJob 在所有区间跑完后调一次(跟 rebalance 同模式)。
     nonisolated static func weightPass() async {
         await Task.detached(priority: .userInitiated) {
-            weightPassSync()
+            _ = weightPass(now: Date())
         }.value
     }
 
-    /// Sync helper — NSEnumerator iteration isn't usable from `async` bodies
-    /// under Swift 6 strict concurrency, so isolate it here.
-    nonisolated private static func weightPassSync() {
-        // 只对 events/ 跑 WeightCalculator —— portrait 不再走 event 的
-        // impact×decay 公式。portrait 的 weight 由 P5 EMA 写入路径管理；
-        // P5 接入前 portrait weight 保持 P3 迁移后的 1.0 不被覆盖。
-        weightPassDir(Storage.eventsDir)
+    /// 按 `now` 重算 events/ 下全部 weight,返回改写的文件数。
+    /// 只对 events/ 跑 WeightCalculator —— portrait 走 PortraitWeight。
+    /// (NSEnumerator 不能在 async 里迭代,所以是同步函数。)
+    @discardableResult
+    nonisolated static func weightPass(now: Date) -> Int {
+        weightPassDir(Storage.eventsDir, now: now)
     }
 
-    nonisolated private static func weightPassDir(_ root: URL) {
+    nonisolated private static func weightPassDir(_ root: URL, now: Date) -> Int {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: root,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ) else { return }
+        ) else { return 0 }
 
+        var written = 0
         while let url = enumerator.nextObject() as? URL {
             guard url.pathExtension == "md" else { continue }
             guard url.lastPathComponent != "INDEX.md" else { continue }
@@ -440,15 +440,17 @@ enum Backfill {
             do {
                 var f = try PortraitFileIO.read(from: url)
                 let oldWeight = f.weight
-                WeightCalculator.recompute(&f)
+                WeightCalculator.recompute(&f, now: now)
                 // 浮点容差 1e-6,对齐 PortraitWeight.refresh —— 值没变就不
                 // 写盘,避免全树文件被无条件改写(I/O + mtime 跳动)。
                 if abs(f.weight - oldWeight) < 1e-6 { continue }
                 try PortraitFileIO.write(f, to: url)
+                written += 1
             } catch {
                 continue
             }
         }
+        return written
     }
 }
 
