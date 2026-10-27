@@ -469,7 +469,9 @@ Related invariants:
   is charging, at the time picked on that page (any time, lid closed, or idle: lid closed,
   brightness at zero or 5 minutes without input; more than 5 GB waiting runs it whenever charging),
   with normal memory pressure and enough free memory
-  (`SystemMemory`). Each frame then gets the usual JPG. Workflow steps run in order: interval
+  (`SystemMemory`). The OCR itself runs in a child process (`OCRHelper`, the app binary with
+  `--ocr-helper`) that exits after each pass, so Vision never stays resident in the app.
+  Each frame then gets the usual JPG. Workflow steps run in order: interval
   sealing never passes the oldest queued frame, and the event / portrait / personality jobs don't
   start while OCR is running.
 - **Focus (app/window/URL) is read from a cached actor**, updated by NSWorkspace notifications —

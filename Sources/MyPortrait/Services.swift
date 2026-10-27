@@ -87,7 +87,7 @@ final class Services {
 
         self.coordinator = CaptureCoordinator(db: dbImpl, reporter: reporter)
         self.compactor = CompactionWorker(db: dbImpl, reporter: reporter)
-        self.deferredOCR = DeferredOCRWorker(db: dbImpl, reporter: reporter)
+        self.deferredOCR = DeferredOCRWorker(db: dbImpl)
         let audioSvc = AudioCaptureService(reporter: reporter)
         self.audio = audioSvc
         self.systemAudio = SystemAudioCaptureService(reporter: reporter)

@@ -15,9 +15,9 @@ import os.log
 /// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
 /// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看内存,马上补完。
 ///
-/// 每帧:OCR → 写 OCR 字段 → 按常规写一张 JPG 换掉 HEIC → 移出队列 → 删 HEIC。之后
-/// MP4 压缩、Premium 打包、时间轴看到的和采集时直接 OCR 的帧一样。每帧之前重判条件,
-/// 用户回来,当前这帧做完就停。
+/// 每帧:交给 OCR 子进程(`OCRHelper`,OCR + 按常规写一张 JPG)→ 写 OCR 字段、换
+/// snapshot_path、移出队列 → 删 HEIC。之后 MP4 压缩、Premium 打包、时间轴看到的和采集时
+/// 直接 OCR 的帧一样。每帧之前重判条件,用户回来,当前这帧做完就停;一轮结束子进程退出。
 ///
 /// 下游等这一层做完:事件区间封口不越过最旧的待 OCR 帧(`EventIntervalStore`),
 /// 这一层在跑时事件 / 画像 / 性格都不开跑(`MemoryScheduler`)。
@@ -32,9 +32,6 @@ actor DeferredOCRWorker {
     private static let summaryEverySeconds: TimeInterval = 60
 
     private let db: PortraitDB
-    private let config: CaptureConfig
-    /// OCR 做完换 JPG 用,同采集的 JPG 规格(1920 宽)。
-    private let jpgWriter: SnapshotWriter
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "deferred-ocr")
 
     private var task: Task<Void, Never>?
@@ -42,11 +39,13 @@ actor DeferredOCRWorker {
     private var summary: (at: Date, count: Int, oldestMs: Int64?, bytes: Int64)?
     /// 只放自己拿过的防睡眠(别每 30 秒去碰一次 helper)。
     private var awake = false
+    /// 这一轮的 OCR 子进程,第一帧时开,drain 结束关。
+    private var helper: OCRHelper.Connection?
+    /// 子进程处理某帧时死掉的次数。同一帧死两次就跳过它(不 OCR),免得卡住整个队列。
+    private var crashes: [Int64: Int] = [:]
 
-    init(db: PortraitDB, reporter: UnimplementedReporter, config: CaptureConfig = .default) {
+    init(db: PortraitDB) {
         self.db = db
-        self.config = config
-        self.jpgWriter = SnapshotWriter(config: config, reporter: reporter)
     }
 
     func start() {
@@ -82,10 +81,12 @@ actor DeferredOCRWorker {
             await holdAwake(true)
             for f in frames {
                 if done > 0, await checkGate(backlogBytes: s.bytes) != nil { break outer }
-                await process(f)
+                guard await process(f) else { break outer }
                 done += 1
             }
         }
+        await helper?.close()
+        helper = nil
         await holdAwake(false)
         if done > 0 {
             logger.notice("drained \(done, privacy: .public) frame(s)")
@@ -96,40 +97,45 @@ actor DeferredOCRWorker {
         await publish(running: false, waiting: s.count > 0 ? gate : nil)
     }
 
-    private func process(_ f: PendingOCRFrame) async {
-        guard let path = f.snapshotPath,
-              let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
-            logger.warning("frame \(f.id, privacy: .public): image unreadable, leaving it without OCR")
+    /// false = 子进程起不来或中途死了,这一轮先停。
+    private func process(_ f: PendingOCRFrame) async -> Bool {
+        guard let path = f.snapshotPath else {
+            logger.warning("frame \(f.id, privacy: .public): no image, leaving it without OCR")
             try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
-            return
+            return true
         }
-        var ocr: OCRResult?
-        do {
-            ocr = try await OCRService.recognizeUncached(image: image, config: config)
-        } catch {
-            logger.warning("frame \(f.id, privacy: .public): OCR failed: \(String(describing: error), privacy: .public)")
-        }
-        // HEIC → 常规 JPG。写失败就留着 HEIC(ImageIO 照样读得了)。
-        let heic = URL(fileURLWithPath: path)
-        var jpg: URL?
-        if heic.pathExtension == SnapshotWriter.pendingOCRExt {
-            let out = heic.deletingPathExtension().appendingPathExtension("jpg")
+        if helper == nil {
             do {
-                try await jpgWriter.write(image: image, to: out)
-                jpg = out
+                helper = try OCRHelper.Connection()
             } catch {
-                logger.warning("frame \(f.id, privacy: .public): JPG write failed: \(String(describing: error), privacy: .public)")
+                logger.error("OCR helper failed to start: \(String(describing: error), privacy: .public)")
+                return false
             }
         }
+        guard let reply = await helper?.run(OCRHelper.Request(id: f.id, path: path)) else {
+            helper = nil
+            let n = (crashes[f.id] ?? 0) + 1
+            crashes[f.id] = n
+            logger.error("frame \(f.id, privacy: .public): OCR helper exited (\(n, privacy: .public)x)")
+            if n >= 2 {
+                try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
+                crashes[f.id] = nil
+            }
+            return false
+        }
+        guard reply.readable else {
+            logger.warning("frame \(f.id, privacy: .public): image unreadable, leaving it without OCR")
+            try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
+            return true
+        }
         do {
-            try await db.completePendingOCR(frameId: f.id, ocr: ocr, snapshotPath: jpg?.path)
-            if jpg != nil { try? FileManager.default.removeItem(at: heic) }
+            try await db.completePendingOCR(frameId: f.id, ocr: reply.ocr, snapshotPath: reply.jpg)
+            if reply.jpg != nil { try? FileManager.default.removeItem(atPath: path) }
         } catch {
             logger.error("frame \(f.id, privacy: .public): DB update failed: \(String(describing: error), privacy: .public)")
-            if let jpg { try? FileManager.default.removeItem(at: jpg) }
+            if let jpg = reply.jpg { try? FileManager.default.removeItem(atPath: jpg) }
         }
-        malloc_zone_pressure_relief(nil, 0)
+        return true
     }
 
     // MARK: - 条件

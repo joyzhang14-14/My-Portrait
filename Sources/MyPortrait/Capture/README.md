@@ -48,6 +48,7 @@ SnapshotWriter.enqueue ─► JPG URL (立即返回)
 | `OCR/OCRService.swift` | Vision OCR + 灰度 + UTF-16 bbox | P0 |
 | `OCR/OCRCache.swift` | `(app::title, imgHash)` LRU + TTL | P0 |
 | `OCR/DeferredOCRWorker.swift` | 延后 OCR(workflow 第 1 层):充电且屏幕没人用时补做 `ocr_pending` 里的帧 | 10-25 |
+| `OCR/OCRHelper.swift` | 延后 OCR 的子进程(app 自身 + `--ocr-helper`):OCR + 换 JPG,一轮补完退出,Vision 不常驻主进程 | 10-26 |
 | `DB/PortraitDB.swift` | 出向 DB 的 protocol + Record 类型 | P0 |
 | `DB/StubPortraitDB.swift` | P0 用，所有方法 throw notImplemented | P0 |
 | `Events/` | 事件驱动调度（NSWorkspace / CGEventTap / Pasteboard） | P2 |

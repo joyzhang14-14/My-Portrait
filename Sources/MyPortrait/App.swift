@@ -9,6 +9,8 @@ struct MyPortraitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     init() {
+        // 延后 OCR 的子进程(DeferredOCRWorker 拉起):只做 OCR,不跑迁移、不起窗口。
+        if ProcessInfo.processInfo.arguments.contains(OCRHelper.flag) { OCRHelper.runChild() }
         // 数据路径迁移最先跑 —— CLI 模式也起 Services,所以放最前面,确保
         // 任何模式下读路径前都已经搬完。Idempotent,重复跑不出错。
         PathMigration.runOnceIfNeeded()

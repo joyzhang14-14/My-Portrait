@@ -247,7 +247,7 @@ struct OCRService: Sendable {
 }
 
 /// OCR 完整结果。
-public struct OCRResult: Sendable {
+public struct OCRResult: Sendable, Codable {
     /// 合并后的纯文本，供 FTS5 索引。
     public let fullText: String
 
