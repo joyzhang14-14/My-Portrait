@@ -127,19 +127,23 @@ enum PremiumExchangeImporter {
                     userMessage: err.localizedDescription))
             }
         }
-        // Premium 写回的结果按料的时间结算(event 链在 Premium 时本机不跑 event job):
-        // 区间处理完 → events weight 重算 + 归档;distill 跑成 → portrait weight 重算(10-27 update)。
+        // weight 以本机算的为准:Premium 只在处理中途临时算(给挑事件 / 分 folder / 提炼用),
+        // 不做周预算和归档。导入后按料的时间结算,跟本机跑 event job / distill 收尾同一套(10-27 update):
+        // 区间处理完 → events weight + 周预算 + 归档;distill 跑成 → portrait weight + 归档。
         if let end = reports.compactMap(\.settledEndMs).max() {
             let at = PipelineSettle.eventsClock(through: Date(timeIntervalSince1970: Double(end) / 1000))
-            await Task.detached(priority: .utility) {
-                _ = Backfill.weightPass(now: at)
-                Archiver.runEvents(now: at)
-            }.value
+            await Task.detached(priority: .utility) { _ = Backfill.weightPass(now: at) }.value
+            _ = MemoryBudget_applyToDisk(now: at)
+            await Task.detached(priority: .utility) { Archiver.runEvents(now: at) }.value
             PipelineSettle.markEvents(at)
         }
         if reports.contains(where: \.distilled) {
             let at = PipelineSettle.portraitClock
-            await Task.detached(priority: .utility) { PortraitWeight.refreshDistillCategories(now: at) }.value
+            let rule = Archiver.Rule.fromConfig
+            await Task.detached(priority: .utility) {
+                PortraitWeight.refreshDistillCategories(now: at)
+                _ = try? Archiver.run(rule: rule, now: at)
+            }.value
             PipelineSettle.markPortrait(at)
         }
         scheduler.releaseAllLocks()

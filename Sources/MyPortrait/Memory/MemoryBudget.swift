@@ -284,7 +284,7 @@ func MemoryBudget_applyToDisk(
         guard plan.kind != .outsideWindow, plan.kind != .frozen else { continue }
         guard var file = fileByURL[plan.url] else { continue }
         MemoryBudget.apply(plan, to: &file)
-        WeightCalculator.recompute(&file)
+        WeightCalculator.recompute(&file, now: now)
         do {
             try PortraitFileIO.write(file, to: plan.url)
             fileByURL[plan.url] = file
