@@ -153,9 +153,10 @@ actor DeferredOCRWorker {
             return (s.count, s.bytes)
         }
         guard let p = try? await db.pendingOCRSummary() else { return (summary?.count ?? 0, summary?.bytes ?? 0) }
-        let fm = FileManager.default
-        let bytes = p.snapshotPaths.reduce(Int64(0)) {
-            $0 + ((try? fm.attributesOfItem(atPath: $1)[.size] as? Int64) ?? 0)
+        // 只要大小,用 stat;attributesOfItem 每个文件还要读一遍扩展属性,上千张就很慢。
+        let bytes = p.snapshotPaths.reduce(Int64(0)) { sum, path in
+            var st = stat()
+            return sum + (stat(path, &st) == 0 ? Int64(st.st_size) : 0)
         }
         summary = (Date(), p.count, p.oldestMs, bytes)
         let (count, oldest) = (p.count, p.oldestMs)
