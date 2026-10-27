@@ -342,7 +342,7 @@ Read-only is always safe:
 
 ```bash
 sqlite3 "file:$HOME/.portrait/portrait.sqlite?mode=ro" \
-  "SELECT id, timestamp, app_name FROM frames ORDER BY timestamp DESC LIMIT 5;"
+  "SELECT id, timestamp_ms, app_name FROM frames ORDER BY timestamp_ms DESC LIMIT 5;"
 ```
 
 **Writing is not.** `audio_transcriptions` and `frames` carry FTS5 sync triggers that call a
