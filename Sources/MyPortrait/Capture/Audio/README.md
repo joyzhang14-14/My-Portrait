@@ -25,13 +25,13 @@
 
 ```
 ~/.portrait/audio_queue/                         待转录
-├── seg_2026-05-17T11-00-15.wav
-└── seg_2026-05-17T11-00-15.meta.json
+├── seg_2026-05-17T11-00-15_mic.wav
+└── seg_2026-05-17T11-00-15_mic.meta.json
 ~/.portrait/raw_data/audio/2026-05-17/           转录完搬过来(TranscriptionScheduler.archiveTranscribed)
-├── seg_2026-05-17T11-00-15.wav
-└── seg_2026-05-17T11-00-15.meta.json
+├── seg_2026-05-17T11-00-15_mic.wav
+└── seg_2026-05-17T11-00-15_mic.meta.json
 ~/.portrait/metadata/transcript/2026-05-17/      转录结果的 JSON 副本(正本在数据库)
-└── seg_2026-05-17T11-00-15.transcript.json
+└── seg_2026-05-17T11-00-15_mic.transcript.json
 ```
 
 ## 外部依赖

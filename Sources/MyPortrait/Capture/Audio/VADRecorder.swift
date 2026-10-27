@@ -189,7 +189,17 @@ actor VADRecorder {
 
     private func openSegment() {
         let now = Date()
-        let segName = "seg_\(Self.tsFormatter.string(from: now))"
+        // 麦克风和系统声音两路写同一个目录,文件名带上来源;同一秒再切出一段就加序号,
+        // 不覆盖已有的段(10-27 update)。
+        let device = deviceLabel == "default_microphone" ? "mic"
+            : deviceLabel == "system_loopback" ? "sys" : deviceLabel
+        let stem = "seg_\(Self.tsFormatter.string(from: now))_\(device)"
+        var segName = stem
+        var n = 1
+        while FileManager.default.fileExists(atPath: audioDir.appendingPathComponent("\(segName).wav").path) {
+            segName = "\(stem)-\(n)"
+            n += 1
+        }
         let wavURL = audioDir.appendingPathComponent("\(segName).wav")
 
         let settings: [String: Any] = [
