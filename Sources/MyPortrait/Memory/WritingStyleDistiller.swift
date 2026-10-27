@@ -155,7 +155,6 @@ final class WritingStyleDistiller {
             // writing capture Pass 3 生成),已经描述用户当时在干什么。distiller
             // 直接信这个 + app + url 让 LLM 自行推断 voice/context。删 OCR
             // enrich 省 5-15k tokens/run。
-            // store.midpointOcrSnippet 保留(未来可能他处用),不再调。
             let recordsForLLM = records
 
             if records.isEmpty {
