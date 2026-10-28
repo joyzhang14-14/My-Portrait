@@ -23,6 +23,8 @@ struct MyPortraitApp: App {
         // 重复转录,还会并发跑第二套 compactor/transcriber/scheduler worker。
         // 图谱时间线重建自检(07-11):纯文件读,不开 DB / 不构造 Services。
         if args.contains("--graph-timeline-dump") { EventTimeline.dumpCLI() }
+        // 导出某天的 Events 图谱几何为 JSON(无标题/路径),同样纯文件读。内部 exit。
+        if args.contains("--graph-snapshot-export") { GraphSnapshotExportCLI.run(args: args) }
         // 区间封口规则只读回放(不开写连接、不跑迁移)。详见 SegmentReplayCLI。内部 exit。
         if args.contains("--segment-replay") { SegmentReplayCLI.run(args: args) }
         if args.contains("--rebuild-frames-fts") {
