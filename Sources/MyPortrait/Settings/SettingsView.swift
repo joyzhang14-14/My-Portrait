@@ -16,14 +16,13 @@ struct SettingsPane: View {
             case .capture(.screen):    ScreenCaptureSettingsView()
             case .capture(.audio):     AudioCaptureSettingsView()
             case .capture(.typing):    TypingCaptureSettingsView()
-            case .app(.health):        CaptureHealthView()
+            case .data(.health):       CaptureHealthView()
             case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
             case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
             case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
             case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
             case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
             case .data(.storage):      StorageSettingsView()
-            case .data(.imports):      ImportSettingsView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,14 +124,13 @@ struct SettingsScene: View {
         case .capture(.screen):    ScreenCaptureSettingsView()
         case .capture(.audio):     AudioCaptureSettingsView()
         case .capture(.typing):    TypingCaptureSettingsView()
-        case .app(.health):        CaptureHealthView()
+        case .data(.health):       CaptureHealthView()
         case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
         case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
         case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
         case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
         case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
         case .data(.storage):      StorageSettingsView()
-        case .data(.imports):      ImportSettingsView()
         }
     }
 }

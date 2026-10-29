@@ -18,7 +18,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum App: String, Hashable, CaseIterable {
         // 显示顺序 = case 顺序(rawValue 仍是各自名字,改序不影响持久化的
         // 选中 id)。General 在 Display 上、Connections 在 AI models 上。
-        case general, display, connections, downloads, notifications, health
+        case general, display, connections, downloads, notifications
     }
     enum Capture: String, Hashable, CaseIterable {
         case screen, audio, typing
@@ -31,7 +31,8 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
         // speakers 子项已折进 Audio Capture 页面尾部(2026-05-26 update)。
-        case storage, imports
+        // screenpipe 导入是 General 页的一张卡(只在 ~/.screenpipe 存在时出现)。
+        case storage, health
     }
 
     var id: String {
@@ -57,7 +58,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .app(.downloads):          return "Downloads"
         case .app(.connections):       return "Connections"
         case .app(.notifications):     return "Notifications"
-        case .app(.health):            return "Health"
         case .capture(.screen):        return "Screen Capture & Timeline"
         case .capture(.audio):         return "Audio Capture & Transcript"
         case .capture(.typing):        return "Typing Capture"
@@ -67,7 +67,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .workflow(.writingStyleDistiller): return "Writing Style Distiller"
         case .workflow(.changelog):             return "Changelog"
         case .data(.storage):          return "Storage"
-        case .data(.imports):          return "Import"
+        case .data(.health):           return "Health"
         }
     }
 
@@ -78,7 +78,6 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .app(.downloads):         return "arrow.down.circle"
         case .app(.connections):       return "powerplug"
         case .app(.notifications):     return "bell"
-        case .app(.health):            return "stethoscope"
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
@@ -88,7 +87,7 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .workflow(.writingStyleDistiller): return "pencil.line"
         case .workflow(.changelog):             return "list.bullet.rectangle"
         case .data(.storage):          return "externaldrive"
-        case .data(.imports):          return "tray.and.arrow.down"
+        case .data(.health):           return "stethoscope"
         }
     }
 

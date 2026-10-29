@@ -44,6 +44,14 @@ struct ScreenpipeImporter: Sendable {
     static let defaultSourceDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".screenpipe")
 
+    /// Import from screenpipe 卡片是否**可见**。判据 = `~/.screenpipe` 目录存在,
+    /// 和 `DevMode.isAvailable` 同一套:没装过 screenpipe 的人看不到这张卡。
+    static var isAvailable: Bool {
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: defaultSourceDir.path, isDirectory: &isDir)
+        return exists && isDir.boolValue
+    }
+
     /// 进度回调载体。UI 用来渲染当前阶段 + 进度条。
     /// 阶段顺序:scanning → copyingVideo → importingFrames → importingAudio → done
     struct Progress: Sendable {

@@ -2,12 +2,13 @@ import SwiftUI
 import AppKit
 import GRDB
 
-/// Settings → Data → Import:启动时自动扫盘 ~/.screenpipe / Library / Documents,
+/// Settings → General 里的 Import from screenpipe 卡片(只在 `~/.screenpipe` 存在时出现,
+/// 见 `ScreenpipeImporter.isAvailable`)。点 Scan 扫盘 ~/.screenpipe / Library / Documents,
 /// 找到 screenpipe DB → 显示 frame 数 + 日期范围 + Import 按钮。
 /// 找不到 → 提示"未找到" + Pick folder 兜底。
 ///
 /// 只导比 My-Portrait 最早数据老的部分,从不动当前数据。
-struct ImportSettingsView: View {
+struct ScreenpipeImportCard: View {
 
     @Environment(\.services) private var services
 
@@ -27,44 +28,39 @@ struct ImportSettingsView: View {
     @State private var progress: ScreenpipeImporter.Progress? = nil
 
     var body: some View {
-        // dev mode 整页只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
+        // dev mode 整张卡只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
         // 演示模式下点它没有任何合理用途,只会污染你本人的采集库。
-        SettingsPage("Import") {
-            Group {
-                SettingsCard(
-                    title: "Import from screenpipe",
-                    info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Workflow settings to turn it into memories."
-                ) {
-                    if scanning {
-                        scanningRow
-                    } else if scan == nil {
-                        notScannedBlock          // 手动模式:还没扫过
-                    } else if let s = scan, s.exists {
-                        foundBlock(s)
-                    } else {
-                        notFoundBlock
-                    }
-                    if let p = progress, running {
-                        SettingsDivider()
-                        progressBlock(p)
-                    }
-                    if !statusLines.isEmpty {
-                        SettingsDivider()
-                        statusBlock
-                    }
-                    if let r = lastReport {
-                        SettingsDivider()
-                        summaryBlock(r)
-                    }
-                    if let err = errorMessage {
-                        SettingsDivider()
-                        errorBlock(err)
-                    }
-                }
-
+        SettingsCard(
+            title: "Import from screenpipe",
+            info: "Brings in your older screenpipe history — screen text and audio — from before My Portrait started recording.\n\nYour current data isn't touched, and the original video and audio files stay where they are. Afterward, run Process events in Workflow settings to turn it into memories."
+        ) {
+            if scanning {
+                scanningRow
+            } else if scan == nil {
+                notScannedBlock          // 手动模式:还没扫过
+            } else if let s = scan, s.exists {
+                foundBlock(s)
+            } else {
+                notFoundBlock
+            }
+            if let p = progress, running {
+                SettingsDivider()
+                progressBlock(p)
+            }
+            if !statusLines.isEmpty {
+                SettingsDivider()
+                statusBlock
+            }
+            if let r = lastReport {
+                SettingsDivider()
+                summaryBlock(r)
+            }
+            if let err = errorMessage {
+                SettingsDivider()
+                errorBlock(err)
             }
         }
-        // 07-28 起固定手动:打开本页不自动扫任何来源,每个来源显示
+        // 07-28 起固定手动:打开 General 页不自动扫任何来源,每个来源显示
         // 「未扫描」+ Scan 按钮,用户点了才扫。
     }
 

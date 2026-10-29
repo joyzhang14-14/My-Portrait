@@ -48,6 +48,8 @@ struct GeneralSettingsView: View {
 
             permissionsCard
 
+            if ScreenpipeImporter.isAvailable { ScreenpipeImportCard() }
+
             if DevMode.isAvailable { devModeCard }
         }
     }
