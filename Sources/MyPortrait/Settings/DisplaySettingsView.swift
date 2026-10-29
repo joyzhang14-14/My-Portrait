@@ -410,7 +410,7 @@ private struct MenuBarLampCard: View {
                 // Spotify 之后仍显示 "Terminal is a terminal")。
                 // 墙钟 TimelineView 每 tick 重新求值 body,直接读单例当前值,
                 // 绕开推送这一层。
-                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { _ in
+                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
                         // 底片模拟菜单栏,**跟随系统外观**:深色模式深底、浅色模式浅底,
@@ -431,7 +431,8 @@ private struct MenuBarLampCard: View {
                                       audio: lamps.audio.on,
                                       typing: lamps.typing.on,
                                       paused: lamps.masterOff,
-                                      dark: dark)
+                                      dark: dark,
+                                      now: tl.date)
                                 .padding(18)
                         }
                         .frame(width: 128, height: 128)
@@ -482,54 +483,91 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 菜单栏图标本体:紧贴的同心三环、中心空心,几何和色板与 Assets 里
-/// MenuBarLamp-* 两套 PNG 一致(外半径 8.6 / 空心半径 4,单位是 18pt 图标)。
+/// 菜单栏图标的大号版:同心三圈星尘带(外半径 8.6 / 空心半径 4,单位是 18pt 图标),
+/// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
+/// 这里尺寸大,颗粒更细更密,亮着的那圈颗粒在自己的带子里缓慢漂浮(不越界、不整体转)。
 private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
     var typing: Bool
-    /// 总开关关(暂停)= 三个环全红。
+    /// 总开关关(暂停)= 三圈全红。
     var paused: Bool
     var dark: Bool
+    /// 漂浮相位由外层墙钟 TimelineView 传进来(外层已保证后台也在 tick)。
+    var now: Date
 
     struct Palette { let screen, audio, typing, off, paused: Color }
-
-    /// 浅色底用偏深、偏饱和的色;深色底用偏亮的色。
-    static func palette(dark: Bool) -> Palette {
-        dark ? Palette(screen: rgb(0xB07CFF), audio: rgb(0xFFD84D),
-                       typing: rgb(0x6AA8FF), off: rgb(0x5C5C62),
-                       paused: rgb(0xFF5A52))
-             : Palette(screen: rgb(0x7A1FE0), audio: rgb(0xE0A800),
-                       typing: rgb(0x2563EB), off: rgb(0xBDBDC2),
-                       paused: rgb(0xE0342B))
-    }
 
     private static func rgb(_ hex: UInt32) -> Color {
         Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255,
               blue: Double(hex & 0xFF) / 255)
     }
 
-    private static let outer: CGFloat = 8.6 / 9
-    private static let hole: CGFloat = 4 / 9
+    /// 浅色底用偏深、偏饱和的色;深色底用偏亮的色。
+    static func palette(dark: Bool) -> Palette {
+        dark ? Palette(screen: rgb(0xB07CFF), audio: rgb(0xFFD84D),
+                       typing: rgb(0x6AA8FF), off: rgb(0x66666C),
+                       paused: rgb(0xFF5A52))
+             : Palette(screen: rgb(0x7A1FE0), audio: rgb(0xE0A800),
+                       typing: rgb(0x2563EB), off: rgb(0xB4B4BA),
+                       paused: rgb(0xE0342B))
+    }
+
+    /// 一颗星尘:极坐标位置 + 大小/透明度 + 漂浮的频率与相位。
+    private struct Dust {
+        let angle, radius, size, alpha: Double
+        let r1, r2: Double                 // 所在那圈带子的内外半径(漂浮夹在里面)
+        let fa, pa, fr, pr: Double         // 沿环 / 径向两个方向的摆动频率与相位
+    }
+
+    /// 三圈颗粒一次生成、固定种子:按面积均匀撒满整条带子。
+    private static let dust: [[Dust]] = {
+        let outer = 8.6, hole = 4.0, w = (outer - hole) / 3
+        var seed: UInt64 = 0x9E3779B97F4A7C15
+        func next() -> Double {          // SplitMix64
+            seed &+= 0x9E3779B97F4A7C15
+            var z = seed
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return Double((z ^ (z >> 31)) >> 11) / Double(1 << 53)
+        }
+        return (0..<3).map { i in
+            let r2 = outer - Double(i) * w, r1 = r2 - w
+            let n = Int(16 * Double.pi * (r2 * r2 - r1 * r1))
+            return (0..<n).map { _ in
+                Dust(angle: next() * 2 * .pi,
+                     radius: (r1 * r1 + next() * (r2 * r2 - r1 * r1)).squareRoot(),
+                     size: 0.08 + next() * 0.16,
+                     alpha: 0.55 + next() * 0.45,
+                     r1: r1, r2: r2,
+                     fa: 0.15 + next() * 0.25, pa: next() * 2 * .pi,
+                     fr: 0.2 + next() * 0.3, pr: next() * 2 * .pi)
+            }
+        }
+    }()
 
     var body: some View {
         Canvas { ctx, size in
             let pal = Self.palette(dark: dark)
-            let half = min(size.width, size.height) / 2
-            let c = CGPoint(x: size.width / 2, y: size.height / 2)
-            func disc(_ r: CGFloat) -> Path {
-                Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-            }
-            let w = (Self.outer - Self.hole) / 3
+            let k = min(size.width, size.height) / 18
+            let cx = size.width / 2, cy = size.height / 2
+            let t = now.timeIntervalSinceReferenceDate
             let rings: [(Bool, Color)] = [(screen, pal.screen), (audio, pal.audio), (typing, pal.typing)]
-            // 从外往里叠实心圆(相邻两环只有一条边,不露缝),最后挖空中心
             for (i, ring) in rings.enumerated() {
-                let color = paused ? pal.paused : (ring.0 ? ring.1 : pal.off)
-                ctx.fill(disc(half * (Self.outer - CGFloat(i) * w)), with: .color(color))
+                let lit = !paused && ring.0
+                let color = paused ? pal.paused : (lit ? ring.1 : pal.off)
+                for d in Self.dust[i] {
+                    var a = d.angle, r = d.radius
+                    if lit {
+                        // 沿环来回漂一点 + 径向晃,半径夹在自己那圈带子里
+                        a += 0.06 * sin(t * d.fa + d.pa)
+                        r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.22 * sin(t * d.fr + d.pr)))
+                    }
+                    let x = cx + cos(a) * r * k, y = cy + sin(a) * r * k, rr = d.size * k
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - rr, y: y - rr, width: 2 * rr, height: 2 * rr)),
+                             with: .color(color.opacity(d.alpha)))
+                }
             }
-            ctx.blendMode = .destinationOut
-            ctx.fill(disc(half * Self.hole), with: .color(.black))
         }
-        .drawingGroup()      // 挖空需要独立图层,否则 destinationOut 会吃掉卡片背景
     }
 }

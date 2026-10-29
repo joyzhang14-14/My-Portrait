@@ -292,8 +292,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 表达(hover 才看到,不打扰)。
         statusItem.button?.contentTintColor = nil
         do {
-            // 菜单栏图标 = **三盏实时采集灯**,画成紧贴的同心三环、中心空心
-            // (外→内:紫屏幕 / 黄音频 / 蓝打字);灭的环是灰色,总开关关掉整个变红。
+            // 菜单栏图标 = **三盏实时采集灯**,画成紧贴的同心三圈星尘带(淡色底 + 颗粒)、
+            // 中心空心(外→内:紫屏幕 / 黄音频 / 蓝打字);灭的那圈是灰色,总开关关掉整个变红。
             // 灯亮 ⇔ 这一路此刻真的在记当前这个 app;前台切到 Ignored app、
             // 撞上暂停、功能关掉或没权限 → 对应的灯灭。判定见 CaptureLampState。
             //
