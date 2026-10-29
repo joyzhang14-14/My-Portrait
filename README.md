@@ -3,9 +3,9 @@
 
   <h1>My Portrait</h1>
 
-  <p><b>A local-first AI memory system for macOS.</b></p>
+  <p><b>A long-term digital portrait of you, built on your Mac.</b></p>
 
-  <p>It quietly captures your screen, voice, and writing — and builds your external memory and a personal portrait out of them, automatically. <b>Everything stays on your Mac.</b></p>
+  <p>It quietly captures your screen, voice, and writing, and over months and years distills them into a portrait of you — what you do, who you spend time with, how you think and write. <b>Everything stays on your Mac.</b></p>
 
   <a href="https://github.com/joyzhang14-14/My-Portrait/releases/latest">
     <img src="https://img.shields.io/github/v/release/joyzhang14-14/My-Portrait?label=download&style=flat-square" alt="latest release" />
@@ -95,11 +95,11 @@ Right now we're working on local screenshot understanding, and on computing typi
 
 ## Our Goal
 
-The goal is the whole system with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
+The goal is a digital portrait that keeps growing with you for years, built with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
 
 - local models sized to fit 16 GB alongside everything else that's running;
 - telling apart what was merely _on screen_ from what you were actually _doing_;
-- keeping memories anchored to real evidence instead of inventing the missing parts.
+- keeping the portrait anchored to real evidence instead of inventing the missing parts.
 
 ## Acknowledgements
 
