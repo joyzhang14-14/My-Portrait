@@ -107,6 +107,22 @@ final class ConfigStore {
         scheduleWrite()
     }
 
+    /// 只改内存、先不写盘。给「停在哪一页」这类切页就变的界面状态用:
+    /// TOMLKit 每次编码都会漏掉一整份配置的内存(它的 C++ 表从不释放),
+    /// 切一次页写一次盘,窗口用得越多常驻越高。这些改动等下一次普通 `mutate`、
+    /// 关窗或退出时(`flushPendingWrite`)一起写。
+    func mutateDeferred(_ block: (inout MyPortraitConfig) -> Void) {
+        var next = current
+        block(&next)
+        guard next != current else { return }
+        current = next
+        refreshSnapshot()
+        hasDeferredWrite = true
+    }
+
+    /// `mutateDeferred` 改过、还没写盘。
+    private var hasDeferredWrite = false
+
     // MARK: - Section passthroughs (so @Bindable works)
     //
     // @Bindable needs stored-property-shaped access, but our underlying truth
@@ -304,7 +320,7 @@ final class ConfigStore {
     /// applicationWillTerminate 调 —— 否则退出前最后一刻的改动(刚拨的开关 /
     /// 刚改的设置)落不了盘,下次启动静默丢失。没有待写时是 no-op。
     func flushPendingWrite() {
-        guard writeTask != nil else { return }
+        guard writeTask != nil || hasDeferredWrite else { return }
         writeTask?.cancel()
         writeTask = nil
         writeNow()
@@ -331,6 +347,7 @@ final class ConfigStore {
             suppressNextWatchEvent = true
             try blob.write(to: path, atomically: true, encoding: .utf8)
             didCompleteInitialSeed = true
+            hasDeferredWrite = false
         } catch {
             loadError = "Couldn't write config.toml: \(error.localizedDescription)"
         }

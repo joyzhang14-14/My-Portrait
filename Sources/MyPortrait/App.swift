@@ -731,6 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ImageThumbnailCache.shared.removeAll()
         AppNameIconCache.shared.removeAll()
         GraphSession.shared.reset()
+        ConfigStore.shared.flushPendingWrite()   // 切页记下的「停在哪」这时才写盘
         window.contentView = NSView(frame: window.frame)
         lifecycleLog.notice("main content torn down (window hidden)")
         MemoryTrim.ifHidden()

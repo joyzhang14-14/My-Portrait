@@ -103,10 +103,10 @@ struct ContentView: View {
         // 内存采样行(health.log 的 MEM)要标当前页面 —— 切页/切图谱模式时更新。
         .onChange(of: selection) { _, sel in
             HealthMonitor.shared.currentPage = pageName
-            if let sel { ConfigStore.shared.mutate { $0.display.lastPage = sel.rawValue } }
+            if let sel { ConfigStore.shared.mutateDeferred { $0.display.lastPage = sel.rawValue } }
         }
         .onChange(of: settingsSubsection) { _, sub in
-            if let sub { ConfigStore.shared.mutate { $0.display.lastSettingsPage = sub.id } }
+            if let sub { ConfigStore.shared.mutateDeferred { $0.display.lastSettingsPage = sub.id } }
         }
         .onChange(of: dataViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
         // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)

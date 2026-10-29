@@ -26,7 +26,7 @@ enum MemoryLanding {
     }
 
     static func persist(scope: DataScope, mode: DataViewMode) {
-        ConfigStore.shared.mutate {
+        ConfigStore.shared.mutateDeferred {
             $0.display.memoryLastScope = scope.id
             $0.display.memoryLastViewMode = mode.rawValue
         }
