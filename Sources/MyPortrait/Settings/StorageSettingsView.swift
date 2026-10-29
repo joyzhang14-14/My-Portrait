@@ -314,7 +314,6 @@ private struct StorageStats {
     /// 另外 App 那行量的是 `Bundle.main`,**在 `~/.portrait` 之外** ——
     /// 所以 app 行的和也不可能被 Data 磁贴(只扫数据目录)覆盖。
     nonisolated static func scan(at path: String) -> StorageStats {
-        let fm = FileManager.default
         let root = URL(fileURLWithPath: path)
         let dataBytes  = directorySize(root)
         // 音频 = 转录后留存的 wav + 待转录队列。
@@ -329,11 +328,10 @@ private struct StorageStats {
                        + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
 
-        var free: Int64 = 0
-        if let attrs = try? fm.attributesOfFileSystem(forPath: root.path),
-           let f = attrs[.systemFreeSize] as? NSNumber {
-            free = f.int64Value
-        }
+        // 和访达显示的「可用」同口径:含系统需要时会自动腾出的可清除空间
+        // (本地 Time Machine 快照、iCloud 缓存等)。
+        let free = (try? root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage ?? 0
 
         // Crude "months remaining" estimate. Avoid divide-by-zero.
         let monthly = max(Int64(1_000_000_000), max(mediaBytes, dataBytes) / 12)
