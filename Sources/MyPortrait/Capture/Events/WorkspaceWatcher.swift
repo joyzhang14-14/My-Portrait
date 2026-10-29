@@ -4,6 +4,8 @@ import Foundation
 /// 焦点 app / 窗口标题变化 → 发 .appSwitch / .windowFocus。
 ///
 /// 注册的 NSWorkspace 通知在 main thread。
+/// 激活通知比画面早 0.1–0.6s(新窗口还没画上屏),切换触发等 500ms 再发;
+/// 连续切换只发最后一次。
 /// Spotlight、Bob 这类面板拿到键盘焦点不会发激活通知,改为每 500ms 问一次
 /// `FocusProbe.focusedPanelApp()`,面板开 / 关时也发 .appSwitch。
 @MainActor
@@ -13,6 +15,8 @@ final class WorkspaceWatcher {
     private var activationObserver: NSObjectProtocol?
     private var deactivationObserver: NSObjectProtocol?
     private var panelPollTask: Task<Void, Never>?
+    private var switchTask: Task<Void, Never>?
+    private static let switchDelayNs: UInt64 = 500_000_000
     private var lastPanelPid: pid_t?
 
     init(emit: @escaping @Sendable (CaptureTrigger) -> Void) {
@@ -27,8 +31,8 @@ final class WorkspaceWatcher {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [emit] _ in
-            emit(.appSwitch)
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.emitSwitchSoon() }
         }
 
         // 当前 app 被切走 —— 焦点已落到新 app，也算 app_switch 边缘。
@@ -36,8 +40,8 @@ final class WorkspaceWatcher {
             forName: NSWorkspace.didDeactivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [emit] _ in
-            emit(.appSwitch)
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.emitSwitchSoon() }
         }
 
         lastPanelPid = FocusProbe.focusedPanelApp()?.processIdentifier
@@ -54,6 +58,14 @@ final class WorkspaceWatcher {
         }
     }
 
+    private func emitSwitchSoon() {
+        switchTask?.cancel()
+        switchTask = Task { [emit] in
+            try? await Task.sleep(nanoseconds: Self.switchDelayNs)
+            if !Task.isCancelled { emit(.appSwitch) }
+        }
+    }
+
     func stop() {
         let center = NSWorkspace.shared.notificationCenter
         if let obs = activationObserver { center.removeObserver(obs) }
@@ -62,5 +74,7 @@ final class WorkspaceWatcher {
         deactivationObserver = nil
         panelPollTask?.cancel()
         panelPollTask = nil
+        switchTask?.cancel()
+        switchTask = nil
     }
 }
