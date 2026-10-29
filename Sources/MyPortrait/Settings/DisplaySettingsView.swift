@@ -400,7 +400,7 @@ private struct MenuBarLampCard: View {
     var body: some View {
         SettingsCard(
             title: "Menu bar icon",
-            info: "Three neural nodes, one per capture channel. A node lights up only while that channel is recording the app you're in right now. It goes dark the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list. The orange hub is the **All Capture** master switch — when it goes hollow, every channel is stopped."
+            info: "Three rings, one per capture channel — screen outside, audio in the middle, typing inside. A ring lights up only while that channel is recording the app you're in right now. It turns gray the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list. When **All Capture** is switched off, the whole icon turns red."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
@@ -410,14 +410,15 @@ private struct MenuBarLampCard: View {
                 // Spotify 之后仍显示 "Terminal is a terminal")。
                 // 墙钟 TimelineView 每 tick 重新求值 body,直接读单例当前值,
                 // 绕开推送这一层。
-                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
+                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { _ in
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
-                        // 底片模拟菜单栏,**跟随系统外观**:深色模式黑底白描边、
-                        // 浅色模式白底黑描边 —— 和菜单栏里真正显示的那一版
-                        // (Assets 里 Any / Dark 两套)始终一致,不然用户在这张
-                        // 卡上看到的和抬头看到的对不上。
+                        // 底片模拟菜单栏,**跟随系统外观**:深色模式深底、浅色模式浅底,
+                        // 色板也跟着换 —— 和菜单栏里真正显示的那一版(Assets 里
+                        // Any / Dark 两套)始终一致,不然用户在这张卡上看到的和
+                        // 抬头看到的对不上。
                         let dark = colorScheme == .dark
+                        let pal = LampGlyph.palette(dark: dark)
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(dark ? Color(red: 0.11, green: 0.11, blue: 0.12)
@@ -429,26 +430,24 @@ private struct MenuBarLampCard: View {
                             LampGlyph(screen: lamps.screen.on,
                                       audio: lamps.audio.on,
                                       typing: lamps.typing.on,
-                                      hub: !lamps.masterOff,
-                                      now: tl.date,
-                                      ink: dark ? .white : .black)
-                                .padding(10)
+                                      paused: lamps.masterOff,
+                                      dark: dark)
+                                .padding(18)
                         }
-                        // 正方形底片。图标本身略高于宽(aspect 1.148),Canvas 里按
-                        // min(w, h/aspect) 等比适配 —— 塞进方框只会左右留白,不变形。
                         .frame(width: 128, height: 128)
 
                         VStack(alignment: .leading, spacing: 9) {
-                            // 橙色中心球 = 全局采集总开关。灭的那句说明放这里
-                            // (三盏灯灭时只说"被总开关关掉",不再各自重复)。
-                            legendRow("All Capture", LampGlyph.hubColor,
+                            // 总开关:开着不占颜色;关掉 = 暂停,整个图标变红。
+                            // 灭的那句说明放这里(三盏灯灭时只说"被总开关关掉",不再各自重复)。
+                            legendRow("All Capture", pal.paused,
                                       CaptureLampState.Lamp(
                                           on: !lamps.masterOff,
-                                          reason: "All capture is switched off."),
-                                      onText: "On — every capture channel is allowed to run.")
-                            legendRow("Screen",  LampGlyph.screenColor, lamps.screen)
-                            legendRow("Audio",   LampGlyph.audioColor,  lamps.audio)
-                            legendRow("Typing",  LampGlyph.typingColor, lamps.typing)
+                                          reason: "All capture is switched off — the icon turns red."),
+                                      onText: "On — every capture channel is allowed to run.",
+                                      offFilled: true)
+                            legendRow("Screen",  pal.screen, lamps.screen)
+                            legendRow("Audio",   pal.audio,  lamps.audio)
+                            legendRow("Typing",  pal.typing, lamps.typing)
                         }
                         Spacer(minLength: 0)
                     }
@@ -460,13 +459,16 @@ private struct MenuBarLampCard: View {
     }
 
     @ViewBuilder
+    /// `offFilled`:总开关那一行反过来 —— 关掉(暂停)才是实心红,开着是空心。
     private func legendRow(_ name: String, _ color: Color,
                            _ lamp: CaptureLampState.Lamp,
-                           onText: String = "Recording this app right now.") -> some View {
-        HStack(alignment: .top, spacing: 9) {
+                           onText: String = "Recording this app right now.",
+                           offFilled: Bool = false) -> some View {
+        let filled = offFilled ? !lamp.on : lamp.on
+        return HStack(alignment: .top, spacing: 9) {
             Circle()
-                .fill(lamp.on ? color : Color.clear)
-                .overlay(Circle().stroke(color.opacity(lamp.on ? 0 : 0.45), lineWidth: 1.5))
+                .fill(filled ? color : Color.clear)
+                .overlay(Circle().stroke(color.opacity(filled ? 0 : 0.45), lineWidth: 1.5))
                 .frame(width: 11, height: 11)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 1) {
@@ -480,114 +482,53 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 菜单栏图标本体,Canvas 直接画 —— 几何是从原始手绘模板量出来的,归一化到
-/// 单位框(宽为基准),所以任意尺寸都不会变形。
+/// 菜单栏图标本体:紧贴的同心三环、中心空心,几何和色板与 Assets 里
+/// MenuBarLamp-* 两套 PNG 一致(外半径 8.6 / 空心半径 4,单位是 18pt 图标)。
 private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
     var typing: Bool
-    /// 中心橙球 = 全局采集总开关。false(总开关关)= 挖空,与灭灯同款。
-    var hub: Bool = true
-    /// 呼吸相位由外层墙钟 TimelineView 传进来 —— 自己再套一个 TimelineView
-    /// 会多一条动画时钟,而且外层已经保证了后台也在 tick。
-    var now: Date
-    /// 连线与各球外圈的颜色。菜单栏深色底用白、浅色底用黑,和 Assets 里
-    /// Any / Dark 两套 PNG 一一对应。
-    var ink: Color = .white
+    /// 总开关关(暂停)= 三个环全红。
+    var paused: Bool
+    var dark: Bool
 
-    static let screenColor = Color(red: 142/255, green: 26/255,  blue: 245/255)
-    static let audioColor  = Color(red: 255/255, green: 255/255, blue: 85/255)
-    static let typingColor = Color(red: 52/255,  green: 120/255, blue: 245/255)
-    static let hubColor    = Color(red: 232/255, green: 159/255, blue: 67/255)
+    struct Palette { let screen, audio, typing, off, paused: Color }
 
-    /// 归一化几何 —— **x 和 y 都除以内容框宽 916**(等比!)。
-    /// ⚠️ x/y 必须用同一个除数,否则非等比缩放,顶部球会被推到 y<0 裁掉
-    /// (看起来就是"图标偏上、上面被盖住一块")。y 的取值范围因此是 0…aspect,
-    /// 不是 0…1。
-    private static let aspect: CGFloat = 1052.0 / 916.0     // 1.148472
-    /// ⚠️ 球 ×1.2(含中心)、描边 ×0.8、连线长度不变 —— 白圈占比大,彩芯太小
-    /// 在菜单栏上看不清,加大到 4.0px@1x。连线长度**不能再缩**:球放大后
-    /// 三条连线本就所剩无几,再短球就压进中心球里了。
-    private static let hub = CGPoint(x: 0.233624, y: 0.749236)
-    private static let rHub: CGFloat = 0.274192      // 0.228493 × 1.2
-    private static let rDot: CGFloat = 0.190481      // 0.158734 × 1.2
-    private static let stroke: CGFloat = 0.055895    // 0.069869 × 0.8
-    private static let dots: [(CGPoint, KeyPath<LampGlyph, Bool>, Color)] = [
-        (CGPoint(x: 0.477293, y: 0.163646), \.screen, screenColor),
-        (CGPoint(x: 0.836135, y: 0.563319), \.audio,  audioColor),
-        (CGPoint(x: 0.715284, y: 0.988210), \.typing, typingColor),
-    ]
+    /// 浅色底用偏深、偏饱和的色;深色底用偏亮的色。
+    static func palette(dark: Bool) -> Palette {
+        dark ? Palette(screen: rgb(0xB07CFF), audio: rgb(0xFFD84D),
+                       typing: rgb(0x6AA8FF), off: rgb(0x5C5C62),
+                       paused: rgb(0xFF5A52))
+             : Palette(screen: rgb(0x7A1FE0), audio: rgb(0xE0A800),
+                       typing: rgb(0x2563EB), off: rgb(0xBDBDC2),
+                       paused: rgb(0xE0342B))
+    }
+
+    private static func rgb(_ hex: UInt32) -> Color {
+        Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255,
+              blue: Double(hex & 0xFF) / 255)
+    }
+
+    private static let outer: CGFloat = 8.6 / 9
+    private static let hole: CGFloat = 4 / 9
 
     var body: some View {
-        // 亮着的灯做极缓的呼吸(2.6s 一轮),幅度很小 —— 让人一眼看出"这是活的
-        // 实时状态",但不至于在设置页里晃眼。
-        Group {
-            Canvas { ctx, size in
-                let t = now.timeIntervalSinceReferenceDate
-                let breathe = 0.5 + 0.5 * sin(t * 2 * .pi / 2.6)   // 0…1
-                // 等比放进给定尺寸,居中。
-                //
-                // ⚠️ **四周留 margin**:Canvas 会把画到 bounds 外的东西剪掉,
-                // 而亮灯的辉光半径能到 (rDot-stroke)*1.9 ≈ 0.256,三颗球都
-                // 贴着归一化框的边(y 最大 0.988、x 最大 0.836),辉光必然超出
-                // → 灯边上出现一道直的截断。把绘制区按 1+2*margin 缩一圈,
-                // 辉光就全落在画布里。
-                let margin: CGFloat = 0.11
-                let boxW = 1 + 2 * margin
-                let boxH = Self.aspect + 2 * margin
-                let scale = min(size.width / boxW, size.height / boxH)
-                let ox = (size.width - boxW * scale) / 2 + margin * scale
-                let oy = (size.height - boxH * scale) / 2 + margin * scale
-                func P(_ p: CGPoint) -> CGPoint {
-                    CGPoint(x: ox + p.x * scale, y: oy + p.y * scale)
-                }
-                func R(_ r: CGFloat) -> CGFloat { r * scale }
-                func disc(_ c: CGPoint, _ r: CGFloat) -> Path {
-                    Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-                }
-
-                let hubC = P(Self.hub)
-                let sw = R(Self.stroke)
-
-                // 1) 连线 + 各球外圆,统一用 ink(深色底=白,浅色底=黑)
-                for (p, _, _) in Self.dots {
-                    var line = Path()
-                    line.move(to: hubC)
-                    line.addLine(to: P(p))
-                    ctx.stroke(line, with: .color(ink),
-                               style: StrokeStyle(lineWidth: sw, lineCap: .round))
-                }
-                ctx.fill(disc(hubC, R(Self.rHub)), with: .color(ink))
-                for (p, _, _) in Self.dots {
-                    ctx.fill(disc(P(p), R(Self.rDot)), with: .color(ink))
-                }
-
-                // 2) 内圆:中心球亮=橙(总开关开着)、灭=挖空;三盏灯亮=本色
-                //    (带辉光)、灭=挖空成底色
-                if hub {
-                    ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(Self.hubColor))
-                } else {
-                    ctx.blendMode = .destinationOut
-                    ctx.fill(disc(hubC, R(Self.rHub - Self.stroke)), with: .color(.black))
-                    ctx.blendMode = .normal
-                }
-                for (p, kp, color) in Self.dots {
-                    let c = P(p)
-                    let ri = R(Self.rDot - Self.stroke)
-                    if self[keyPath: kp] {
-                        // 辉光:同色大圆低透明度垫在下面,呼吸时轻微涨缩。
-                        // 系数 1.6,配合 margin 0.11 才不会被 Canvas 边缘切出直边。
-                        let glow = ri * (1.6 + 0.30 * breathe)
-                        ctx.fill(disc(c, glow), with: .color(color.opacity(0.16 + 0.08 * breathe)))
-                        ctx.fill(disc(c, ri), with: .color(color))
-                    } else {
-                        // 灭 = 真的挖空(跟真实图标一致:露出菜单栏底色)
-                        ctx.blendMode = .destinationOut
-                        ctx.fill(disc(c, ri), with: .color(.black))
-                        ctx.blendMode = .normal
-                    }
-                }
+        Canvas { ctx, size in
+            let pal = Self.palette(dark: dark)
+            let half = min(size.width, size.height) / 2
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            func disc(_ r: CGFloat) -> Path {
+                Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
             }
+            let w = (Self.outer - Self.hole) / 3
+            let rings: [(Bool, Color)] = [(screen, pal.screen), (audio, pal.audio), (typing, pal.typing)]
+            // 从外往里叠实心圆(相邻两环只有一条边,不露缝),最后挖空中心
+            for (i, ring) in rings.enumerated() {
+                let color = paused ? pal.paused : (ring.0 ? ring.1 : pal.off)
+                ctx.fill(disc(half * (Self.outer - CGFloat(i) * w)), with: .color(color))
+            }
+            ctx.blendMode = .destinationOut
+            ctx.fill(disc(half * Self.hole), with: .color(.black))
         }
         .drawingGroup()      // 挖空需要独立图层,否则 destinationOut 会吃掉卡片背景
     }
