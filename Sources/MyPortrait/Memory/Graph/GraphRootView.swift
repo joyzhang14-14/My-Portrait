@@ -4,7 +4,8 @@ import simd
 
 /// 会话级图谱缓存:zone → (场景, 物理引擎, 指纹, 相机)。
 /// 需求待确认#6:布局**会话内保留** —— 切去 text / 换画布再回来不重新炸开,
-/// 重启 app 才重新布局。数据变了(指纹不同)才重建引擎重新炸开。
+/// 关窗或重启 app 才重新布局(10-29 update:关窗卸视图树时 `reset()`,
+/// 物理线程和场景不留在后台占内存)。数据变了(指纹不同)才重建引擎重新炸开。
 @MainActor
 final class GraphSession {
     static let shared = GraphSession()
@@ -17,6 +18,12 @@ final class GraphSession {
     }
 
     var entries: [GraphZone: Entry] = [:]
+
+    /// 停掉全部物理线程、丢掉场景。关窗卸视图树时调,重开窗口重新布局。
+    func reset() {
+        for entry in entries.values { entry.engine.shutdown() }
+        entries.removeAll()
+    }
 
     /// 节点集合的稳定指纹(顺序敏感)。相等 → 复用引擎保位置。
     static func fingerprint(of scene: GraphScene) -> [String] {
