@@ -230,7 +230,8 @@ actor CaptureCoordinator {
         for await trigger in stream {
             if Task.isCancelled { break }
             do {
-                try await captureOneFrame(trigger: trigger, force: false)
+                // 回车帧必拍:敲完一行再回车整屏直方图几乎不变,走去重会被吃掉近一半。
+                try await captureOneFrame(trigger: trigger, force: trigger == .typingPause)
             } catch CaptureError.screenRecordingPermissionDenied,
                     CaptureError.captureFailed(CaptureError.screenRecordingPermissionDenied) {
                 // **权限没给**：再 trigger 也只是反复撞 SCK XPC，每次都让 caulk
