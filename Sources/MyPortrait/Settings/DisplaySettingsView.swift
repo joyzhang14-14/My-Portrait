@@ -485,7 +485,8 @@ private struct MenuBarLampCard: View {
 
 /// 菜单栏图标的大号版:同心三圈星尘带(外半径 8.6 / 空心半径 4,单位是 18pt 图标),
 /// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
-/// 这里尺寸大,颗粒更细更密,亮着的那圈颗粒在自己的带子里缓慢漂浮(不越界、不整体转)。
+/// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
+/// 亮着的那圈颗粒在自己的范围里漂浮(不越过空心和外缘、不整体转)。
 private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
@@ -516,11 +517,11 @@ private struct LampGlyph: View {
     /// 一颗星尘:极坐标位置 + 大小/透明度 + 漂浮的频率与相位。
     private struct Dust {
         let angle, radius, size, alpha: Double
-        let r1, r2: Double                 // 所在那圈带子的内外半径(漂浮夹在里面)
+        let r1, r2: Double                 // 这颗能待的内外半径(本圈带子外扩半个环宽,夹在空心与外缘之间)
         let fa, pa, fr, pr: Double         // 沿环 / 径向两个方向的摆动频率与相位
     }
 
-    /// 三圈颗粒一次生成、固定种子:按面积均匀撒满整条带子。
+    /// 三圈颗粒一次生成、固定种子:带内按面积均匀撒,渗进相邻那圈的部分越远越稀。
     private static let dust: [[Dust]] = {
         let outer = 8.6, hole = 4.0, w = (outer - hole) / 3
         var seed: UInt64 = 0x9E3779B97F4A7C15
@@ -531,15 +532,23 @@ private struct LampGlyph: View {
             z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
             return Double((z ^ (z >> 31)) >> 11) / Double(1 << 53)
         }
+        let blend = 0.5
         return (0..<3).map { i in
             let r2 = outer - Double(i) * w, r1 = r2 - w
-            let n = Int(16 * Double.pi * (r2 * r2 - r1 * r1))
+            let lo = max(hole, r1 - blend * w), hi = min(outer, r2 + blend * w)
+            let n = Int(16 * Double.pi * (r2 * r2 - r1 * r1) * (1 + blend))
             return (0..<n).map { _ in
-                Dust(angle: next() * 2 * .pi,
-                     radius: (r1 * r1 + next() * (r2 * r2 - r1 * r1)).squareRoot(),
+                var r = 0.0
+                while true {
+                    r = (lo * lo + next() * (hi * hi - lo * lo)).squareRoot()
+                    let out = r < r1 ? (r1 - r) / (blend * w) : r > r2 ? (r - r2) / (blend * w) : 0
+                    if next() > out { break }
+                }
+                return Dust(angle: next() * 2 * .pi,
+                     radius: r,
                      size: 0.08 + next() * 0.16,
                      alpha: 0.55 + next() * 0.45,
-                     r1: r1, r2: r2,
+                     r1: lo, r2: hi,
                      fa: 0.15 + next() * 0.25, pa: next() * 2 * .pi,
                      fr: 0.2 + next() * 0.3, pr: next() * 2 * .pi)
             }
@@ -559,9 +568,10 @@ private struct LampGlyph: View {
                 for d in Self.dust[i] {
                     var a = d.angle, r = d.radius
                     if lit {
-                        // 沿环来回漂一点 + 径向晃,半径夹在自己那圈带子里
-                        a += 0.06 * sin(t * d.fa + d.pa)
-                        r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.22 * sin(t * d.fr + d.pr)))
+                        // 沿环来回漂 + 径向晃,半径夹在自己的范围里
+                        let ts = t * 2
+                        a += 0.18 * sin(ts * d.fa + d.pa)
+                        r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.66 * sin(ts * d.fr + d.pr)))
                     }
                     let x = cx + cos(a) * r * k, y = cy + sin(a) * r * k, rr = d.size * k
                     ctx.fill(Path(ellipseIn: CGRect(x: x - rr, y: y - rr, width: 2 * rr, height: 2 * rr)),
