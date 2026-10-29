@@ -843,11 +843,14 @@ enum AppKeyboard {
 
             let isAlt = event.modifierFlags.contains(.option)
             switch event.keyCode {
+            // userInfo["isRepeat"]:长按产生的系统重复键,需要按自己节奏走的订阅方(图谱时间线)据此限速。
             case 123:    // LeftArrow
-                NotificationCenter.default.post(name: .leftArrowPressed, object: isAlt)
+                NotificationCenter.default.post(name: .leftArrowPressed, object: isAlt,
+                                                userInfo: ["isRepeat": event.isARepeat])
                 return nil
             case 124:    // RightArrow
-                NotificationCenter.default.post(name: .rightArrowPressed, object: isAlt)
+                NotificationCenter.default.post(name: .rightArrowPressed, object: isAlt,
+                                                userInfo: ["isRepeat": event.isARepeat])
                 return nil
             default:
                 return event

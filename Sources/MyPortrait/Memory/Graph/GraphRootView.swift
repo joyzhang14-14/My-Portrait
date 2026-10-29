@@ -136,6 +136,8 @@ struct GraphRootView: View {
     @State private var timelineDay: Date = .distantPast
     @State private var timelineLoading = false
     @State private var timelinePlaying = false
+    /// 上一次方向键换日的时刻(长按限速用)。
+    @State private var lastTimelineStep = ContinuousClock.now
     /// 正在淡出(⑤ 不要一下子消失)。淡出期间条还在但不接事件。
     @State private var timelineFading = false
     /// 当日变化统计(换日时算一次,给底条显示)。
@@ -259,11 +261,11 @@ struct GraphRootView: View {
         // `return nil` 吞掉事件,排在后面的监听永远收不到(这正是上一版
         // 按键没反应的原因)。这里按项目既定架构订阅它广播的通知。
         // 文本框里的方向键 AppKeyboard 已放行,不会走到这。
-        .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { _ in
-            stepTimeline(-1)
+        .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
+            stepTimeline(-1, isRepeat: note.userInfo?["isRepeat"] as? Bool ?? false)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { _ in
-            stepTimeline(1)
+        .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { note in
+            stepTimeline(1, isRepeat: note.userInfo?["isRepeat"] as? Bool ?? false)
         }
         // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
         .onChange(of: timelineDay) { _, d in
@@ -281,7 +283,7 @@ struct GraphRootView: View {
             floatNodeId = nil
             let cal = Calendar(identifier: .gregorian)
             while timelinePlaying, !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(220))
+                try? await Task.sleep(for: Self.timelineStepInterval)
                 guard timelinePlaying, !Task.isCancelled else { break }
                 if timelineDay >= tidx.range.upperBound { timelinePlaying = false; break }
                 if let nx = cal.date(byAdding: .day, value: 1, to: timelineDay) {
@@ -990,10 +992,18 @@ struct GraphRootView: View {
         frameCameraToRing(animated: true)
     }
 
+    /// 播放每前进一天的间隔;长按方向键也按这个节奏走。
+    private static let timelineStepInterval: Duration = .milliseconds(220)
+
     /// 左右方向键:逐日前后挪一天,夹在数据范围内。按键即停播放
     /// (与拖动擦洗同样的语义:手动介入就不再自动跑)。
-    private func stepTimeline(_ delta: Int) {
+    /// 长按时系统重复键约 30ms 一发,每发都换一天会让场景重建和镜头取景排队、卡顿;
+    /// 重复键按播放节奏限速,单击照旧立即生效。
+    private func stepTimeline(_ delta: Int, isRepeat: Bool = false) {
         guard let idx = timelineIndex else { return }
+        let now = ContinuousClock.now
+        if isRepeat, now - lastTimelineStep < Self.timelineStepInterval { return }
+        lastTimelineStep = now
         timelinePlaying = false
         let cal = Calendar(identifier: .gregorian)
         guard let nx = cal.date(byAdding: .day, value: delta, to: timelineDay) else { return }
