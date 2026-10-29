@@ -292,14 +292,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 表达(hover 才看到,不打扰)。
         statusItem.button?.contentTintColor = nil
         do {
-            // 菜单栏图标 = **三盏实时采集灯**(紫屏幕 / 黄音频 / 蓝打字)。
+            // 菜单栏图标 = **三盏实时采集灯**,画成同心三环(外→内:紫屏幕 / 黄音频 / 蓝打字)。
             // 灯亮 ⇔ 这一路此刻真的在记当前这个 app;前台切到 Ignored app、
             // 撞上暂停、功能关掉或没权限 → 对应的灯灭。判定见 CaptureLampState。
             //
             // **isTemplate = false 是关键**:图是彩色的,设 true 会被系统压成
             // 黑白剪影,三盏灯就全一个颜色、彻底失去意义。
-            // 深浅两套不走代码分支 —— 每个 imageset 里 Any(黑描边,浅色菜单栏)
-            // 和 Dark(白描边)各一份,AppKit 按按钮的 effectiveAppearance 自己挑。
+            // 深浅两套不走代码分支 —— 每个 imageset 里 Any(灭的环是深灰,浅色菜单栏)
+            // 和 Dark(灭的环是浅灰)各一份,AppKit 按按钮的 effectiveAppearance 自己挑。
             // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
             // 变化通知,回头调 refreshIcon,重算会成自激死循环(主线程 100% CPU、
             // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。

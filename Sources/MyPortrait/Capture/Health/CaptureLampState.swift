@@ -38,11 +38,11 @@ final class CaptureLampState: ObservableObject {
     @Published private(set) var screen = Lamp(on: false, reason: "off")
     @Published private(set) var audio = Lamp(on: false, reason: "off")
     @Published private(set) var typing = Lamp(on: false, reason: "off")
-    /// 全局采集总开关(capture.screen.enabled)关着 —— 图标连橙色大球一起熄灭。
+    /// 全局采集总开关(capture.screen.enabled)关着 —— 三个环一起变成更淡的灰。
     @Published private(set) var masterOff = false
 
     /// 三盏灯的组合 → 资源名 `MenuBarLamp-S1-A0-T1`;总开关关掉 → 全灭变体
-    /// (大球也是灰的)。
+    /// (三个环都是淡灰)。
     var assetName: String {
         masterOff ? "MenuBarLamp-Off"
                   : "MenuBarLamp-S\(screen.on ? 1 : 0)-A\(audio.on ? 1 : 0)-T\(typing.on ? 1 : 0)"
