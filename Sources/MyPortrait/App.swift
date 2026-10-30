@@ -689,7 +689,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installMainContent() {
         guard let window, !mainContentInstalled else { return }
         mainContentInstalled = true
-        BackgroundRelaunch.disarm()
         // Inject the Services container + captureSettings into the environment
         // so any descendant view can read \.services (db / coordinator / reporter)
         // or \.captureSettings (toggle bindings for the Settings UI).
@@ -738,7 +737,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = NSView(frame: window.frame)
         lifecycleLog.notice("main content torn down (window hidden)")
         MemoryTrim.ifHidden()
-        BackgroundRelaunch.arm()
     }
 
     /// 启动时如果 FDA 没授权,弹一个 NSAlert 引导用户去 System Settings 加

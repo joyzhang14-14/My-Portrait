@@ -369,8 +369,6 @@ final class MemoryScheduler {
     // MARK: - View bindings(canRunXxx + 解释文案)
     /// 当前是否有事件家族(distill or personality)在跑。
     var portraitFamilyRunning: Bool { distillRunning || personalityRunning }
-    /// 有任何 job 或 tick 在跑(后台重启前要等它空闲)。
-    var isBusy: Bool { eventRunning || portraitFamilyRunning || tickRunning }
 
     /// 能不能现在起 event job(必须自己空闲 + portrait/personality 都空闲)。
     var canRunEvent: Bool { !eventRunning && !portraitFamilyRunning }

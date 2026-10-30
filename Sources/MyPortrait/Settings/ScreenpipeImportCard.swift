@@ -390,7 +390,6 @@ struct ScreenpipeImportCard: View {
 
     private func runImport(source: URL) async {
         running = true
-        BackgroundRelaunch.hold("screenpipe-import")
         statusLines = ["Importing from \(source.path)…"]
         lastReport = nil
         errorMessage = nil
@@ -398,7 +397,6 @@ struct ScreenpipeImportCard: View {
         defer {
             running = false
             progress = nil
-            BackgroundRelaunch.release("screenpipe-import")
         }
 
         guard let dbImpl = services?.db as? PortraitDBImpl else {
