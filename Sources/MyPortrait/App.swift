@@ -472,8 +472,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 登录项拉起时,启动 Apple event 带 keyAELaunchedAsLogInItem。只在 willFinish 读得到。
     func applicationWillFinishLaunching(_ notification: Notification) {
         let event = NSAppleEventManager.shared().currentAppleEvent
-        launchedAtLogin = event?.eventID == kAEOpenApplication
-            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+        // `--background`:同样只在后台采集、不建窗口内容(自己重启回后台时用)。
+        launchedAtLogin = (event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem)
+            || ProcessInfo.processInfo.arguments.contains("--background")
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
