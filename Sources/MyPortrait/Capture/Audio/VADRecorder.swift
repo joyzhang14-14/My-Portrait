@@ -47,6 +47,10 @@ actor VADRecorder {
 
     // MARK: - 状态
 
+    /// 最近一次处在语音段里的时刻(systemUptime,麦克风和系统音频共用)。
+    /// 后台重启要避开正在说话的时候,免得把一段话切断。
+    static let lastSpeechUptime = OSAllocatedUnfairLock<TimeInterval>(initialState: 0)
+
     private enum State { case silent, speech }
     private var state: State = .silent
     private var consecutiveSpeechFrames: Int = 0
@@ -126,6 +130,8 @@ actor VADRecorder {
 
         case .speech:
             writeFrameToCurrentSegment(frame)
+            let now = ProcessInfo.processInfo.systemUptime
+            Self.lastSpeechUptime.withLock { $0 = now }
 
             if isSilent {
                 consecutiveSilenceFrames += 1

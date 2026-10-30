@@ -54,6 +54,12 @@ final class PiAgentRegistry: @unchecked Sendable {
         boxes.removeAll { $0.agent == nil || $0.agent === agent }
     }
 
+    /// 还有活着的 LLM 子进程(pipeline / chat / cron 都算)。
+    var hasLiveAgents: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return boxes.contains { $0.agent != nil }
+    }
+
     /// Stop every live agent. Returns how many were stopped.
     @discardableResult
     func stopAll() -> Int {

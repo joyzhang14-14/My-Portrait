@@ -226,6 +226,9 @@ actor TranscriptionScheduler {
         return false
     }
 
+    /// 正在跑一轮转录。
+    var isBusy: Bool { isDraining }
+
     private func processQueueOnce() async {
         // 重入守卫:tight drain 期间(可能跑几十分钟)power 事件 / 60s poll 会再次
         // 触发本函数 —— 同一时刻只允许一轮,否则并发转录 data race。

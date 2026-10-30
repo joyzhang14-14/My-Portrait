@@ -275,9 +275,11 @@ struct AIModelsSettingsView: View {
     private func downloadSpeakerModel(_ m: SpeakerModel.EmbeddingOption) {
         guard !downloading.contains(m.id), !SpeakerModelStore.isOnDisk(m.model) else { return }
         downloading.insert(m.id)
+        BackgroundRelaunch.hold("model-download")
         Task { @MainActor in
             _ = try? await SpeakerModelStore.shared.path(for: m.model)
             downloading.remove(m.id)
+            BackgroundRelaunch.release("model-download")
             localModelTick &+= 1
         }
     }
@@ -323,9 +325,11 @@ struct AIModelsSettingsView: View {
     private func downloadModel(_ name: String) {
         guard !downloading.contains(name), !WhisperKitWrapper.isOnDisk(modelName: name) else { return }
         downloading.insert(name)
+        BackgroundRelaunch.hold("model-download")
         Task { @MainActor in
             await WhisperKitWrapper.downloadModel(name)
             downloading.remove(name)
+            BackgroundRelaunch.release("model-download")
             localModelTick &+= 1
         }
     }
@@ -371,9 +375,11 @@ struct AIModelsSettingsView: View {
     private func downloadQwenModel(_ name: String) {
         guard !downloading.contains(name), !Qwen3ASRWrapper.isOnDisk(modelId: name) else { return }
         downloading.insert(name)
+        BackgroundRelaunch.hold("model-download")
         Task { @MainActor in
             await Qwen3ASRWrapper.downloadModel(modelId: name)
             downloading.remove(name)
+            BackgroundRelaunch.release("model-download")
             localModelTick &+= 1
         }
     }
