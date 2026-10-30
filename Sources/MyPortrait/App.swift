@@ -578,7 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 835),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
-            defer: false
+            defer: true   // 第一次显示才建窗口后备缓冲;后台启动用不上
         )
         window.title = ""
         window.titleVisibility = .hidden
