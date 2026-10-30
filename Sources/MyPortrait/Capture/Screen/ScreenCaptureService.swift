@@ -163,6 +163,45 @@ final class ScreenCaptureService {
             ?? NSError(domain: "MyPortrait.Capture", code: -1))
     }
 
+    /// 切换等稳用:截一张 256 宽的小图,缩成 64×40 灰度格,只用来比画面变没变,不落盘、不 OCR。
+    /// 不套遮罩规则(省掉窗口枚举),格子在内存里比完就丢。
+    func captureGrid() async throws -> [UInt8] {
+        ensureScreenParamsObserver()
+        let display: SCDisplay
+        if let cached = cachedDisplay {
+            display = cached
+        } else {
+            display = try await fetchDisplayAndWindows().0
+            cachedDisplay = display
+        }
+        let cfg = SCStreamConfiguration()
+        cfg.width = 256
+        cfg.height = max(1, 256 * Int(display.height) / max(Int(display.width), 1))
+        cfg.showsCursor = false
+        cfg.capturesAudio = false
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(display: display, excludingWindows: []),
+            configuration: cfg
+        )
+        var grid = [UInt8](repeating: 0, count: 64 * 40)
+        grid.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: 64, height: 40, bitsPerComponent: 8,
+                                      bytesPerRow: 64, space: CGColorSpaceCreateDeviceGray(),
+                                      bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: 64, height: 40))
+        }
+        return grid
+    }
+
+    /// 两张灰度格的平均绝对差(0–255)。
+    nonisolated static func gridDiff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        guard a.count == b.count, !a.isEmpty else { return 255 }
+        var sum = 0
+        for i in 0..<a.count { sum += abs(Int(a[i]) - Int(b[i])) }
+        return Double(sum) / Double(a.count)
+    }
+
     /// sleep/wake / DRM watcher 调用:丢掉显示器缓存(唤醒后显示器配置
     /// 可能已变)。有遮罩规则时窗口列表本来就每帧重新枚举,无需失效。
     func invalidateStream() async {

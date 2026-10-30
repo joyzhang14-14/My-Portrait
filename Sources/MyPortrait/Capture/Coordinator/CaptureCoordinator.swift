@@ -45,12 +45,22 @@ actor CaptureCoordinator {
     private var lastCaptureAt: Date?
     /// DRM 命中时为 true —— captureOneFrame 全部跳过。
     private var drmActive: Bool = false
-    /// 切换补拍任务(见 scheduleSettleCapture)。同一时间最多一个。
+    /// 切换等稳任务(见 scheduleSettleCapture)。同一时间最多一个。
     private var settleTask: Task<Void, Never>?
+    /// 这次等稳开始时的画面(灰度格)和开始时刻。
+    private var settleBaseline: [UInt8]?
+    private var settleStartedAt: Date?
 
-    /// 切换补拍:最多等多久让前台读数稳定。实测切换分歧最长 2.9s。
-    private let settleTimeoutMs = 3_000
+    /// 切换等稳:切 app 后新画面要过一阵才上屏,快的机器 0.1s,慢的机器 / 冷启动的 app 要几秒,
+    /// 所以不按固定时间等,每 settlePollMs 截一张小图看画面:前台读数稳定、画面变过且停住才抓;
+    /// 画面一直没变(点的是本来就露着的窗口)等满 settleQuietMs 也抓;最多等 settleTimeoutMs。
+    /// 等稳期间截下的其他帧一律标 switching。
+    private let settleTimeoutMs = 5_000
     private let settlePollMs = 100
+    private let settleQuietMs = 1_500
+    /// 灰度格平均差(0–255):≥ changed 算画面换了,< still 算停住了。实测切 app 4–30,停住后 0–1。
+    private let settleChangedDiff = 2.0
+    private let settleStillDiff = 1.0
 
     init(db: PortraitDB, reporter: UnimplementedReporter, config: CaptureConfig = .default) {
         self.db = db
@@ -176,6 +186,8 @@ actor CaptureCoordinator {
         drmTask = nil
         sleepWakeTask = nil
         settleTask = nil
+        settleBaseline = nil
+        settleStartedAt = nil
 
         await drmWatcher.stop()
         await sleepWakeBox.stop()
@@ -229,6 +241,11 @@ actor CaptureCoordinator {
     private func runEventLoop(stream: AsyncStream<CaptureTrigger>) async {
         for await trigger in stream {
             if Task.isCancelled { break }
+            // 切 app 不当场抓:这时画面多半还是上一个 app,交给等稳任务看画面换好了再抓。
+            if trigger == .appSwitch {
+                scheduleSettleCapture(trigger: .appSwitch, restart: true)
+                continue
+            }
             do {
                 // 回车帧必拍:敲完一行再回车整屏直方图几乎不变,走去重会被吃掉近一半。
                 try await captureOneFrame(trigger: trigger, force: trigger == .typingPause)
@@ -246,7 +263,8 @@ actor CaptureCoordinator {
         }
     }
 
-    private func captureOneFrame(trigger: CaptureTrigger, force: Bool) async throws {
+    /// `fromSettle`:等稳任务抓的那一帧(切换后第一张可信帧 / 补拍帧)。
+    private func captureOneFrame(trigger: CaptureTrigger, force: Bool, fromSettle: Bool = false) async throws {
         let now = Date()
 
         // P5: DRM 命中 → 整个流水线暂停，SCStream 已 invalidate。
@@ -305,9 +323,15 @@ actor CaptureCoordinator {
         //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
         let image = try await screen.captureMainDisplay()
         let front = await focus.liveFront()
-        let focusState = FrameFocusState.classify(front)
-        if focusState == .switching, trigger != .switchSettle {
-            scheduleSettleCapture()
+        var focusState = FrameFocusState.classify(front)
+        // 等稳期间截的帧、或截图途中来了切换通知(点别的 app 时点击帧先截、激活后到):
+        // 前台读数已是新 app,画面可能还是上一个,标签不可信。
+        if focusState == .normal, !fromSettle,
+           settleTask != nil || SwitchClock.shared.lastSwitch >= now {
+            focusState = .switching
+        }
+        if focusState == .switching, !fromSettle {
+            scheduleSettleCapture(trigger: .switchSettle, restart: false)
         }
 
         // 5. 去重。
@@ -404,28 +428,61 @@ actor CaptureCoordinator {
         _ = writeTask
     }
 
-    /// 切换补拍:每 settlePollMs 读一次前台,稳定(或等满 settleTimeoutMs)后强制抓一帧。
-    /// 补拍帧自己若仍是 switching 不再续约,避免连环补拍。
-    private func scheduleSettleCapture() {
-        guard settleTask == nil else { return }
+    /// 开一次切换等稳,等好后强制抓一帧(trigger = .appSwitch 或 .switchSettle)。
+    /// 新的切 app 会顶掉正在等的那次(restart);switching 帧补拍不顶(已在等就算了)。
+    /// 等稳帧自己若仍是 switching 不再续约,避免连环补拍。
+    private func scheduleSettleCapture(trigger: CaptureTrigger, restart: Bool) {
+        if settleTask != nil {
+            guard restart else { return }
+            settleTask?.cancel()
+            // 切走 / 切入两个通知前后脚到:0.5s 内的沿用原来的起点和画面,那时画面还没动。
+            if let t = settleStartedAt, Date().timeIntervalSince(t) >= 0.5 {
+                settleBaseline = nil
+                settleStartedAt = nil
+            }
+        }
         settleTask = Task { [weak self] in
             guard let self else { return }
-            await self.runSettleCapture()
+            await self.runSettleCapture(trigger: trigger)
         }
     }
 
-    private func runSettleCapture() async {
-        var waitedMs = 0
-        while waitedMs < settleTimeoutMs {
-            try? await Task.sleep(nanoseconds: UInt64(settlePollMs) * 1_000_000)
-            if Task.isCancelled { return }   // stop() 已清 settleTask
-            waitedMs += settlePollMs
-            if await focus.liveFront().isSettled { break }
+    private func runSettleCapture(trigger: CaptureTrigger) async {
+        if settleStartedAt == nil {
+            settleStartedAt = Date()
+            settleBaseline = try? await screen.captureGrid()
+            if Task.isCancelled { return }
         }
-        // 抓之前就让出位置:补拍帧的 OCR + 写库要几百 ms,这期间又截到的 switching 帧要能排上自己的补拍。
+        let started = settleStartedAt ?? Date()
+        var prev = settleBaseline
+        var changed = false
+        while true {
+            try? await Task.sleep(nanoseconds: UInt64(settlePollMs) * 1_000_000)
+            if Task.isCancelled { return }   // stop() 或新的切 app 顶掉了
+            let waitedMs = Int(Date().timeIntervalSince(started) * 1000)
+            if waitedMs >= settleTimeoutMs { break }
+            let grid = try? await screen.captureGrid()
+            if Task.isCancelled { return }
+            var still = false
+            if let grid, let base = settleBaseline {
+                if ScreenCaptureService.gridDiff(base, grid) >= settleChangedDiff { changed = true }
+                still = prev.map { ScreenCaptureService.gridDiff($0, grid) < settleStillDiff } ?? false
+                prev = grid
+            }
+            let front = await focus.liveFront()
+            if Task.isCancelled { return }
+            guard front.isSettled else { continue }
+            // 小图截不到时只看前台读数。
+            if grid == nil || settleBaseline == nil { break }
+            // 画面没变时,激活 app 还没有窗口(慢机器上 app 还在启动)就接着等它的窗口,等满为止。
+            if changed ? still : (waitedMs >= settleQuietMs && front.activeHasWindow) { break }
+        }
+        // 抓之前就让出位置:这帧的 OCR + 写库要几百 ms,这期间又来的切换要能开自己的等稳。
         settleTask = nil
+        settleBaseline = nil
+        settleStartedAt = nil
         do {
-            try await captureOneFrame(trigger: .switchSettle, force: true)
+            try await captureOneFrame(trigger: trigger, force: true, fromSettle: true)
         } catch {
             logger.error("switch settle capture failed: \(String(describing: error), privacy: .public)")
         }
