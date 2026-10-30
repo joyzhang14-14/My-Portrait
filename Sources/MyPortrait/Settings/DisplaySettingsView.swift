@@ -433,7 +433,7 @@ private struct MenuBarLampCard: View {
                                       paused: lamps.masterOff,
                                       dark: dark,
                                       now: tl.date)
-                                .padding(18)
+                                .padding(8)
                         }
                         .frame(width: 128, height: 128)
 
@@ -483,10 +483,10 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.2 / 内缘 4.4,单位是 18pt 图标),
+/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.8 / 内缘 5.2,单位是 18pt 图标),
 /// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
 /// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
-/// 最外圈的外缘和空心的内缘也有颗粒散出去,越远越稀(和 app 图标那圈一样);
+/// 最外圈像 app 图标那圈一样往外散(越远越稀、越小、越淡,但更稀疏),空心内缘也散进去一点;
 /// 三圈颗粒都在自己的范围里漂浮(不越出这个范围、不整体转)—— 灰环和红环也漂:
 /// 看这张卡时前台就是本 app,它通常在忽略名单里,三圈多半是灰的。
 private struct LampGlyph: View {
@@ -524,10 +524,14 @@ private struct LampGlyph: View {
     }
 
     /// 三圈颗粒一次生成、固定种子:带内按面积均匀撒,渗进相邻那圈的部分越远越稀。
+    /// 画布半宽(图标坐标):装下往外散的颗粒,再留一点漂浮余量。
+    private static let extent = 7.8 + 3.0 * 1.2
+
     private static let dust: [[Dust]] = {
-        // 实心带外缘 7.2 / 内缘 4.4;三圈互渗半个环宽;最外圈往外散 1.6、最内圈往空心里散 1.2
-        let outer = 7.2, hole = 4.4, w = (outer - hole) / 3
-        let blend = 0.5, spillOut = 1.6, spillIn = 1.2, spillFrac = 0.5
+        // 实心带外缘 7.8 / 内缘 5.2;三圈互渗半个环宽;最外圈像 app 图标那圈一样往外散 3
+        // (大多挤在环边,越外越少越小越淡,只是更稀疏),最内圈往空心里散 1
+        let outer = 7.8, hole = 5.2, w = (outer - hole) / 3
+        let blend = 0.5, spillOut = 3.0, spillIn = 1.0, spillFrac = 0.9
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func next() -> Double {          // SplitMix64
             seed &+= 0x9E3779B97F4A7C15
@@ -561,7 +565,7 @@ private struct LampGlyph: View {
             }
             // 边缘散开:越远越稀(u² 偏向边缘)
             let extra = Int(Double(n) * spillFrac)
-            if i == 0 { for _ in 0..<extra { let u = pow(next(), 2); ring.append(dust(outer + u * spillOut, u)) } }
+            if i == 0 { for _ in 0..<extra { let u = pow(next(), 2.8); ring.append(dust(outer + u * spillOut, u)) } }
             if i == 2 { for _ in 0..<extra { let u = pow(next(), 2); ring.append(dust(hole - u * spillIn, u)) } }
             return ring
         }
@@ -570,7 +574,7 @@ private struct LampGlyph: View {
     var body: some View {
         Canvas { ctx, size in
             let pal = Self.palette(dark: dark)
-            let k = min(size.width, size.height) / 18
+            let k = min(size.width, size.height) / (2 * Self.extent)
             let cx = size.width / 2, cy = size.height / 2
             let t = now.timeIntervalSinceReferenceDate
             let rings: [(Bool, Color)] = [(screen, pal.screen), (audio, pal.audio), (typing, pal.typing)]
