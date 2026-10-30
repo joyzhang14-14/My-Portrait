@@ -45,8 +45,7 @@ actor MusicAudioDetector {
         if let cached = categoryCache[bundleID] { return cached }
         var category = ""
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
-           let bundle = Bundle(url: url),
-           let cat = bundle.infoDictionary?["LSApplicationCategoryType"] as? String {
+           let cat = InstalledApps.infoPlist(appPath: url.path)?["LSApplicationCategoryType"] as? String {
             category = cat
         }
         logger.notice("category lookup: \(bundleID, privacy: .public) = \(category.isEmpty ? "<none>" : category, privacy: .public)")

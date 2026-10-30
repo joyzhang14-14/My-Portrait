@@ -26,8 +26,7 @@ final class AppCategoryResolver: @unchecked Sendable {
         if let hit = cache.withLock({ $0[bundleId] }) { return hit }
         let category: String = {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId),
-                  let bundle = Bundle(url: url),
-                  let declared = bundle.infoDictionary?["LSApplicationCategoryType"] as? String
+                  let declared = InstalledApps.infoPlist(appPath: url.path)?["LSApplicationCategoryType"] as? String
             else { return "" }
             return declared
         }()

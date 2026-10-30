@@ -682,16 +682,22 @@ enum InstalledApps {
         for dir in dirs {
             guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
             for entry in entries where entry.hasSuffix(".app") {
-                guard let bundle = Bundle(path: dir + "/" + entry),
-                      let bid = bundle.bundleIdentifier, !seen.contains(bid) else { continue }
+                guard let info = infoPlist(appPath: dir + "/" + entry),
+                      let bid = info["CFBundleIdentifier"] as? String, !seen.contains(bid) else { continue }
                 seen.insert(bid)
-                let name = (bundle.infoDictionary?["CFBundleDisplayName"] as? String)
-                    ?? (bundle.infoDictionary?["CFBundleName"] as? String)
+                let name = (info["CFBundleDisplayName"] as? String)
+                    ?? (info["CFBundleName"] as? String)
                     ?? String(entry.dropLast(4))
                 result.append(InstalledAppEntry(id: bid, name: name))
             }
         }
         return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// 直接读 Contents/Info.plist。不用 `Bundle(path:)`:Foundation 会把建过的 Bundle
+    /// 永久缓存在进程里,扫一遍几百个 app 就常驻一两 MB。
+    static func infoPlist(appPath: String) -> [String: Any]? {
+        NSDictionary(contentsOfFile: appPath + "/Contents/Info.plist") as? [String: Any]
     }
 }
 
