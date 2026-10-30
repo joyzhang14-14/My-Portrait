@@ -306,8 +306,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
             let lamps = CaptureLampState.shared
             if let img = NSImage(named: lamps.assetName) {
-                img.size = NSSize(width: 18 * img.size.width / max(img.size.height, 1),
-                                  height: 18)
+                // 22pt:环中间空、边缘往外散,18pt 时看着比别的图标小一圈(菜单栏高约 24pt)
+                img.size = NSSize(width: 22 * img.size.width / max(img.size.height, 1),
+                                  height: 22)
                 img.isTemplate = false
                 statusItem.button?.image = img
             }
