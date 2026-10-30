@@ -486,7 +486,8 @@ private struct MenuBarLampCard: View {
 /// 菜单栏图标的大号版:同心三圈星尘带(外半径 8.6 / 空心半径 4,单位是 18pt 图标),
 /// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
 /// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
-/// 亮着的那圈颗粒在自己的范围里漂浮(不越过空心和外缘、不整体转)。
+/// 三圈颗粒都在自己的范围里漂浮(不越过空心和外缘、不整体转)—— 灰环和红环也漂:
+/// 看这张卡时前台就是本 app,它通常在忽略名单里,三圈多半是灰的。
 private struct LampGlyph: View {
     var screen: Bool
     var audio: Bool
@@ -567,12 +568,10 @@ private struct LampGlyph: View {
                 let color = paused ? pal.paused : (lit ? ring.1 : pal.off)
                 for d in Self.dust[i] {
                     var a = d.angle, r = d.radius
-                    if lit {
-                        // 沿环来回漂 + 径向晃,半径夹在自己的范围里
-                        let ts = t * 2
-                        a += 0.18 * sin(ts * d.fa + d.pa)
-                        r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.66 * sin(ts * d.fr + d.pr)))
-                    }
+                    // 沿环来回漂 + 径向晃,半径夹在自己的范围里
+                    let ts = t * 2
+                    a += 0.18 * sin(ts * d.fa + d.pa)
+                    r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.66 * sin(ts * d.fr + d.pr)))
                     let x = cx + cos(a) * r * k, y = cy + sin(a) * r * k, rr = d.size * k
                     ctx.fill(Path(ellipseIn: CGRect(x: x - rr, y: y - rr, width: 2 * rr, height: 2 * rr)),
                              with: .color(color.opacity(d.alpha)))
