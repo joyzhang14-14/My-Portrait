@@ -483,7 +483,7 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.8 / 内缘 5.2,单位是 18pt 图标),
+/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.8 / 内缘 4.68,单位是 18pt 图标),
 /// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
 /// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
 /// 最外圈像 app 图标那圈一样往外散(越远越稀、越小、越淡,但更稀疏),空心内缘也散进去一点;
@@ -528,9 +528,9 @@ private struct LampGlyph: View {
     private static let extent = 7.8 + 3.0 * 1.2
 
     private static let dust: [[Dust]] = {
-        // 实心带外缘 7.8 / 内缘 5.2;三圈互渗半个环宽;最外圈像 app 图标那圈一样往外散 3
+        // 实心带外缘 7.8 / 内缘 4.68(和菜单栏图标同宽);三圈互渗半个环宽;最外圈像 app 图标那圈一样往外散 3
         // (大多挤在环边,越外越少越小越淡,只是更稀疏),最内圈往空心里散 1
-        let outer = 7.8, hole = 5.2, w = (outer - hole) / 3
+        let outer = 7.8, hole = 4.68, w = (outer - hole) / 3
         let blend = 0.5, spillOut = 3.0, spillIn = 1.0, spillFrac = 0.9
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func next() -> Double {          // SplitMix64
