@@ -483,10 +483,11 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 菜单栏图标的大号版:同心三圈星尘带(外半径 8.6 / 空心半径 4,单位是 18pt 图标),
+/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.2 / 内缘 4.4,单位是 18pt 图标),
 /// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
 /// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
-/// 三圈颗粒都在自己的范围里漂浮(不越过空心和外缘、不整体转)—— 灰环和红环也漂:
+/// 最外圈的外缘和空心的内缘也有颗粒散出去,越远越稀(和 app 图标那圈一样);
+/// 三圈颗粒都在自己的范围里漂浮(不越出这个范围、不整体转)—— 灰环和红环也漂:
 /// 看这张卡时前台就是本 app,它通常在忽略名单里,三圈多半是灰的。
 private struct LampGlyph: View {
     var screen: Bool
@@ -524,7 +525,9 @@ private struct LampGlyph: View {
 
     /// 三圈颗粒一次生成、固定种子:带内按面积均匀撒,渗进相邻那圈的部分越远越稀。
     private static let dust: [[Dust]] = {
-        let outer = 8.6, hole = 4.0, w = (outer - hole) / 3
+        // 实心带外缘 7.2 / 内缘 4.4;三圈互渗半个环宽;最外圈往外散 1.6、最内圈往空心里散 1.2
+        let outer = 7.2, hole = 4.4, w = (outer - hole) / 3
+        let blend = 0.5, spillOut = 1.6, spillIn = 1.2, spillFrac = 0.5
         var seed: UInt64 = 0x9E3779B97F4A7C15
         func next() -> Double {          // SplitMix64
             seed &+= 0x9E3779B97F4A7C15
@@ -533,26 +536,34 @@ private struct LampGlyph: View {
             z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
             return Double((z ^ (z >> 31)) >> 11) / Double(1 << 53)
         }
-        let blend = 0.5
         return (0..<3).map { i in
             let r2 = outer - Double(i) * w, r1 = r2 - w
             let lo = max(hole, r1 - blend * w), hi = min(outer, r2 + blend * w)
             let n = Int(16 * Double.pi * (r2 * r2 - r1 * r1) * (1 + blend))
-            return (0..<n).map { _ in
+            // fade:散出边缘的程度(0 = 带内),越大颗粒越小越淡;漂浮范围包住它自己的位置
+            func dust(_ r: Double, _ fade: Double) -> Dust {
+                Dust(angle: next() * 2 * .pi,
+                     radius: r,
+                     size: (0.08 + next() * 0.16) * (1 - 0.5 * fade),
+                     alpha: (0.55 + next() * 0.45) * (1 - 0.8 * fade),
+                     r1: min(r, lo), r2: max(r, hi),
+                     fa: 0.15 + next() * 0.25, pa: next() * 2 * .pi,
+                     fr: 0.2 + next() * 0.3, pr: next() * 2 * .pi)
+            }
+            var ring: [Dust] = (0..<n).map { _ in
                 var r = 0.0
                 while true {
                     r = (lo * lo + next() * (hi * hi - lo * lo)).squareRoot()
                     let out = r < r1 ? (r1 - r) / (blend * w) : r > r2 ? (r - r2) / (blend * w) : 0
                     if next() > out { break }
                 }
-                return Dust(angle: next() * 2 * .pi,
-                     radius: r,
-                     size: 0.08 + next() * 0.16,
-                     alpha: 0.55 + next() * 0.45,
-                     r1: lo, r2: hi,
-                     fa: 0.15 + next() * 0.25, pa: next() * 2 * .pi,
-                     fr: 0.2 + next() * 0.3, pr: next() * 2 * .pi)
+                return dust(r, 0)
             }
+            // 边缘散开:越远越稀(u² 偏向边缘)
+            let extra = Int(Double(n) * spillFrac)
+            if i == 0 { for _ in 0..<extra { let u = pow(next(), 2); ring.append(dust(outer + u * spillOut, u)) } }
+            if i == 2 { for _ in 0..<extra { let u = pow(next(), 2); ring.append(dust(hole - u * spillIn, u)) } }
+            return ring
         }
     }()
 
