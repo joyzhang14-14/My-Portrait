@@ -28,7 +28,7 @@ struct ScreenpipeImportCard: View {
     @State private var progress: ScreenpipeImporter.Progress? = nil
 
     var body: some View {
-        // dev mode 整张卡只读 —— 导入是往**真实** portrait.sqlite 里写数据的,
+        // dev mode 整张卡只读 —— 导入是往**真实**的 screen / audio 库里写数据的,
         // 演示模式下点它没有任何合理用途,只会污染你本人的采集库。
         SettingsCard(
             title: "Import from screenpipe",
@@ -347,7 +347,7 @@ struct ScreenpipeImportCard: View {
         // 带媒体的若参与会在分批导入中途失败后把 cutoff 拉前,剩余源帧被
         // 滤掉、重导静默 0 行。
         let dbImpl = services?.db as? PortraitDBImpl
-        let dbPool = dbImpl?.dbPool
+        let dbPool = dbImpl?.screenPool
         let override = overrideDir
         let result = await Task.detached(priority: .userInitiated) { () -> ScreenpipeImporter.ScanResult in
             let cutoff: Int64? = {
@@ -403,11 +403,10 @@ struct ScreenpipeImportCard: View {
             errorMessage = "Portrait DB not available (Services not initialized)."
             return
         }
-        let dbPool = dbImpl.dbPool
         do {
             let importer = ScreenpipeImporter(sourceDir: source)
             // progress callback 跑在 detached task 上,跳回 MainActor 更新 @State。
-            let r = try await importer.run(into: dbPool) { p in
+            let r = try await importer.run(screen: dbImpl.screenPool, audio: dbImpl.audioPool) { p in
                 Task { @MainActor in self.progress = p }
             }
             statusLines.append("Done.")

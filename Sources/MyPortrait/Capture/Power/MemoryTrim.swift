@@ -9,15 +9,15 @@ import GRDB
 enum MemoryTrim {
 
     /// Services 启动时填上。
-    nonisolated(unsafe) static var dbPool: DatabasePool?
+    nonisolated(unsafe) static var dbPools: [DatabasePool] = []
 
     static func ifHidden() {
         Task { @MainActor in
             guard !HealthMonitor.shared.windowVisible else { return }
-            let pool = dbPool
+            let pools = dbPools
             Task.detached(priority: .utility) {
                 // releaseMemory 会等手上的读写做完再关读连接,放在后台线程。
-                pool?.releaseMemory()
+                for pool in pools { pool.releaseMemory() }
                 malloc_zone_pressure_relief(nil, 0)
             }
         }

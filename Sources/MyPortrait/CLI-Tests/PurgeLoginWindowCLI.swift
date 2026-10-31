@@ -31,7 +31,7 @@ enum PurgeLoginWindowCLI {
     }
 
     private static func purge(quarantineDir: String) throws {
-        let dbPath = Storage.rootURL.appendingPathComponent("portrait.sqlite").path
+        let dbPath = Storage.screenDBPath
         var config = Configuration()
         config.busyMode = .timeout(5)
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }

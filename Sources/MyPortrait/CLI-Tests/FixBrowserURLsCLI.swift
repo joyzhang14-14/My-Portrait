@@ -69,8 +69,8 @@ enum FixBrowserURLsCLI {
         fflush(stdout)
 
         let dbImpl: PortraitDBImpl
-        do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
-        let pool = dbImpl.dbPool
+        do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
+        let pool = dbImpl.screenPool
 
         Task.detached {
             defer { state.done = true }

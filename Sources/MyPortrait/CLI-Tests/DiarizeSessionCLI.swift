@@ -29,8 +29,8 @@ enum DiarizeSessionCLI {
     static func run(hours: Double?, threshold: Float, minDur: Double, reenroll: Bool = false, dumpPath: String? = nil, modelPath: String? = nil) {
         let state = ExitState()
         let dbImpl: PortraitDBImpl
-        do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
-        let pool = dbImpl.dbPool
+        do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
+        let pool = dbImpl.audioPool
         let base = Storage.rootURL
 
         // 时间范围:默认本地今天 00:00 起;--hours N 改成最近 N 小时。

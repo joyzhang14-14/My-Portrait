@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 存在的理由是 dev mode 在这条链路上必须分叉,而分叉只该发生一次:
 /// 待审核数据不在文件里而在 sqlite 里(`writing_style_runs` /
-/// `writing_style_staged`),那个库永远是真实的 `~/.portrait/portrait.sqlite`
+/// `writing_style_staged`),那个库永远是真实的 `~/.portrait/pipeline/workflow.sqlite`
 /// —— dev mode 只切文件类路径,不切 DB。所以 dev 演示只能顶替查询结果,
 /// 而不能像 events / portrait 那样换个根目录就完事。
 ///

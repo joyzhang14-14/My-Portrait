@@ -71,10 +71,10 @@ enum Backfill {
         try PortraitPaths.ensureSeedTree()
 
         let db = TimelineDB()
-        guard db.exists else {
+        guard db.screenExists else {
             throw NSError(
                 domain: "Backfill", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "timeline DB not found at \(db.dbPath)"]
+                userInfo: [NSLocalizedDescriptionKey: "timeline DB not found at \(db.screenPath)"]
             )
         }
 

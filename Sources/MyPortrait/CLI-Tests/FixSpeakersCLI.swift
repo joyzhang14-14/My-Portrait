@@ -16,8 +16,8 @@ enum FixSpeakersCLI {
     private enum FixError: Error { case noTrainedKeep }
 
     static func run() {
-        let base = Storage.rootURL
-        let src = base.appendingPathComponent("portrait.sqlite")
+        let base = Storage.metadataDir
+        let src = URL(fileURLWithPath: Storage.audioDBPath)
 
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
@@ -71,8 +71,10 @@ enum FixSpeakersCLI {
             try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
             if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
                 let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let bak = base.appendingPathComponent("portrait.sqlite.bak-speakers-\(ts)")
-                try FileManager.default.copyItem(at: src, to: bak)
+                let bak = base.appendingPathComponent("audio.sqlite.bak-speakers-\(ts)")
+                try queue.writeWithoutTransaction { db in
+                    try db.execute(sql: "VACUUM INTO :p", arguments: ["p": bak.path])
+                }
                 print("DB 备份: \(bak.lastPathComponent)\n")
             }
 
@@ -107,8 +109,8 @@ enum FixSpeakersCLI {
     /// matchSpeaker 是质心优先,本人的干净质心不被这些样本带偏(质心 merge 时不重算)。
     /// 动态扫描当前所有 hall=0 且非训练的簇,稳健。
     static func consolidateNoisyJoy() {
-        let base = Storage.rootURL
-        let src = base.appendingPathComponent("portrait.sqlite")
+        let base = Storage.metadataDir
+        let src = URL(fileURLWithPath: Storage.audioDBPath)
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
         let queue: DatabaseQueue
@@ -134,8 +136,10 @@ enum FixSpeakersCLI {
             try queue.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
             if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
                 let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let bak = base.appendingPathComponent("portrait.sqlite.bak-consolidate-\(ts)")
-                try FileManager.default.copyItem(at: src, to: bak)
+                let bak = base.appendingPathComponent("audio.sqlite.bak-consolidate-\(ts)")
+                try queue.writeWithoutTransaction { db in
+                    try db.execute(sql: "VACUUM INTO :p", arguments: ["p": bak.path])
+                }
                 print("DB 备份: \(bak.lastPathComponent)\n")
             }
             printState("BEFORE"); print("")

@@ -27,8 +27,8 @@ enum RetranscribeQwenCLI {
         fflush(stdout)
 
         let dbImpl: PortraitDBImpl
-        do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
-        let pool = dbImpl.dbPool
+        do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
+        let pool = dbImpl.audioPool
         let base = Storage.rootURL
 
         Task.detached {
@@ -196,9 +196,13 @@ enum RetranscribeQwenCLI {
                 try await pool.writeWithoutTransaction { db in try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)") }
                 if ProcessInfo.processInfo.environment["MYPORTRAIT_KEEP_BAK"] == "1" {
                     let ts = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                    let src = base.appendingPathComponent("portrait.sqlite")
-                    let bak = base.appendingPathComponent("portrait.sqlite.bak-\(ts)")
-                    do { try FileManager.default.copyItem(at: src, to: bak); print("DB 备份: \(bak.path)") }
+                    let bak = Storage.metadataDir.appendingPathComponent("audio.sqlite.bak-\(ts)")
+                    do {
+                        try await pool.writeWithoutTransaction { db in
+                            try db.execute(sql: "VACUUM INTO :p", arguments: ["p": bak.path])
+                        }
+                        print("DB 备份: \(bak.path)")
+                    }
                     catch { print("ERROR: 备份失败,中止 apply: \(error)"); state.code = 1; return }
                 }
 

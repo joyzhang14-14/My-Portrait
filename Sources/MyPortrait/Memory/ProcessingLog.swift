@@ -97,8 +97,8 @@ struct ProcessingLogRow: Sendable {
 }
 
 /// processing_log 表的读写客户端。裸 SQLite3、每方法自开连接，风格与
-/// `TimelineDB` 一致 —— Memory 层不引 GRDB。表本身由 `DBSchema` 的
-/// `v8_processing_log` 迁移建好。
+/// `TimelineDB` 一致 —— Memory 层不引 GRDB。表在 workflow.sqlite,由 `DBSchema` 的
+/// workflow 基线建好。
 struct ProcessingLogStore: Sendable {
     /// distill 锚行的 `date` 值。distill 是一次性整体操作（非 per-day），它的
     /// 锁 / 状态 / retry 记在这一行的 `distill_status` 列。不是真实日期，不会
@@ -117,7 +117,7 @@ struct ProcessingLogStore: Sendable {
     let dbPath: String
 
     init(path: String? = nil) {
-        self.dbPath = path ?? Storage.portraitDBPath
+        self.dbPath = path ?? Storage.workflowDBPath
     }
 
     var exists: Bool { FileManager.default.fileExists(atPath: dbPath) }

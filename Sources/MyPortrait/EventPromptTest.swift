@@ -67,9 +67,9 @@ enum EventPromptTestCLI {
 
         // 1. Frames.
         let db = TimelineDB()
-        guard db.exists else {
+        guard db.screenExists else {
             throw NSError(domain: "EventPromptTest", code: 2,
-                          userInfo: [NSLocalizedDescriptionKey: "timeline DB not found at \(db.dbPath)"])
+                          userInfo: [NSLocalizedDescriptionKey: "timeline DB not found at \(db.screenPath)"])
         }
         let frames = db.frames(on: day, limit: 5000)
         print("frames on \(dayStr): \(frames.count)")
@@ -1033,7 +1033,7 @@ enum DumpDayCLI {
         hm.timeZone = TimeZone(identifier: "UTC")
 
         let db = TimelineDB()
-        guard db.exists else {
+        guard db.screenExists else {
             FileHandle.standardError.write(Data("timeline DB not found\n".utf8))
             exit(1)
         }

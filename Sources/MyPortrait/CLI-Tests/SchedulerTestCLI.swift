@@ -20,10 +20,10 @@ enum SchedulerTestCLI {
 
     private static let store = ProcessingLogStore()
 
-    /// ProcessingLogStore 走裸 sqlite3、不跑迁移。先构造一次 PortraitDBImpl 让
-    /// GRDB 把 v1–v9 迁移（含 processing_log + retry_count）落地。
+    /// ProcessingLogStore 走裸 sqlite3、不跑迁移。先开一次库让 GRDB 把
+    /// workflow.sqlite 的基线(含 processing_log)落地。
     private static func ensureMigrated() {
-        _ = try? PortraitDBImpl()
+        _ = try? DBPools.open()
     }
 
     // MARK: - dump

@@ -79,7 +79,7 @@ enum DevMode {
 
     /// Writing Style 的待审核数据**不在文件里,在 sqlite 里**
     /// (`writing_style_runs` / `writing_style_staged`),而那个库永远是真实的
-    /// `~/.portrait/portrait.sqlite` —— dev mode 只切文件类路径,不切 DB。
+    /// `~/.portrait/pipeline/workflow.sqlite` —— dev mode 只切文件类路径,不切 DB。
     /// 所以这条链路只能顶替查询结果:往真实库里插假 run 的话,distiller 见到
     /// pending_review 会**跳过之后所有跑批**,把真实提炼一直卡住。
     ///

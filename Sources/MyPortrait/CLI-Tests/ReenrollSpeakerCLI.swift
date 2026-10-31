@@ -23,8 +23,8 @@ enum ReenrollSpeakerCLI {
         print("=== reenroll-speaker '\(name)' channel=\(channel) \(apply ? "APPLY" : "dry-run") threshold=\(threshold) ===")
         fflush(stdout)
         let dbImpl: PortraitDBImpl
-        do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
-        let pool = dbImpl.dbPool
+        do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
+        let pool = dbImpl.audioPool
         let base = Storage.rootURL
         let rangeStartMs: Int64 = fromMs ?? hours.map { Int64(Date().timeIntervalSince1970 * 1000) - Int64($0 * 3600 * 1000) } ?? 0
         let rangeEndMs: Int64 = toMs ?? Int64.max

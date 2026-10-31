@@ -13,13 +13,13 @@ enum ScreenpipeImportCLI {
             do {
                 let sourceURL: URL = sourcePath.map { URL(fileURLWithPath: $0) }
                     ?? ScreenpipeImporter.defaultSourceDir
-                let dbImpl = try await MainActor.run { try PortraitDBImpl() }
+                let dbImpl = try await MainActor.run { try PortraitDBImpl(pools: DBPools.open()) }
                 Self.dbHolder = dbImpl
 
                 print("[screenpipe-import] source: \(sourceURL.path)")
                 print("[screenpipe-import] scanning…")
                 let importer = ScreenpipeImporter(sourceDir: sourceURL)
-                let r = try await importer.run(into: dbImpl.dbPool)
+                let r = try await importer.run(screen: dbImpl.screenPool, audio: dbImpl.audioPool)
                 printReport(r)
                 exit(0)
             } catch {

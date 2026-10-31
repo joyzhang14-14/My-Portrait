@@ -24,10 +24,10 @@
 ## 文件布局
 
 ```
-~/.portrait/audio_queue/                         待转录
+~/.portrait/metadata/audio_queue/                待转录
 ├── seg_2026-05-17T11-00-15_mic.wav
 └── seg_2026-05-17T11-00-15_mic.meta.json
-~/.portrait/raw_data/audio/2026-05-17/           转录完搬过来(TranscriptionScheduler.archiveTranscribed)
+~/.portrait/metadata/audio/2026-05-17/           转录完搬过来(TranscriptionScheduler.archiveTranscribed)
 ├── seg_2026-05-17T11-00-15_mic.wav
 └── seg_2026-05-17T11-00-15_mic.meta.json
 ~/.portrait/metadata/transcript/2026-05-17/      转录结果的 JSON 副本(正本在数据库)

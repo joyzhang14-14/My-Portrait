@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 两个视图都只显示元输入:`keystroke_log` 经 `InputSegments` 切段拼字,不显示
 /// 整理过的 writing_records(10-25 update)。库永远是真实的
-/// `~/.portrait/portrait.sqlite`(dev mode 只切文件类路径,不切 DB),演示环境要么
+/// `~/.portrait/metadata/input.sqlite`(dev mode 只切文件类路径,不切 DB),演示环境要么
 /// 显示真实击键——那是最不能出现在录屏里的东西——要么整页空白。所以在这一层
 /// 分叉一次:dev mode 用 `~/.portrait-dev/input_records.json` 合成的击键。
 ///

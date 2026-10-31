@@ -52,7 +52,7 @@ enum SegmentReplayCLI {
     }
 
     private static func replay(_ args: [String]) throws {
-        let path = value("--db", args).map { ($0 as NSString).expandingTildeInPath } ?? Storage.portraitDBPath
+        let path = value("--db", args).map { ($0 as NSString).expandingTildeInPath } ?? Storage.screenDBPath
         var cfg = Configuration()
         cfg.readonly = true
         let q = try DatabaseQueue(path: path, configuration: cfg)

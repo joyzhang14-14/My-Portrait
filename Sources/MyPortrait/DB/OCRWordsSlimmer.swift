@@ -44,10 +44,6 @@ enum OCRWordsSlimmer {
     static func run(dbPool: DatabasePool) async {
         do {
             try await dbPool.write { db in
-                try db.execute(sql: """
-                    CREATE TABLE IF NOT EXISTS ocr_words_slim_state (
-                        id INTEGER PRIMARY KEY CHECK (id = 1), last_id INTEGER NOT NULL, done INTEGER NOT NULL)
-                    """)
                 try db.execute(sql: "INSERT OR IGNORE INTO ocr_words_slim_state (id, last_id, done) VALUES (1, 0, 0)")
             }
             guard let start = try await dbPool.read({ db in

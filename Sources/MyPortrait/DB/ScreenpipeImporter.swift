@@ -14,7 +14,7 @@ private let importLog = Logger(subsystem: "com.myportrait.db", category: "screen
 /// 不修改 screenpipe DB(read-only 打开)。
 ///
 /// 用法:
-///   let r = try await ScreenpipeImporter(sourcePath: "/Users/x/.screenpipe").run(into: dbPool)
+///   let r = try await ScreenpipeImporter(sourcePath: "/Users/x/.screenpipe").run(screen: screenPool, audio: audioPool)
 struct ScreenpipeImporter: Sendable {
 
     struct Report: Sendable {
@@ -290,11 +290,12 @@ struct ScreenpipeImporter: Sendable {
 
     /// 主入口。
     /// - Parameters:
-    ///   - target: 目标 My-Portrait DatabasePool。
+    ///   - screen / audio: 目标 screen.sqlite / audio.sqlite 的连接池。
     ///   - onProgress: 进度回调,主线程友好(实际调用线程不保证 MainActor)。
     /// - Returns: Report —— 总导入 / 跳过 / 错误数。
     func run(
-        into target: DatabasePool,
+        screen: DatabasePool,
+        audio: DatabasePool,
         onProgress: (@Sendable (Progress) -> Void)? = nil
     ) async throws -> Report {
         onProgress?(Progress(stage: .scanning, current: 0, total: 0, bytesDone: 0, bytesTotal: 0))
@@ -313,7 +314,7 @@ struct ScreenpipeImporter: Sendable {
         //      重导静默导 0 行,数据永久缺失。cutoff 语义是「本机原生采集从
         //      何时开始」;已导入行的去重交给探重索引。
         let cutoffMs = try await Task.detached(priority: .userInitiated) {
-            try target.read { db in
+            try screen.read { db in
                 try Int64.fetchOne(
                     db, sql: """
                         SELECT MIN(timestamp_ms) FROM frames
@@ -341,7 +342,7 @@ struct ScreenpipeImporter: Sendable {
         // 4. 拷 MP4 video_chunks → 拿 chunkId map
         let (chunkIdMap, videoChunksIn, videoBytes) = try await Task.detached(priority: .userInitiated) { [sourceDir] in
             try Self.importVideoChunks(
-                source: source, target: target,
+                source: source, target: screen,
                 cutoffMs: cutoffMs, sourceDir: sourceDir,
                 onProgress: onProgress
             )
@@ -350,7 +351,7 @@ struct ScreenpipeImporter: Sendable {
         // 5. 导 frames + ocr_text(UPSERT:ts+app 已存在 → UPDATE video_chunk_id)
         let (framesIn, framesBackfilled, skippedFrames) = try await Task.detached(priority: .userInitiated) {
             try Self.importFrames(
-                source: source, target: target,
+                source: source, target: screen,
                 cutoffMs: cutoffMs, chunkIdMap: chunkIdMap,
                 onProgress: onProgress
             )
@@ -359,7 +360,7 @@ struct ScreenpipeImporter: Sendable {
         // 6. 导 audio_chunks + audio_transcriptions
         let (chunksIn, transcriptsIn) = try await Task.detached(priority: .userInitiated) { [sourceDir] in
             try Self.importAudio(
-                source: source, target: target, cutoffMs: cutoffMs,
+                source: source, target: audio, cutoffMs: cutoffMs,
                 sourceDir: sourceDir, onProgress: onProgress
             )
         }.value
@@ -381,7 +382,7 @@ struct ScreenpipeImporter: Sendable {
 
     // MARK: - Video chunks(拷贝 MP4)
 
-    /// 拷 screenpipe MP4 chunks 到 ~/.portrait/raw_data/video/<day>/imported/,
+    /// 拷 screenpipe MP4 chunks 到 ~/.portrait/metadata/video/<day>/imported/,
     /// 同时 INSERT My-Portrait video_chunks 行,返回 old_chunk_id → new_chunk_id 映射
     /// 给 importFrames 用。
     ///
@@ -446,7 +447,7 @@ struct ScreenpipeImporter: Sendable {
         }
         importLog.info("video_chunks to consider: \(rows.count, privacy: .public)")
 
-        // 拷文件到 ~/.portrait/raw_data/video/<day>/imported_<basename>
+        // 拷文件到 ~/.portrait/metadata/video/<day>/imported_<basename>
         var idMap: [Int64: Int64] = [:]
         var importedCount = 0
         var bytesCopied: Int64 = 0
@@ -494,7 +495,7 @@ struct ScreenpipeImporter: Sendable {
             // 3. 已存在同名 → 复用(再 import 同 chunk 不重复拷)
             if fm.fileExists(atPath: destAbs.path) {
                 // 找已有 My-Portrait video_chunks 行
-                let relPath = "raw_data/video/\(day)/\(destName)"
+                let relPath = "metadata/video/\(day)/\(destName)"
                 let existingId: Int64? = try? target.read { d in
                     try Int64.fetchOne(
                         d,
@@ -520,7 +521,7 @@ struct ScreenpipeImporter: Sendable {
 
             // 4. INSERT My-Portrait video_chunks(path 存 Storage.rootURL 相对,
             //    跟原 capture 流水线一致 —— compactor / retention 都按相对路径)。
-            let relPath = "raw_data/video/\(day)/\(destName)"
+            let relPath = "metadata/video/\(day)/\(destName)"
             let newId: Int64 = try target.write { d in
                 try d.execute(sql: """
                     INSERT INTO video_chunks
@@ -824,7 +825,7 @@ struct ScreenpipeImporter: Sendable {
         }
         importLog.info("screenpipe audio: chunks=\(chunks.count) transcripts=\(transcripts.count)")
 
-        // 把每条 chunk 的音频文件拷进 ~/.portrait/raw_data/audio/<day>/,记录相对路径。
+        // 把每条 chunk 的音频文件拷进 ~/.portrait/metadata/audio/<day>/,记录相对路径。
         // **为什么拷而不是直接存 screenpipe 路径**:~/.screenpipe 只读,且
         // RetentionWorker 到期会 removeItem(file_path) —— 直接存原路径会删掉用户的
         // screenpipe 原始录音。拷成副本后 DB 存 ~/.portrait 相对路径,retention 只删
@@ -862,7 +863,7 @@ struct ScreenpipeImporter: Sendable {
                     continue
                 }
             }
-            relPathByOldId[c.oldId] = "raw_data/audio/\(day)/\(destName)"
+            relPathByOldId[c.oldId] = "metadata/audio/\(day)/\(destName)"
         }
         importLog.info("audio files copied=\(copiedFiles, privacy: .public)")
 

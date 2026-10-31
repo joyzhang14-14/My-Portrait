@@ -26,7 +26,7 @@ enum EmbedDumpCLI {
         Task.detached {
             defer { state.done = true }
             do {
-                try await impl.dbPool.write { db in
+                try await impl.screenPool.write { db in
                     // 检查存在
                     let exists = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='frames_fts'") ?? 0
                     if exists > 0 {
@@ -36,40 +36,10 @@ enum EmbedDumpCLI {
                         return
                     }
                     print("frames_fts missing; recreating + reindexing…")
-                    // 跟 Schema.swift v1 migration 完全一致（tokenize='foundation_icu'）
-                    try db.execute(sql: """
-                        CREATE VIRTUAL TABLE frames_fts USING fts5(
-                            app_name, window_name, browser_url, full_text,
-                            tokenize='''foundation_icu''',
-                            content='frames', content_rowid='id'
-                        )
-                        """)
-                    // GRDB synchronize(withTable:) 走的是 INSERT/UPDATE/DELETE 触发器。
-                    // 这里手工补齐（跟 GRDB 自动生成的等价）：
-                    try db.execute(sql: """
-                        CREATE TRIGGER __frames_fts_ai AFTER INSERT ON frames BEGIN
-                            INSERT INTO frames_fts(rowid, app_name, window_name, browser_url, full_text)
-                            VALUES (new.id, new.app_name, new.window_name, new.browser_url, new.full_text);
-                        END
-                        """)
-                    try db.execute(sql: """
-                        CREATE TRIGGER __frames_fts_ad AFTER DELETE ON frames BEGIN
-                            INSERT INTO frames_fts(frames_fts, rowid, app_name, window_name, browser_url, full_text)
-                            VALUES('delete', old.id, old.app_name, old.window_name, old.browser_url, old.full_text);
-                        END
-                        """)
-                    // ⚠️ AU 触发器带列限定(与 Schema v39 一致):媒体列
-                    // (snapshot_path/video_chunk_id/offset_ms)的 UPDATE 不触发
-                    // FTS 重分词 —— 不带限定的话 retention/compaction 每次改媒体
-                    // 列都白付一次几 KB OCR 全文的 delete+reinsert。
-                    try db.execute(sql: """
-                        CREATE TRIGGER __frames_fts_au AFTER UPDATE OF app_name, window_name, browser_url, full_text ON frames BEGIN
-                            INSERT INTO frames_fts(frames_fts, rowid, app_name, window_name, browser_url, full_text)
-                            VALUES('delete', old.id, old.app_name, old.window_name, old.browser_url, old.full_text);
-                            INSERT INTO frames_fts(rowid, app_name, window_name, browser_url, full_text)
-                            VALUES (new.id, new.app_name, new.window_name, new.browser_url, new.full_text);
-                        END
-                        """)
+                    // 建表和三个同步触发器用 screen 基线同一份文本(更新触发器带列限定,
+                    // 媒体列的 UPDATE 不触发重分词)。
+                    try db.execute(sql: DBSchema.framesFTS)
+                    for sql in DBSchema.framesFTSTriggers { try db.execute(sql: sql) }
                     // 用 content table 重建索引
                     try db.execute(sql: "INSERT INTO frames_fts(frames_fts) VALUES('rebuild')")
                     let count = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM frames_fts") ?? -1
@@ -94,7 +64,7 @@ enum EmbedDumpCLI {
         let state = ExitState()
 
         // 直接用 DB pool 构造 FTS 引擎 —— 不需要完整 Services(避免与 GUI 双跑)。
-        let engine = FTSSearchEngine(dbPool: db.dbPool)
+        let engine = FTSSearchEngine(screenPool: db.screenPool, audioPool: db.audioPool)
         let frameQueries: [(String, String)] = [
             ("EN→ZH", "music player"),
             ("ZH→EN", "聊天"),

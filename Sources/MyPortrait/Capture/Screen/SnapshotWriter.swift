@@ -6,7 +6,7 @@ import os.log
 
 /// JPG 异步落盘。
 ///
-/// 路径：`~/.portrait/raw_data/frames/YYYY-MM-DD/{ts_ms}_m{monitor}.jpg`
+/// 路径：`~/.portrait/metadata/frames/YYYY-MM-DD/{ts_ms}_m{monitor}.jpg`
 ///
 /// 设计：actor 自然序列化 `write` 调用 —— 同一时刻只有一个 ImageIO 编码。
 /// 调用方流程：

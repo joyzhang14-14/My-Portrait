@@ -77,7 +77,7 @@ protocol PortraitDB: Sendable {
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws
     func insertTranscription(_ record: TranscriptionRecord) async throws
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
-    /// 转录完或彻底失败(重试用完)、文件还在 `audio_queue/` 下的段(等着搬进 raw_data/audio)。
+    /// 转录完或彻底失败(重试用完)、文件还在 `audio_queue/` 下的段(等着搬进 metadata/audio)。
     func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord]
     /// 改一段的文件路径(搬家后)。`path` 存相对 root 的形式。
     func updateAudioChunkPath(chunkId: Int64, path: String) async throws
@@ -147,7 +147,7 @@ protocol PortraitDB: Sendable {
 
     /// 早于 `ms` 的所有媒体文件路径快照。
     /// RetentionWorker 先用这个清单删盘上文件，再调 `applyRetention(...)` 清 DB。
-    /// 音频只清转录完或彻底失败的(也就是已经搬进 raw_data/audio 的);`audio_queue/` 里
+    /// 音频只清转录完或彻底失败的(也就是已经搬进 metadata/audio 的);`audio_queue/` 里
     /// 待转录的不进清单,转录产出文本后下一轮再删(10-27 update)。
     func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList
 

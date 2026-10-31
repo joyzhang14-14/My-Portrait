@@ -100,13 +100,13 @@ enum WritingStyleCLI {
 
     @MainActor
     private static func makeDistiller() throws -> WritingStyleDistiller {
-        let dbImpl = try PortraitDBImpl()
-        let store = WritingStyleStore(dbPool: dbImpl.dbPool)
-        Self.dbHolder = dbImpl
+        let pools = try DBPools.open()
+        let store = WritingStyleStore(dbPool: pools.workflow)
+        Self.dbHolder = pools
         return WritingStyleDistiller(store: store)
     }
 
-    nonisolated(unsafe) private static var dbHolder: PortraitDBImpl?
+    nonisolated(unsafe) private static var dbHolder: DBPools?
 
     // MARK: - 打印
 

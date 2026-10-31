@@ -18,10 +18,12 @@ import os.log
 final class FTSSearchEngine: SearchEngine, @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.myportrait.db", category: "fts")
-    private let dbPool: DatabasePool
+    private let screenPool: DatabasePool
+    private let audioPool: DatabasePool
 
-    init(dbPool: DatabasePool) {
-        self.dbPool = dbPool
+    init(screenPool: DatabasePool, audioPool: DatabasePool) {
+        self.screenPool = screenPool
+        self.audioPool = audioPool
     }
 
     // MARK: - SearchEngine
@@ -30,7 +32,7 @@ final class FTSSearchEngine: SearchEngine, @unchecked Sendable {
         let cleanQuery = Self.sanitizeFTSQuery(query)
         guard !cleanQuery.isEmpty else { return [] }
 
-        return try await dbPool.read { db in
+        return try await screenPool.read { db in
             // bm25 返回负数；取负后 ORDER BY score DESC 让"大=好"。
             // snippet(table, col=-1=all, '<b>', '</b>', '…', tokens=32)
             let sql = """
@@ -73,7 +75,7 @@ final class FTSSearchEngine: SearchEngine, @unchecked Sendable {
         let cleanQuery = Self.sanitizeFTSQuery(query)
         guard !cleanQuery.isEmpty else { return [] }
 
-        return try await dbPool.read { db in
+        return try await audioPool.read { db in
             let sql = """
             SELECT
                 t.id,

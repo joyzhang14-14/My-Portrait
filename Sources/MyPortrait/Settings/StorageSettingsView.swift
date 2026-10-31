@@ -84,9 +84,9 @@ struct StorageSettingsView: View {
 
             // 三张卡把 app 占的空间**全部**记完:采集下来的 / 分析出来的 /
             // app 自己要用的。前两张对齐 README 架构图的 CAP / ANA subgraph。
-            // ⚠️ portrait.sqlite 归 **Capture** —— README 里它的名字就叫
-            // "Capture DB"(frames / OCR / audio 都是采集层写的),别因为它
-            // "不是媒体文件"就挪去分析那边。
+            // ⚠️ metadata/ 下的三个库(screen / audio / input)归 **Capture** ——
+            // 都是采集层写的,别因为它们"不是媒体文件"就挪去分析那边;
+            // pipeline/workflow.sqlite 是分析产物,算进记忆那一行。
             SettingsCard(
                 title: "Capture data",
                 info: "Everything recorded off your Mac: the screen, what was said, and what you typed — plus the searchable index built from them.\n\nThis is raw material. It's almost all of your disk usage, and it's what the retention window above trims."
@@ -317,15 +317,19 @@ private struct StorageStats {
         let root = URL(fileURLWithPath: path)
         let dataBytes  = directorySize(root)
         // 音频 = 转录后留存的 wav + 待转录队列。
-        let audioBytes = directorySize(root.appendingPathComponent("raw_data/audio"))
-                       + directorySize(root.appendingPathComponent("audio_queue"))
-        let videoBytes = directorySize(root.appendingPathComponent("raw_data/video"))
-        let frameBytes = directorySize(root.appendingPathComponent("raw_data/frames"))
+        let audioBytes = directorySize(root.appendingPathComponent("metadata/audio"))
+                       + directorySize(root.appendingPathComponent("metadata/audio_queue"))
+        let videoBytes = directorySize(root.appendingPathComponent("metadata/video"))
+        let frameBytes = directorySize(root.appendingPathComponent("metadata/frames"))
         let mediaBytes = audioBytes + videoBytes + frameBytes
 
-        let dbBytes    = fileSize(root.appendingPathComponent("portrait.sqlite"))
-                       + fileSize(root.appendingPathComponent("portrait.sqlite-wal"))
-                       + fileSize(root.appendingPathComponent("portrait.sqlite-shm"))
+        /// 一个库连同 -wal / -shm 的大小。
+        func dbSize(_ rel: String) -> Int64 {
+            ["", "-wal", "-shm"].reduce(0) { $0 + fileSize(root.appendingPathComponent(rel + $1)) }
+        }
+        // 采集的三个库(帧和 OCR / 转录和说话人 / 击键、鼠标、剪贴板)。
+        let dbBytes    = dbSize("metadata/screen.sqlite") + dbSize("metadata/audio.sqlite")
+                       + dbSize("metadata/input.sqlite")
         let logBytes   = directorySize(root.appendingPathComponent("logs"))
 
         // 和访达显示的「可用」同口径:含系统需要时会自动腾出的可清除空间
@@ -341,6 +345,7 @@ private struct StorageStats {
         let memoryBytes = directorySize(root.appendingPathComponent("events"))
                         + directorySize(root.appendingPathComponent("portrait"))
                         + directorySize(root.appendingPathComponent("pipeline/logs"))
+                        + dbSize("pipeline/workflow.sqlite")
         // app 本体在 ~/.portrait 之外(/Applications 之类),单独量。
         let bundleBytes = directorySize(Bundle.main.bundleURL)
         // 首次启动下载的 AI 运行时:Bun + pi-agent 包 + 注入 PATH 的小 wrapper。

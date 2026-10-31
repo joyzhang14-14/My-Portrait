@@ -2,61 +2,30 @@ import Foundation
 import GRDB
 import os.log
 
-/// `PortraitDB` 协议的真正实现。actor 隔离的 `DatabasePool`（WAL 模式 →
-/// 多 reader + 单 writer 不阻塞），跑 `DBSchema.migrator()` 完成 schema。
+/// `PortraitDB` 协议的真正实现。屏幕部分读写 screen.sqlite,音频部分读写 audio.sqlite
+/// (WAL 模式 → 多 reader + 单 writer 不阻塞);保留清理两边都碰,超期的输入数据也一起删。
 ///
-/// 默认路径：`~/.portrait/portrait.sqlite`。测试可注入 `:memory:`。
-///
-/// 写入策略：所有方法都 `try await dbPool.write { ... }`，actor 保证只有一个
+/// 写入策略：所有方法都 `try await <pool>.write { ... }`，actor 保证只有一个
 /// writer 同时跑，WAL 允许 reader 并发读不阻塞。
 actor PortraitDBImpl: PortraitDB {
 
     private let logger = Logger(subsystem: "com.myportrait.db", category: "impl")
 
-    /// 内部可见的 pool 引用。SearchEngine 实现共用此 pool（WAL 下多 reader 安全）。
     /// `nonisolated let` —— DatabasePool 是 Sendable，跨 actor 边界传零成本。
-    nonisolated let dbPool: DatabasePool
+    nonisolated let screenPool: DatabasePool
+    nonisolated let audioPool: DatabasePool
+    nonisolated let inputPool: DatabasePool
 
-    init(path: String = Storage.portraitDBPath) throws {
-        // 确保父目录存在（首启时 ~/.portrait/ 可能还没建好）。
-        let url = URL(fileURLWithPath: path)
-        let parent = url.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-
-        var config = Configuration()
-        // 夜间 seal-check helper 是另一个进程,会和 app 抢同一把 WAL 写锁;
-        // 默认 .immediateError 会让采集写帧直接失败,改成最多等 5 秒。
-        config.busyMode = .timeout(5)
-        config.prepareDatabase { db in
-            // WAL：写不阻塞读，崩溃恢复用 .wal 文件
-            try db.execute(sql: "PRAGMA journal_mode = WAL")
-            // NORMAL：WAL 下足够安全（FULL 慢 10×），系统/电源故障最多丢最近一次提交
-            try db.execute(sql: "PRAGMA synchronous = NORMAL")
-            // 默认 SQLite 不强制外键，必须显式开
-            try db.execute(sql: "PRAGMA foreign_keys = ON")
-            // mmap_size:256MB 虚拟地址空间映射 DB 文件,读 query 走 mmap
-            // 直接读页,免去 read syscall + buffer copy。TimelineSidebar /
-            // OCR 文本搜索这种大表读密集场景能快 2-5x。注:虚拟内存,
-            // 实际物理内存按需 page-in。
-            try db.execute(sql: "PRAGMA mmap_size = 268435456")
-            // cache_size:负值 = KB,-64000 = 64MB page cache。默认 ~2MB
-            // 对几百 MB 大表完全不够,JOIN / FTS5 重排都得反复 page-in。
-            try db.execute(sql: "PRAGMA cache_size = -65536")
-            // 注册 Foundation 后端的 ICU 分词器，FTS5 表才能识别 tokenizer="foundation_icu"。
-            // 见 FoundationTokenizer.swift —— Foundation enumerateSubstrings(.byWords)
-            // 在 Darwin 上是 ICU-backed，等价于"直接用 ICU 分词器"。
-            db.add(tokenizer: FoundationTokenizer.self)
-        }
-
-        self.dbPool = try DatabasePool(path: path, configuration: config)
-        try DBSchema.migrator().migrate(self.dbPool)
-        logger.info("PortraitDB opened: \(path, privacy: .public)")
+    init(pools: DBPools) {
+        self.screenPool = pools.screen
+        self.audioPool = pools.audio
+        self.inputPool = pools.input
     }
 
     // MARK: - P1: 屏幕帧
 
     func insertFrame(_ record: FrameRecord) async throws -> Int64 {
-        try await dbPool.write { db in
+        try await screenPool.write { db in
             var row = FrameRow.fromRecord(record)
             try row.insert(db)
             return row.id ?? 0
@@ -65,7 +34,7 @@ actor PortraitDBImpl: PortraitDB {
 
     func insertFrameWithOCR(_ record: FrameRecord, ocr: OCRResult?) async throws -> Int64 {
         let ocrFields = try Self.encodeOCRFields(ocr)
-        return try await dbPool.write { db in
+        return try await screenPool.write { db in
             var row = FrameRow.fromRecord(record, ocr: ocrFields)
             try row.insert(db)
             return row.id ?? 0
@@ -74,7 +43,7 @@ actor PortraitDBImpl: PortraitDB {
 
     func updateFrameOCR(frameId: Int64, ocr: OCRResult) async throws {
         let ocrFields = try Self.encodeOCRFields(ocr)
-        try await dbPool.write { db in
+        try await screenPool.write { db in
             try db.execute(
                 sql: """
                 UPDATE frames
@@ -96,7 +65,7 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - 延后 OCR
 
     func insertFramePendingOCR(_ record: FrameRecord) async throws -> Int64 {
-        try await dbPool.write { db in
+        try await screenPool.write { db in
             var row = FrameRow.fromRecord(record)
             try row.insert(db)
             let id = row.id ?? 0
@@ -107,7 +76,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func pendingOCRFrames(beforeMs: Int64, limit: Int) async throws -> [PendingOCRFrame] {
-        try await dbPool.read { db in
+        try await screenPool.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT p.frame_id, p.timestamp_ms, f.snapshot_path FROM ocr_pending p
                 LEFT JOIN frames f ON f.id = p.frame_id
@@ -122,7 +91,7 @@ actor PortraitDBImpl: PortraitDB {
 
     func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws {
         let ocrFields = try Self.encodeOCRFields(ocr)
-        try await dbPool.write { db in
+        try await screenPool.write { db in
             if let ocrFields {
                 try db.execute(sql: """
                     UPDATE frames
@@ -142,7 +111,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func pendingOCRSummary() async throws -> PendingOCRSummary {
-        try await dbPool.read { db in
+        try await screenPool.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT p.timestamp_ms, f.snapshot_path FROM ocr_pending p
                 LEFT JOIN frames f ON f.id = p.frame_id ORDER BY p.timestamp_ms
@@ -155,7 +124,7 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - P3: MP4 压缩
 
     func framesToCompact(olderThanMs: Int64, limit: Int) async throws -> [FrameForCompaction] {
-        let (frames, deadIds): ([FrameForCompaction], [Int64]) = try await dbPool.read { db in
+        let (frames, deadIds): ([FrameForCompaction], [Int64]) = try await screenPool.read { db in
             let sql = """
             SELECT id, timestamp_ms, snapshot_path, device_name
             FROM frames
@@ -222,7 +191,7 @@ actor PortraitDBImpl: PortraitDB {
                         start = end
                         let placeholders = Array(repeating: "?", count: batch.count).joined(separator: ",")
                         // 动态变长 IN 子句:显式 StatementArguments 包装(铁律)。
-                        try await dbPool.write { db in
+                        try await screenPool.write { db in
                             try db.execute(
                                 sql: "UPDATE frames SET snapshot_path = NULL WHERE id IN (\(placeholders))",
                                 arguments: StatementArguments(batch)
@@ -253,7 +222,7 @@ actor PortraitDBImpl: PortraitDB {
             frameCount: chunk.frameCount,
             createdAtMs: Self.nowMs()
         )
-        return try await dbPool.write { db in
+        return try await screenPool.write { db in
             var row = chunkRow
             try row.insert(db)
             let chunkId = row.id ?? 0
@@ -273,7 +242,7 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - P4: 音频
 
     func insertAudioChunk(_ record: AudioChunkRecord) async throws -> Int64 {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             var row = AudioChunkRow(
                 id: nil,
                 filePath: AssetPath.normalize(record.filePath),
@@ -290,7 +259,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func updateAudioChunkStatus(chunkId: Int64, status: AudioChunkStatus) async throws {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             try db.execute(
                 sql: "UPDATE audio_chunks SET status = :status WHERE id = :chunkId",
                 arguments: ["status": status.rawValue, "chunkId": chunkId]
@@ -299,7 +268,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func insertTranscription(_ record: TranscriptionRecord) async throws {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             var row = TranscriptionRow(
                 id: nil,
                 audioChunkId: record.audioChunkId,
@@ -315,11 +284,11 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func transcribedQueuedAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             try AudioChunkRow
                 .filter(Column("status") == AudioChunkStatus.done.rawValue
                         || (Column("status") == AudioChunkStatus.failed.rawValue && Column("retry_count") >= 3))
-                .filter(Column("file_path").like("audio_queue/%"))
+                .filter(Column("file_path").like(AssetPath.normalize(Storage.audioQueueDir.path) + "/%"))
                 .order(Column("recorded_at_ms"))
                 .limit(limit)
                 .fetchAll(db)
@@ -333,7 +302,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func updateAudioChunkPath(chunkId: Int64, path: String) async throws {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             try db.execute(
                 sql: "UPDATE audio_chunks SET file_path = :path WHERE id = :chunkId",
                 arguments: ["path": AssetPath.normalize(path), "chunkId": chunkId]
@@ -342,7 +311,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func pendingAudioChunks(limit: Int) async throws -> [AudioChunkRecord] {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             let rows = try AudioChunkRow
                 .filter(Column("status") == AudioChunkStatus.pending.rawValue)
                 .order(Column("recorded_at_ms"))
@@ -368,7 +337,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func audioBacklogStats() async throws -> (pendingCount: Int, oldestRecordedAtMs: Int64?) {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             // 单次查询拿 COUNT + MIN,索引扫描代价 ~ms 级。pending 表 ~1e3
             // 量级时也不会成为热点(Driver 30s 一次)。
             let row = try Row.fetchOne(
@@ -383,7 +352,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func recordAudioChunkFailure(chunkId: Int64) async throws {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             try db.execute(
                 sql: "UPDATE audio_chunks SET status = :status, retry_count = retry_count + 1 WHERE id = :chunkId",
                 arguments: ["status": AudioChunkStatus.failed.rawValue, "chunkId": chunkId]
@@ -392,7 +361,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func resetInProgressAudioChunks() async throws -> Int {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             try db.execute(
                 sql: "UPDATE audio_chunks SET status = :newStatus WHERE status = :oldStatus",
                 arguments: ["newStatus": AudioChunkStatus.pending.rawValue, "oldStatus": AudioChunkStatus.inProgress.rawValue]
@@ -402,7 +371,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func resetRetryableFailedAudioChunks() async throws -> Int {
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             // retry_count < 3：重试上限，超过的保持 failed 不再重跑。
             try db.execute(
                 sql: "UPDATE audio_chunks SET status = :newStatus WHERE status = :oldStatus AND retry_count < 3",
@@ -425,7 +394,7 @@ actor PortraitDBImpl: PortraitDB {
     /// column/table 由上面两个调用方写死,不接受外部输入(无注入面)。
     private func referencedPaths(column: String, table: String, paths: [String]) async throws -> Set<String> {
         guard !paths.isEmpty else { return [] }
-        return try await dbPool.read { db in
+        return try await screenPool.read { db in
             var found = Set<String>()
             // SQLite 默认绑定变量上限 999 → 分批。动态变长 IN 子句显式
             // StatementArguments 包装(铁律,不能用数组字面量)。
@@ -449,7 +418,7 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - 跨通道转录去重(外放回录,见 TranscriptDeduper)
 
     func transcriptionsForDedup(isInput: Bool, fromMs: Int64, toMs: Int64) async throws -> [TranscriptDeduper.Segment] {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             let rows = try Row.fetchAll(db, sql: """
                 SELECT t.id AS tid, t.text AS text, t.speaker_id AS speakerId,
                        ac.recorded_at_ms AS recMs, t.start_s AS startS, t.end_s AS endS
@@ -475,9 +444,9 @@ actor PortraitDBImpl: PortraitDB {
 
     func deleteTranscriptions(ids: [Int64]) async throws {
         guard !ids.isEmpty else { return }
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             // 动态变长 IN 子句:显式 StatementArguments 包装(铁律,不能用数组字面量)。
-            // dbPool 在 init 时注册了 FoundationTokenizer,transcriptions_fts 的
+            // audioPool 注册了 FoundationTokenizer,transcriptions_fts 的
             // 同步删除触发器在这条连接上能跑。
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
             try db.execute(
@@ -488,7 +457,7 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func audioChunkTimeRangeMs() async throws -> (minMs: Int64, maxMs: Int64)? {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             let row = try Row.fetchOne(db, sql: "SELECT MIN(recorded_at_ms) AS lo, MAX(recorded_at_ms) AS hi FROM audio_chunks")
             guard let row else { return nil }
             let lo: Int64? = row["lo"]
@@ -511,7 +480,7 @@ actor PortraitDBImpl: PortraitDB {
     private static let centroidEMACap = 50
 
     func matchSpeaker(embedding: [Float], model: String) async throws -> SpeakerMatch {
-        try await dbPool.read { db in
+        try await audioPool.read { db in
             // **best-of-N 匹配**(对齐 screenpipe `get_speaker_from_embedding`):
             // 每个说话人取「存的多条 embedding + 质心」里**最接近的一条**的相似度。
             //
@@ -575,7 +544,7 @@ actor PortraitDBImpl: PortraitDB {
     func enrollSpeaker(embedding: [Float], model: String) async throws -> Int64 {
         let blob = Data(floats: embedding)
         let now = Self.nowMs()
-        return try await dbPool.write { db in
+        return try await audioPool.write { db in
             try db.execute(sql: """
                 INSERT INTO speakers (name, centroid, embedding_count, hallucination, created_at_ms, updated_at_ms, embedding_model)
                 VALUES (NULL, :blob, 1, 0, :createdAt, :updatedAt, :model)
@@ -590,7 +559,7 @@ actor PortraitDBImpl: PortraitDB {
 
     func addEmbeddingToSpeaker(speakerId: Int64, embedding: [Float]) async throws {
         let now = Self.nowMs()
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             guard let row = try Row.fetchOne(db, sql:
                 "SELECT centroid, embedding_count FROM speakers WHERE id = :speakerId", arguments: ["speakerId": speakerId])
             else { return }
@@ -635,7 +604,7 @@ actor PortraitDBImpl: PortraitDB {
 
     func nameSpeakerIfUnnamed(speakerId: Int64, name: String) async throws {
         let now = Self.nowMs()
-        try await dbPool.write { db in
+        try await audioPool.write { db in
             try db.execute(sql: """
                 UPDATE speakers SET name = :name, updated_at_ms = :updatedAt
                 WHERE id = :speakerId AND (name IS NULL OR name = '')
@@ -646,42 +615,44 @@ actor PortraitDBImpl: PortraitDB {
     // MARK: - Retention
 
     func mediaPathsBefore(ms: Int64) async throws -> RetentionFileList {
-        try await dbPool.read { db in
-            // Pull raw paths from each table, then resolve. Files that
-            // already vanished off disk are dropped — retention has
-            // nothing to delete for them.
-            let rawSnapshots = try String.fetchAll(db, sql: """
+        // Pull raw paths from each table, then resolve. Files that
+        // already vanished off disk are dropped — retention has
+        // nothing to delete for them.
+        let (rawSnapshots, rawVideoChunks): ([String], [String]) = try await screenPool.read { db in
+            (try String.fetchAll(db, sql: """
                 SELECT snapshot_path FROM frames
                 WHERE snapshot_path IS NOT NULL AND timestamp_ms < :ms
-                """, arguments: ["ms": ms])
-            let rawVideoChunks = try String.fetchAll(db, sql: """
+                """, arguments: ["ms": ms]),
+             try String.fetchAll(db, sql: """
                 SELECT file_path FROM video_chunks
                 WHERE end_ts_ms < :ms
-                """, arguments: ["ms": ms])
-            // 只删「转录完(done)或永久放弃(failed 且重试次数耗尽,见
-            // resetRetryableFailedAudioChunks 的 retry_count < 3)」的音频 —— 这些已经从
-            // audio_queue 搬进 raw_data/audio;待转录的留在队列里不动。
-            // **id 一并取回**:applyRetention 按这批 id 快照删行,不二次求值
-            // status(文件清单与行删除之间 status 会被转录管线推进)。
-            let audioRows = try Row.fetchAll(db, sql: """
+                """, arguments: ["ms": ms]))
+        }
+        // 只删「转录完(done)或永久放弃(failed 且重试次数耗尽,见
+        // resetRetryableFailedAudioChunks 的 retry_count < 3)」的音频 —— 这些已经从
+        // audio_queue 搬进 metadata/audio;待转录的留在队列里不动。
+        // **id 一并取回**:applyRetention 按这批 id 快照删行,不二次求值
+        // status(文件清单与行删除之间 status 会被转录管线推进)。
+        let audioRows: [Row] = try await audioPool.read { db in
+            try Row.fetchAll(db, sql: """
                 SELECT id, file_path FROM audio_chunks
                 WHERE recorded_at_ms < :ms
                   AND (status = :done OR (status = :failed AND retry_count >= 3))
                 """, arguments: ["ms": ms,
                                   "done": AudioChunkStatus.done.rawValue,
                                   "failed": AudioChunkStatus.failed.rawValue])
-            // id 不跟文件存在性挂钩:文件已丢的行照样要删(否则永远残留)。
-            let audioIds = audioRows.compactMap { $0["id"] as Int64? }
-            let rawAudio = audioRows.compactMap { $0["file_path"] as String? }
-
-            return RetentionFileList(
-                snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
-                videoChunkPaths: rawVideoChunks.compactMap(AssetPath.resolve),
-                audioPaths: rawAudio.compactMap(AssetPath.resolve),
-                transcriptPaths: rawAudio.compactMap { Storage.transcriptURL(forAudio: $0)?.path },
-                audioChunkIds: audioIds
-            )
         }
+        // id 不跟文件存在性挂钩:文件已丢的行照样要删(否则永远残留)。
+        let audioIds = audioRows.compactMap { $0["id"] as Int64? }
+        let rawAudio = audioRows.compactMap { $0["file_path"] as String? }
+
+        return RetentionFileList(
+            snapshotPaths: rawSnapshots.compactMap(AssetPath.resolve),
+            videoChunkPaths: rawVideoChunks.compactMap(AssetPath.resolve),
+            audioPaths: rawAudio.compactMap(AssetPath.resolve),
+            transcriptPaths: rawAudio.compactMap { Storage.transcriptURL(forAudio: $0)?.path },
+            audioChunkIds: audioIds
+        )
     }
 
     // MARK: - 读（UI 用）
@@ -693,7 +664,7 @@ actor PortraitDBImpl: PortraitDB {
         let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
         let endMs = Int64(dayEnd.timeIntervalSince1970 * 1000)
 
-        return try await dbPool.read { db in
+        return try await screenPool.read { db in
             // **screenpipe import 的帧 snapshot_path/video_chunk_id 都 NULL**
             // 但 device_name='imported',加进 WHERE 让 timeline UI 也显示。
             // 渲染层 TimelineView 有 NoMediaPlaceholder 兜底无媒体帧。
@@ -758,7 +729,7 @@ actor PortraitDBImpl: PortraitDB {
         let startMs = ms - Int64(windowSeconds * 1000)
         let endMs = ms + Int64(windowSeconds * 1000)
 
-        return try await dbPool.read { db in
+        return try await screenPool.read { db in
             let sql = """
             SELECT app_name,
                    COALESCE(window_name, '') AS window_name,
@@ -798,7 +769,7 @@ actor PortraitDBImpl: PortraitDB {
         let startMs = ms - Int64(beforeSeconds * 1000)
         let endMs = ms + Int64(afterSeconds * 1000)
 
-        return try await dbPool.read { db in
+        return try await audioPool.read { db in
             // JOIN audio_chunks 拿 recorded_at_ms + device；LEFT JOIN speakers 拿名字
             // (hallucination=0 才出名,匿名/误判簇出 NULL → 上层回退 "Speaker <id>")。
             let sql = """
@@ -842,9 +813,9 @@ actor PortraitDBImpl: PortraitDB {
     }
 
     func applyRetention(mode: RetentionMode, beforeMs: Int64, audioChunkIds: [Int64]) async throws -> RetentionStats {
-        try await dbPool.write { db in
-            switch mode {
-            case .mediaOnly:
+        switch mode {
+        case .mediaOnly:
+            let (framesAffected, videoChunksDeleted): (Int, Int) = try await screenPool.write { db in
                 // 1. NULL 掉 frames 的媒体引用（保留 OCR 文本）。
                 //    只碰还有媒体引用的行:mediaOnly 模式下旧行永久保留,不加
                 //    过滤的话每天一轮 retention 把整个历史(几十万行)重写一遍
@@ -864,16 +835,17 @@ actor PortraitDBImpl: PortraitDB {
                 try db.execute(sql: """
                     DELETE FROM video_chunks WHERE end_ts_ms < :beforeMs
                     """, arguments: ["beforeMs": beforeMs])
-                let videoChunksDeleted = db.changesCount
+                return (framesAffected, db.changesCount)
+            }
+            // mediaOnly：audio_chunks 保留（含 transcriptions 关联），文件由 worker 删;输入数据不是媒体,不动。
+            return RetentionStats(
+                framesAffected: framesAffected,
+                videoChunksDeleted: videoChunksDeleted,
+                audioChunksDeleted: 0
+            )
 
-                // mediaOnly：audio_chunks 保留（含 transcriptions 关联），文件由 worker 删。
-                return RetentionStats(
-                    framesAffected: framesAffected,
-                    videoChunksDeleted: videoChunksDeleted,
-                    audioChunksDeleted: 0
-                )
-
-            case .everything:
+        case .everything:
+            let (framesAffected, videoChunksDeleted): (Int, Int) = try await screenPool.write { db in
                 try db.execute(sql: """
                     DELETE FROM frames WHERE timestamp_ms < :beforeMs
                     """, arguments: ["beforeMs": beforeMs])
@@ -884,12 +856,14 @@ actor PortraitDBImpl: PortraitDB {
                 try db.execute(sql: """
                     DELETE FROM video_chunks WHERE end_ts_ms < :beforeMs
                     """, arguments: ["beforeMs": beforeMs])
-                let videoChunksDeleted = db.changesCount
+                return (framesAffected, db.changesCount)
+            }
 
-                // CASCADE 删 transcriptions。只删 mediaPathsBefore 同一轮快照
-                // 里的 id —— 不重新按 status/时间求值,保证「删的行」恰是
-                // 「文件清单里那批 chunk」,与盘上删除严格一致。
-                var audioChunksDeleted = 0
+            // CASCADE 删 transcriptions。只删 mediaPathsBefore 同一轮快照
+            // 里的 id —— 不重新按 status/时间求值,保证「删的行」恰是
+            // 「文件清单里那批 chunk」,与盘上删除严格一致。
+            let audioChunksDeleted = try await audioPool.write { db in
+                var deleted = 0
                 var start = 0
                 while start < audioChunkIds.count {
                     let end = min(start + 500, audioChunkIds.count)   // 999 绑定变量上限,分批
@@ -901,15 +875,21 @@ actor PortraitDBImpl: PortraitDB {
                         sql: "DELETE FROM audio_chunks WHERE id IN (\(placeholders))",
                         arguments: StatementArguments(batch)
                     )
-                    audioChunksDeleted += db.changesCount
+                    deleted += db.changesCount
                 }
-
-                return RetentionStats(
-                    framesAffected: framesAffected,
-                    videoChunksDeleted: videoChunksDeleted,
-                    audioChunksDeleted: audioChunksDeleted
-                )
+                return deleted
             }
+
+            // 超期的击键、鼠标、打字事件、剪贴板一起删。
+            try await inputPool.write { db in
+                try InputDataDeletion.delete(db, fromMs: nil, beforeMs: beforeMs)
+            }
+
+            return RetentionStats(
+                framesAffected: framesAffected,
+                videoChunksDeleted: videoChunksDeleted,
+                audioChunksDeleted: audioChunksDeleted
+            )
         }
     }
 

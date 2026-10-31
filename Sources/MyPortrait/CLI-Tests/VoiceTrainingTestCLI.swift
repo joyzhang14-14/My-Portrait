@@ -73,7 +73,7 @@ enum VoiceTrainingTestCLI {
 
         // 写 DB(测试用 speaker 名 "Test-CLI")。
         guard let speakerId = TimelineDB().upsertVoiceTrainedSpeaker(name: "Test-CLI", embedding: embedding, model: "en_campplus") else {
-            print("ERROR: DB upsert failed (DB exists? path: \(TimelineDB().dbPath))")
+            print("ERROR: DB upsert failed (DB exists? path: \(TimelineDB().audioPath))")
             exit(6)
         }
         print("upserted speaker id=\(speakerId), name='Test-CLI'")

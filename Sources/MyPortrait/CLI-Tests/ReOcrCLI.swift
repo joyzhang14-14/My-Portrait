@@ -47,7 +47,7 @@ enum ReOcrCLI {
 
     private static func reocrToday() async throws -> Int {
         // 1. 打开 DB
-        let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
+        let dbPath = Storage.screenDBPath
         // 注册 foundation_icu 分词器 —— UPDATE frames 触发的 frames_fts 同步触发器
         // 就能正常分词,不必再 drop/recreate 触发器(那会留下索引过时 + 中断时触发器
         // 永久消失、连累主 app 搜索的坑)。
@@ -115,7 +115,7 @@ enum ReOcrCLI {
     }
 
     private static func reocrTodayMP4() async throws -> Int {
-        let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
+        let dbPath = Storage.screenDBPath
         // 注册 foundation_icu 分词器(同 reocrToday),frames_fts 同步触发器照常分词,
         // 无需 drop/recreate 触发器。
         var config = Configuration()

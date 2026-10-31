@@ -14,6 +14,9 @@ struct MyPortraitApp: App {
         // 数据路径迁移最先跑 —— CLI 模式也起 Services,所以放最前面,确保
         // 任何模式下读路径前都已经搬完。Idempotent,重复跑不出错。
         PathMigration.runOnceIfNeeded()
+        // 拆库(portrait.sqlite → metadata/ 三个库 + pipeline/workflow.sqlite)紧跟其后,
+        // 在任何命令行分支和开库之前;进程退出前一直持有共享锁。
+        DBSplitMigration.runIfNeeded()
 
         // CLI 调试命令在任何 SwiftUI / AppDelegate 设置之前拦截，否则会被窗口初始化拖慢。
         let args = ProcessInfo.processInfo.arguments
@@ -33,7 +36,7 @@ struct MyPortraitApp: App {
             FileHandle.standardError.write(
                 "⚠️ 建议先退出正在运行的 My Portrait app(避免 WAL 写冲突)\n".data(using: .utf8)!)
             let dbImpl: PortraitDBImpl
-            do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
+            do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
             EmbedDumpCLI.runRebuildFramesFts(db: dbImpl)
         }
         if args.contains("--embed-search-test") {
@@ -42,7 +45,7 @@ struct MyPortraitApp: App {
             FileHandle.standardError.write(
                 "⚠️ 建议先退出正在运行的 My Portrait app(避免 WAL 写冲突)\n".data(using: .utf8)!)
             let dbImpl: PortraitDBImpl
-            do { dbImpl = try PortraitDBImpl() } catch { print("ERROR: open DB: \(error)"); exit(1) }
+            do { dbImpl = try PortraitDBImpl(pools: DBPools.open()) } catch { print("ERROR: open DB: \(error)"); exit(1) }
             EmbedDumpCLI.runSearchTest(db: dbImpl)
         }
         // DEV-ONLY: `--event-prompt-test <yyyy-MM-dd>` validates the proposed
@@ -185,7 +188,7 @@ struct MyPortraitApp: App {
         // DEV-ONLY: `--distill-selftest` 确定性验证 occurrence-by-event-day +
         // derived 不封顶(不调 LLM、不碰真实数据)。
         if args.contains("--distill-selftest") {
-            _ = try? PortraitDBImpl()   // updateExistingPortrait 写 changelog 需要 DB
+            _ = try? DBPools.open()   // updateExistingPortrait 写 changelog 需要 DB
             let ok = PortraitDistiller.runOccurrenceSelfTest()
             exit(ok ? 0 : 1)
         }
@@ -493,15 +496,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // （含 v13 —— 旧 typing_events 会被 DROP 重建）。
                 let dbImpl: PortraitDBImpl
                 do {
-                    dbImpl = try PortraitDBImpl()
+                    dbImpl = try PortraitDBImpl(pools: DBPools.open())
                 } catch {
                     print("[m4] DB open failed: \(error)")
                     exit(1)
                 }
                 m4DBImpl = dbImpl  // 持有防 DatabasePool 释放
                 observer = TypingObserver(
-                    store: TypingEventStore(dbPool: dbImpl.dbPool),
-                    keystrokeStore: KeystrokeStore(dbPool: dbImpl.dbPool),
+                    store: TypingEventStore(dbPool: dbImpl.inputPool),
+                    keystrokeStore: KeystrokeStore(dbPool: dbImpl.inputPool),
                     modeLabel: "m4-dev")
                 // M4 关键事件（burst / 跨记录 delete / flush）print 到终端。
                 // 启动 banner 由 start() 自己 print，不走这里。

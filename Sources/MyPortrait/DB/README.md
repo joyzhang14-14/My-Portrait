@@ -17,33 +17,44 @@
 
 ## 文件位置
 
-数据库：`~/.portrait/portrait.sqlite`（+ `.wal` / `.shm` 同目录）。
+按「数据从哪来」分四个库（各自带 `-wal` / `-shm`）：
+
+| 文件 | 表 |
+|---|---|
+| `~/.portrait/metadata/screen.sqlite` | `frames`、`frames_fts`、`video_chunks`、`ocr_pending`、`ocr_words_slim_state` |
+| `~/.portrait/metadata/audio.sqlite` | `audio_chunks`、`audio_transcriptions`、`transcriptions_fts`、`speakers`、`speaker_embeddings` |
+| `~/.portrait/metadata/input.sqlite` | `keystroke_log`、`mouse_log`、`typing_events`、`clipboard_log` |
+| `~/.portrait/pipeline/workflow.sqlite` | `event_intervals`、`personality_days`、`processing_log`、`pipeline_runs`、`distill_changelog`、`writing_records`、`writing_style_runs`、`writing_style_staged` |
+
+截图、视频、录音和库放在一起：`metadata/frames/`、`metadata/video/`、`metadata/audio/`、
+`metadata/audio_queue/`。库里存相对 `~/.portrait` 的路径（`AssetPath`）。
+
+连接池由 `DBPools` 统一建（WAL、5 秒忙等待、外键全开；分词器只在 screen、audio 上注册），
+`Services` 把对应的池交给各组件。旧的单库 `portrait.sqlite` 由 `DBSplitMigration` 一次性拆开，
+进度标记在 `~/.portrait/.staging/db-split.json`（`stage == "done"` 才算拆完）。
 
 ## Schema（migrations）
 
-```
-v1_screen_capture         video_chunks + frames + frames_fts (FTS5 + custom tokenizer)
-v2_audio_capture          audio_chunks + audio_transcriptions
-v3_transcriptions_fts     transcriptions_fts (FTS5 + same tokenizer)
-```
-
-详见 [Schema.swift](Schema.swift)。**Migration 一旦发布就不改**，新 schema 加新 migration。
+每个库一个迁移器，从一份基线开始：`screen_v1` / `audio_v1` / `input_v1` / `workflow_v1`，
+直接建出当前的表结构。详见 [Schema.swift](Schema.swift)。**基线和已发布的迁移不改**，
+改表结构就在对应库的迁移器里往后追加新版本。
 
 > **残留列说明：** `frames.embedding` / `audio_transcriptions.embedding`（BLOB）及其
 > `embedding_model`（TEXT）列、对应的 `*_embedding_null` 部分索引，是已移除的语义搜索
-> 子系统留下的（v4_embeddings / v5_embedding_model）。migration 只能追加、不能回删，所以
-> 列还在，但**没有任何代码写入或读取它们**（BLOB 落 overflow page，不读 = 0 成本）。
+> 子系统留下的，基线照原样保留，**没有任何代码写入或读取它们**（BLOB 落 overflow page，不读 = 0 成本）。
 > （`PortraitDB` 协议里那批 embedding 读写方法 + `FrameMetadata`/`TranscriptionMetadata`
-> 已随子系统一并删除，只剩这几列因 migration 锁定而保留。）
-> （注意：v7_speakers 的 `speakers.centroid` / `speaker_embeddings.embedding` 属于
+> 已随子系统一并删除，只剩这几列。）
+> （注意：`speakers.centroid` / `speaker_embeddings.embedding` 属于
 > **说话人声纹**系统，正在使用，跟这里的文本 embedding 残留无关。）
 
 ## 模块文件
 
 | 文件 | 职责 |
 |---|---|
-| `Schema.swift` | DatabaseMigrator —— v1/v2/v3 起，含残留的 v4/v5 embedding 列 |
-| `PortraitDBImpl.swift` | `PortraitDB` 协议实现，actor + DatabasePool (WAL) |
+| `Schema.swift` | 四个库的 DatabaseMigrator（各一份基线） |
+| `DBPools.swift` | 四个库的连接池：建池工厂 + 容器 |
+| `DBSplitMigration.swift` | 一次性把旧的 `portrait.sqlite` 拆成四个库、媒体目录挪进 `metadata/` |
+| `PortraitDBImpl.swift` | `PortraitDB` 协议实现，actor；屏幕部分走 screen 池、音频部分走 audio 池 |
 | `FoundationTokenizer.swift` | 自定义 FTS5 分词器（ICU 通过 Foundation 借道） |
 | `RetentionWorker.swift` | 自动删除，24h cadence，读 ConfigStore.snapshot 的 retentionDays / autoDeleteMode |
 | `ScreenpipeImporter.swift` | 从 screenpipe 库导入历史数据（只读 copy，不动源库） |
@@ -65,7 +76,7 @@ query
 ```
 
 `searchEngine` 类型声明为 `SearchEngine` 协议，`Services.init` 里实例化的是
-`FTSSearchEngine(dbPool: dbImpl.dbPool)`——**和 DB 共用同一个 GRDB `DatabasePool`**。
+`FTSSearchEngine(screenPool:audioPool:)`——**帧和转录分别用 screen、audio 的连接池**，两次独立查询。
 保留协议这层抽象的意义：UI 永远只调 `services.searchEngine.searchFrames(...)`，
 将来若换实现，UI 零改动。（当前唯一实现就是 `FTSSearchEngine`，不再有 Hybrid。）
 
@@ -93,8 +104,8 @@ query
    SQLite overflow page 机制让"不读 = 0 成本"，明确列名拿到性能
 3. **`focused` 字段保留** —— 即使单显示器，它仍然区分"主动操作"和"背景常驻"
 4. **`StubPortraitDB` 已删** —— 仅在未来的 Tests target 中重建。Sources/ 永远是真 DB
-5. **screenpipe 历史数据直接 import 进 `portrait.sqlite` 的 `frames` 表** —— 用
-   `device_name='imported'` 标记区分（不复制媒体文件），写盘只动 `portrait.sqlite` / `raw_data/`
+5. **screenpipe 历史数据直接 import 进 screen / audio 两个库** —— 帧用
+   `device_name='imported'` 标记区分，写盘只动这两个库和 `metadata/` 下的媒体目录
 6. **词框坐标只留 5 位小数** —— `ocr_words_json` / `ocr_backfill_words` 写库前截短，旧帧由
    `OCRWordsSlimmer` 后台改写一遍（进度在 `ocr_words_slim_state`）。0–1 比例坐标，5 位 ≈ 0.02 px
 7. **`full_text` 为空不一定是没字** —— 延后 OCR 开着时，新帧先进 `ocr_pending`（图是全分辨率
@@ -119,7 +130,7 @@ let hits = try await services.searchEngine.searchFrames(query: "力矩传感器"
 
 ```bash
 # 看库内容
-sqlite3 ~/.portrait/portrait.sqlite
+sqlite3 ~/.portrait/metadata/screen.sqlite
 > .schema frames
 > SELECT COUNT(*) FROM frames;
 > SELECT app_name, full_text FROM frames ORDER BY id DESC LIMIT 5;

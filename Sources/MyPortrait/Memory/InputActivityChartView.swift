@@ -62,7 +62,7 @@ struct InputActivityChartView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     // dev mode 不读真实打字库(08-10 update):演示里不能出现真实击键。
-    // dev 目录没有 portrait.sqlite → 返回 nil,页面走空态。
+    // dev 目录没有 input.sqlite → 返回 nil,页面走空态。
     var body: some View {
         VStack(spacing: 0) {
             TimelineControlsBar(currentDate: $selectedDay, onRefresh: { Task { await reload() } })

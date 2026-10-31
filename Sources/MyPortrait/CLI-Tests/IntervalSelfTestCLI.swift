@@ -169,13 +169,13 @@ enum IntervalSelfTest {
         }
         let fm = FileManager.default
         print("[interval-selftest] data root: \(Storage.rootURL.path)")
-        guard !fm.fileExists(atPath: Storage.portraitDBPath) else {
+        guard !fm.fileExists(atPath: Storage.screenDBPath) else {
             fputs("[interval-selftest] refusing to run: the data root is not empty, use a fresh temp directory\n", stderr)
             exit(2)
         }
         sharedVectors()
-        let dbImpl = try PortraitDBImpl()
-        let pool = dbImpl.dbPool
+        let pools = try DBPools.open()
+        let pool = pools.screen
 
         // 写作风格 update 的正文多了一层转义 → 这次不写。
         let wsDir = PortraitPaths.categoryDir("writing_style")
@@ -194,7 +194,7 @@ enum IntervalSelfTest {
         check(wsNew && wsSkip && wsAfter == wsBefore,
               "writing style: update with a doubly escaped body returns true and leaves the file unchanged")
         try fm.removeItem(at: wsURL)
-        MemoryScheduler.useLedgerPool(pool)
+        MemoryScheduler.useDBPools(pools)
         let sched = MemoryScheduler.shared
 
         // 区间(PDT):A = 09-21 00:00 → 09-22 06:00,B = 09-22 06:00 → 18:00,
@@ -227,7 +227,7 @@ enum IntervalSelfTest {
         // E:6000 帧,每秒一帧,同一 session。
         try addSession(pool, window: "bulk-win", app: "Video",
                        from: local("2026-09-23 07:00"), to: local("2026-09-23 07:00") + 5999 * 1000, every: 1000)
-        try insertLedger(pool, [ivA, ivB, ivC, ivE], origin: t0)
+        try insertLedger(pools.workflow, [ivA, ivB, ivC, ivE], origin: t0)
 
         check(sched.pendingIntervals().map(\.id) == [ivA.id, ivB.id, ivC.id, ivE.id],
               "scheduler: pending intervals come from the ledger, oldest first")
@@ -252,7 +252,7 @@ enum IntervalSelfTest {
         check(fm.fileExists(atPath: EventOverlay.journalURL(intervalId: ivA.id).path),
               "A: undo journal written with the commit")
         let aId = ivA.id
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: "UPDATE event_intervals SET event_status = 'complete' WHERE id = :id",
                            arguments: ["id": aId])
         }
@@ -303,24 +303,24 @@ enum IntervalSelfTest {
         check(exists("2026-09-22/2026-09-22_delta.md") && tree() != before, "C: committed (delta new, beta joined)")
         await sched.runInjectedStep(date: ivC.id, stage: .event, result: .failure)
         check(tree() == before, "C: failed step undoes only this interval (delta removed, beta restored, others untouched)")
-        let c1 = try EventIntervalStore(dbPool: pool).interval(id: ivC.id)
+        let c1 = try EventIntervalStore(pools: pools).interval(id: ivC.id)
         check(c1?.event == .failed && c1?.retryCount == 1, "C: ledger row failed, retry 1")
 
         // 落盘后进程死掉(心跳过期)→ 恢复时按清单撤销。
         let rC2 = try await Backfill.runInterval(ivC, clusterer: clusterer(planC))
         try rC2.overlay.commit(intervalId: ivC.id)
         let staleAt = EventIntervalStore.nowMs() - 2 * h, cId = ivC.id
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: "UPDATE event_intervals SET event_status = 'in_progress', updated_at_ms = :t WHERE id = :id",
                            arguments: ["t": staleAt, "id": cId])
         }
         sched.recoverStaleLocks()
-        let c2 = try EventIntervalStore(dbPool: pool).interval(id: ivC.id)
+        let c2 = try EventIntervalStore(pools: pools).interval(id: ivC.id)
         check(tree() == before && c2?.event == .failed && c2?.retryCount == 2,
               "C: stale in-progress interval → recovery undoes its writes, failed, retry 2")
         check(sched.attentionDays().contains { $0.date == ivC.id }, "C: failed interval shows in Needs attention")
         sched.resetDay(ivC.id)
-        let c3 = try EventIntervalStore(dbPool: pool).interval(id: ivC.id)
+        let c3 = try EventIntervalStore(pools: pools).interval(id: ivC.id)
         check(c3?.event == .pending && c3?.retryCount == 2
               && sched.pendingIntervals(scope: .retryOnly).map(\.id) == [ivC.id],
               "C: Retry now → pending, retry kept, picked up by the next tick's retry run")
@@ -347,7 +347,7 @@ enum IntervalSelfTest {
 
         // —— personality:本地日、每天一次 ——
         print("[interval-selftest] personality by local day")
-        let store = EventIntervalStore(dbPool: pool)
+        let store = EventIntervalStore(pools: pools)
         for iv in [ivA, ivB] {
             try store.setStatus(id: iv.id, stage: .event, status: .complete)
             try store.setStatus(id: iv.id, stage: .impact, status: .complete)

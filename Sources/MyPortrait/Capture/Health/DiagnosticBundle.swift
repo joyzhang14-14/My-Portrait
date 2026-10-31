@@ -560,21 +560,39 @@ enum DiagnosticBundle {
         ], to: url)
     }
 
-    /// db_stats.json — 各表 row count + ~/.portrait 各子目录 du。
+    /// 四个库和各自的表,诊断包按库统计。
+    private static let dbTables: [(name: String, path: String, tables: [String])] = [
+        ("metadata/screen.sqlite", Storage.screenDBPath, ["frames", "video_chunks", "ocr_pending"]),
+        ("metadata/audio.sqlite", Storage.audioDBPath,
+         ["audio_chunks", "audio_transcriptions", "speakers", "speaker_embeddings"]),
+        ("metadata/input.sqlite", Storage.inputDBPath,
+         ["keystroke_log", "mouse_log", "typing_events", "clipboard_log"]),
+        ("pipeline/workflow.sqlite", Storage.workflowDBPath,
+         ["processing_log", "event_intervals", "personality_days", "writing_records"]),
+    ]
+
+    /// db_stats.json — 各库大小(连 -wal)、各表 row count + ~/.portrait 各子目录 du。
     private static func writeDbStats(mode: DiagnosticBundleMode, to url: URL) throws {
         var dict: [String: Any] = [:]
-        if mode == .privateSupport {
-            dict["db_path"] = "~/.portrait/portrait.sqlite"
+        var sizes: [String: Int64] = [:]
+        var counts: [String: [String: Int]] = [:]
+        for db in dbTables {
+            sizes[db.name] = fileSize(db.path) + fileSize(db.path + "-wal")
+            var c: [String: Int] = [:]
+            for t in db.tables {
+                if let n = sqliteScalarInt(db.path, "SELECT COUNT(*) FROM \(t)") { c[t] = n }
+            }
+            counts[db.name] = c
         }
-        dict["db_size_bytes"] = fileSize(Storage.portraitDBPath)
-        dict["table_row_counts"] = readTableCounts()
+        dict["db_size_bytes"] = sizes
+        dict["table_row_counts"] = counts
 
         var dirs: [String: Int64] = [:]
         for (name, url) in [
             ("portrait",        Storage.portraitDir),
             ("events",          Storage.eventsDir),
             ("audio_queue",     Storage.audioQueueDir),
-            ("raw_data",        Storage.rawDataDir),
+            ("audio",           Storage.audioDir),
             ("frames",          Storage.framesDir),
             ("video",           Storage.videoDir),
             ("logs",            Storage.dailyLogsDir),
@@ -587,28 +605,11 @@ enum DiagnosticBundle {
         try writeJSON(dict, to: url)
     }
 
-    private static func readTableCounts() -> [String: Int] {
-        // 直接用 sqlite3 命令行(避免引 GRDB)。
-        let tables = [
-            "frames", "video_chunks",
-            "audio_chunks", "audio_transcriptions",
-            "typing_events", "keystroke_log", "mouse_log", "writing_records",
-            "processing_log", "event_intervals", "personality_days",
-            "speakers", "speaker_embeddings",
-        ]
-        var out: [String: Int] = [:]
-        for t in tables {
-            if let n = sqliteScalarInt("SELECT COUNT(*) FROM \(t)") {
-                out[t] = n
-            }
-        }
-        return out
-    }
-
-    private static func sqliteScalarInt(_ sql: String) -> Int? {
+    /// 直接用 sqlite3 命令行只读打开(避免引 GRDB)。
+    private static func sqliteScalarInt(_ path: String, _ sql: String) -> Int? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        p.arguments = [Storage.portraitDBPath, sql]
+        p.arguments = ["-readonly", path, sql]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = Pipe()

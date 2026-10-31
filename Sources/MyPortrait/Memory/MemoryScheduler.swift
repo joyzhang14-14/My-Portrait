@@ -293,18 +293,21 @@ final class MemoryScheduler {
         key.hasPrefix(pdayPrefix) ? String(key.dropFirst(pdayPrefix.count)) : nil
     }
 
-    /// 区间台账的连接。app 里 Services 一开库就填上同一个 DatabasePool;CLI / 自检里
-    /// 没填,第一次用时按 Storage.portraitDBPath 自己开(会跑迁移)。
-    nonisolated(unsafe) private static var ledgerPool: DatabasePool?
-    nonisolated private static let ledgerPoolLock = NSLock()
-    nonisolated static var ledger: EventIntervalStore? {
-        ledgerPoolLock.lock(); defer { ledgerPoolLock.unlock() }
-        if ledgerPool == nil { ledgerPool = try? PortraitDBImpl().dbPool }
-        return ledgerPool.map { EventIntervalStore(dbPool: $0) }
+    /// 四个库的连接池。app 里 Services 一开库就填上同一份;CLI / 自检里没填,
+    /// 第一次用时按 Storage 的路径自己开(会跑迁移)。区间台账、Premium 打包和导入都用它。
+    nonisolated(unsafe) private static var pools: DBPools?
+    nonisolated private static let poolsLock = NSLock()
+    nonisolated static var dbPools: DBPools? {
+        poolsLock.lock(); defer { poolsLock.unlock() }
+        if pools == nil { pools = try? DBPools.open() }
+        return pools
     }
-    nonisolated static func useLedgerPool(_ pool: DatabasePool) {
-        ledgerPoolLock.lock(); defer { ledgerPoolLock.unlock() }
-        ledgerPool = pool
+    nonisolated static var ledger: EventIntervalStore? {
+        dbPools.map { EventIntervalStore(pools: $0) }
+    }
+    nonisolated static func useDBPools(_ p: DBPools) {
+        poolsLock.lock(); defer { poolsLock.unlock() }
+        pools = p
     }
 
     /// 某个 key 的行,统一成 ProcessingLogRow:区间填 raw(恒 complete,封口即收齐)/
@@ -651,11 +654,11 @@ final class MemoryScheduler {
         // 结果。导入先于本机链,personality 等下游读到的就是 Premium 刚写回的台账 / 事件。
         // 然后跑封区间检查(与 helper 同一个入口,交换锁互斥、幂等):本机和 Premium 的
         // event 链都从区间台账取活;有链搬到 Premium 时按每日节奏导出、上传(见 PremiumExchangeExporter)。
-        if let pool = WritingStyleDistiller.shared?.store.dbPool {
+        if let pools = Self.dbPools {
             if !s.offloadedChains.isEmpty {
-                _ = await PremiumExchangeImporter.runIfNeeded(dbPool: pool)
+                _ = await PremiumExchangeImporter.runIfNeeded(dbPool: pools.workflow)
             }
-            _ = await PremiumExchangeExporter.runSealCheck(dbPool: pool, lockWait: 0, importFirst: false)
+            _ = await PremiumExchangeExporter.runSealCheck(pools: pools, lockWait: 0, importFirst: false)
         } else {
             schedLog.warning("tick: DB pool unavailable — skip Premium import and interval seal check")
         }

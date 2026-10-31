@@ -4,22 +4,24 @@ import GRDB
 /// Data → Input 读击键的 DAO(`keystroke_log`),外加写作风格引用标签按 id
 /// 回查 `writing_records`(写作采集的还原记录已清空,查不到就返回空)。
 ///
-/// 所有 DB IO 在 `dbPool` 上同步执行(GRDB 内部已 thread-safe)。
+/// 击键在 input.sqlite,writing_records 在 workflow.sqlite;DB IO 同步执行(GRDB 内部已 thread-safe)。
 struct WritingCaptureStore: Sendable {
 
     /// Services 启动时填上。
     @MainActor static var shared: WritingCaptureStore?
 
-    let dbPool: DatabasePool
+    let inputPool: DatabasePool
+    let workflowPool: DatabasePool
 
-    init(dbPool: DatabasePool) {
-        self.dbPool = dbPool
+    init(inputPool: DatabasePool, workflowPool: DatabasePool) {
+        self.inputPool = inputPool
+        self.workflowPool = workflowPool
     }
 
     func keystrokesInRange(
         startMs: Int64, endMs: Int64, excludeBundleIds: Set<String>
     ) throws -> [KeystrokeEntry] {
-        try dbPool.read { db in
+        try inputPool.read { db in
             if excludeBundleIds.isEmpty {
                 return try KeystrokeEntry.fetchAll(
                     db,
@@ -50,7 +52,7 @@ struct WritingCaptureStore: Sendable {
     /// Memory → Input 左列:各 app 记下了字符的击键数,最近打字的排前面。
     /// 字符全被抹掉的 app(密码类 / 黑名单)自然不出现。
     func keystrokeAppSummaries() throws -> [InputAppSummary] {
-        try dbPool.read { db in
+        try inputPool.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT bundle_id, COUNT(*) AS n, MAX(ts_ms) AS last FROM keystroke_log
                 WHERE char IS NOT NULL GROUP BY bundle_id ORDER BY last DESC
@@ -60,7 +62,7 @@ struct WritingCaptureStore: Sendable {
 
     /// 某 app 在 `beforeMs` 之前最近的 `limit` 次击键,按时间升序返回。
     func keystrokesForApp(_ app: String, beforeMs: Int64, limit: Int) throws -> [KeystrokeEntry] {
-        try dbPool.read { db in
+        try inputPool.read { db in
             try KeystrokeEntry.fetchAll(db, sql: """
                 SELECT id, ts_ms, bundle_id, char, is_backspace, modifiers FROM keystroke_log
                 WHERE bundle_id = :app AND ts_ms < :before
@@ -71,7 +73,7 @@ struct WritingCaptureStore: Sendable {
 
     /// 按 record id 反查它所属的 (app, url) 分组 —— writing-style chip 跳转用。
     func groupForRecord(id: Int64) -> (app: String, url: String)? {
-        try? dbPool.read { db -> (String, String)? in
+        try? workflowPool.read { db -> (String, String)? in
             guard let r = try Row.fetchOne(
                 db, sql: "SELECT app, url FROM writing_records WHERE id = :id",
                 arguments: ["id": id]) else { return nil }
@@ -83,7 +85,7 @@ struct WritingCaptureStore: Sendable {
     /// 按 record id 反查它的 start_ts(毫秒)—— Neural Graph 的 Input 图跳转定位用
     /// (先据此切到该 record 所在那天)。record 不存在返回 nil。
     func writingRecordStartTs(id: Int64) -> Int64? {
-        try? dbPool.read { db in
+        try? workflowPool.read { db in
             try Int64.fetchOne(
                 db, sql: "SELECT start_ts FROM writing_records WHERE id = :id",
                 arguments: ["id": id])
@@ -94,7 +96,7 @@ struct WritingCaptureStore: Sendable {
     func writingRecordPreviews(ids: [Int64]) -> [Int64: String] {
         guard !ids.isEmpty else { return [:] }
         let inList = ids.map(String.init).joined(separator: ",")
-        return (try? dbPool.read { db -> [Int64: String] in
+        return (try? workflowPool.read { db -> [Int64: String] in
             var out: [Int64: String] = [:]
             for r in try Row.fetchAll(db, sql: "SELECT id, text FROM writing_records WHERE id IN (\(inList))") {
                 let id: Int64? = r["id"]; let t: String? = r["text"]

@@ -66,20 +66,19 @@ enum PremiumCLI {
             return
         }
         _ = ConfigStore.shared    // 先加载配置:上传请求带的名字读 ConfigStore.snapshot
-        let db = try PortraitDBImpl()
+        let pools = try DBPools.open()
         if args.contains("--premium-export") {
             if let dirArg = value(after: "--dry-run-dir", in: args) {
                 guard let from = value(after: "--interval-from", in: args).flatMap({ Int64($0) }),
                       let to = value(after: "--interval-to", in: args).flatMap({ Int64($0) }), to > from else {
                     throw CLIError(message: "--dry-run-dir needs --interval-from <ms> --interval-to <ms> (to > from)")
                 }
-                let input = try PremiumExchangeExporter.gatherDryRunInput(dbPool: db.dbPool, fromMs: from, toMs: to)
+                let input = try PremiumExchangeExporter.gatherDryRunInput(pools: pools, fromMs: from, toMs: to)
                 let parent = URL(fileURLWithPath: (dirArg as NSString).expandingTildeInPath, isDirectory: true)
-                let pool = db.dbPool
                 let dir = try await Task.detached {
                     try PremiumExchangeExporter.writeBundle(
                         input: input, bundleId: PremiumExchange.makeBundleId(),
-                        root: Storage.rootURL, parentDir: parent, dbPool: pool)
+                        root: Storage.rootURL, parentDir: parent, pools: pools)
                 }.value
                 let iv = input.pending.eventIntervals.first
                 print("[premium-export] dry-run bundle: \(dir.path)")
@@ -88,7 +87,7 @@ enum PremiumCLI {
                 return
             }
             if args.contains("--seal-check") {
-                let r = await PremiumExchangeExporter.runSealCheck(dbPool: db.dbPool, lockWait: 600, importFirst: true)
+                let r = await PremiumExchangeExporter.runSealCheck(pools: pools, lockWait: 600, importFirst: true)
                 let sealed = r.sealed.map { "\($0.id) \($0.trigger) \($0.frameCount) frame(s)" }
                 let export = r.export.map { e -> String in
                     if case .skipped(let why) = e { return "skipped: \(why)" }
@@ -105,13 +104,13 @@ enum PremiumCLI {
                 if !quiet { appendHelperLog(line) }
                 return
             }
-            let r = await PremiumExchangeExporter.exportNow(dbPool: db.dbPool, lockWait: 600)
+            let r = await PremiumExchangeExporter.exportNow(pools: pools, lockWait: 600)
             print("[premium-export] \(r)")
             if case .skipped(let why) = r { throw CLIError(message: why) }
             return
         }
         if args.contains("--premium-import") {
-            let (reports, failed) = await PremiumExchangeImporter.runIfNeeded(dbPool: db.dbPool, notify: false,
+            let (reports, failed) = await PremiumExchangeImporter.runIfNeeded(dbPool: pools.workflow, notify: false,
                                                                              retryFailed: true)
             if reports.isEmpty && failed == 0 { print("[premium-import] nothing imported") }
             for r in reports {
@@ -122,7 +121,7 @@ enum PremiumCLI {
             return
         }
         if let id = value(after: "--premium-rollback", in: args) {
-            try PremiumExchangeImporter.rollback(bundleId: id, root: Storage.rootURL, dbPool: db.dbPool)
+            try PremiumExchangeImporter.rollback(bundleId: id, root: Storage.rootURL, dbPool: pools.workflow)
             print("[premium-rollback] restored trees + ledger rows from backup \(id)")
             return
         }
@@ -581,15 +580,17 @@ enum PremiumImportSelfTest {
         defer { R.transportOverride = nil }
         let cfg = PremiumConfig()
 
-        let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("reach.sqlite").path).dbPool
-        let store = EventIntervalStore(dbPool: pool)
+        let pools = try DBPools.open(in: tmp.appendingPathComponent("reach", isDirectory: true))
+        let store = EventIntervalStore(pools: pools)
         let m: Int64 = 60_000, h: Int64 = 3_600_000
         let t0 = Int64(ISO8601DateFormatter().date(from: "2026-01-02T00:00:00Z")!.timeIntervalSince1970 * 1000)
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: """
                 INSERT INTO processing_log (date, raw_status, event_status, impact_status, updated_at_ms)
                 VALUES ('2026-01-01', 'complete', 'complete', 'complete', 0)
                 """)
+        }
+        try await pools.screen.write { db in
             for t in stride(from: t0 + h, through: t0 + 10 * h, by: Int(5 * m)) {
                 try db.execute(sql: """
                     INSERT INTO frames (timestamp_ms, app_name, snapshot_path, capture_trigger, full_text, created_at_ms)
@@ -628,7 +629,7 @@ enum PremiumImportSelfTest {
                                                   personalityDays: [], distillPending: false, classifyPending: false,
                                                   writingStyleEnabled: false, writingRecordsUnprocessed: 0),
                             processingLog: [], aboutUserBlock: "", params: selftestParams, appVersion: "selftest")
-                        let r = try E.packageForUpload(input: input, root: root, dbPool: pool)
+                        let r = try E.packageForUpload(input: input, root: root, pools: pools)
                         if case .exported(let id, _) = r {
                             R.updateState(root) { s in
                                 s.uploads.append(.init(bundleId: id, trigger: "nightly", chains: ["event"],
@@ -757,13 +758,13 @@ enum PremiumImportSelfTest {
     private static func checkEventSession(tmp: URL) async throws {
         print("[premium-selftest] event session contents")
         let fm = FileManager.default
-        let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("session.sqlite").path).dbPool
+        let pools = try DBPools.open(in: tmp.appendingPathComponent("session-db", isDirectory: true))
         let media = tmp.appendingPathComponent("session-media", isDirectory: true)
         try fm.createDirectory(at: media, withIntermediateDirectories: true)
         let mp4 = media.appendingPathComponent("mmain_1000.mp4"), jpg = media.appendingPathComponent("1600_mmain.jpg")
         try Data("mp4".utf8).write(to: mp4)
         try Data("jpg".utf8).write(to: jpg)
-        try await pool.write { db in
+        try await pools.screen.write { db in
             try db.execute(sql: """
                 INSERT INTO video_chunks (id, file_path, device_name, fps, start_ts_ms, end_ts_ms, frame_count, created_at_ms)
                 VALUES (7, :p, 'main', 1, 1000, 1400, 2, 1)
@@ -776,6 +777,8 @@ enum PremiumImportSelfTest {
                     VALUES (:t, 'App', :snap, :chunk, :offset, 'click', 'text', '[{"text":"text"}]', 'normal', 'App', :t)
                     """, arguments: ["t": t, "snap": snap, "chunk": chunk, "offset": offset])
             }
+        }
+        try await pools.input.write { db in
             for t in [Int64(1200), 1700, 2500] {
                 try db.execute(sql: """
                     INSERT INTO keystroke_log (ts_ms, bundle_id, char, is_backspace, modifiers) VALUES (:t, 'app', 'a', 0, 0)
@@ -800,7 +803,7 @@ enum PremiumImportSelfTest {
                 processingLog: [], aboutUserBlock: "", params: selftestParams, appVersion: "selftest")
             return try PremiumExchangeExporter.writeBundle(input: input, bundleId: id, root: root,
                                                          parentDir: tmp.appendingPathComponent("session", isDirectory: true),
-                                                         dbPool: pool)
+                                                         pools: pools)
         }
         func lines(_ d: URL, _ rel: String) -> [[String: Any]] {
             (read(d.appendingPathComponent(rel)) ?? "").split(separator: "\n").compactMap {
@@ -874,13 +877,13 @@ enum PremiumImportSelfTest {
               "reprocess: only layers handed to Premium are sent, the rest reported with what they use")
 
         // 2026-01-02(偏移 0):区间台账从 10:00 开始,10:00–20:00、20:00–次日 05:00 两个区间,之前有两帧。
-        let pool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo.sqlite").path).dbPool
+        let pools = try DBPools.open(in: tmp.appendingPathComponent("redo-db", isDirectory: true))
         let iso = ISO8601DateFormatter()
         func ms(_ s: String) -> Int64 { Int64(iso.date(from: s)!.timeIntervalSince1970 * 1000) }
         let day0 = ms("2026-01-02T00:00:00Z"), t0 = ms("2026-01-02T10:00:00Z")
         let t20 = ms("2026-01-02T20:00:00Z"), n5 = ms("2026-01-03T05:00:00Z"), n8 = ms("2026-01-03T08:00:00Z")
         let frameTs = [ms("2026-01-02T08:00:00Z"), ms("2026-01-02T09:00:00Z"), ms("2026-01-02T11:00:00Z")]
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: "INSERT INTO personality_days (day, tz_offset_min, status, retry_count, updated_at_ms) VALUES ('2026-01-02', 0, 'complete', 0, 0)")
             for (id, s, e, trig) in [("iv:origin", t0, t0, "origin"), ("iv:a", t0, t20, "gap"), ("iv:b", t20, n5, "gap"),
                                      ("iv:c", n5, n8, "gap")] {
@@ -890,6 +893,8 @@ enum PremiumImportSelfTest {
                     VALUES (:id, :s, :e, 0, :e, :t, 0, 1000, 'complete', 'complete', 0, 0)
                     """, arguments: ["id": id, "s": s, "e": e, "t": trig])
             }
+        }
+        try await pools.screen.write { db in
             for t in frameTs {
                 try db.execute(sql: """
                     INSERT INTO frames (timestamp_ms, app_name, snapshot_path, capture_trigger, full_text, created_at_ms)
@@ -897,11 +902,11 @@ enum PremiumImportSelfTest {
                     """, arguments: ["t": t])
             }
         }
-        check(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-02") && !(try E.redoDayHasFrames(dbPool: pool, day: "2026-01-05")),
+        check(try E.redoDayHasFrames(pools: pools, day: "2026-01-02") && !(try E.redoDayHasFrames(pools: pools, day: "2026-01-05")),
               "reprocess: a day without frames is reported as empty instead of sent")
         let all = R.Redo(id: "r9", days: ["2026-01-02"], chains: ["event_session", "event", "portrait", "personality"])
         let full = try await MainActor.run {
-            try E.gatherRedoInput(dbPool: pool, redo: all, day: "2026-01-02", contents: R.eventSessionContents)
+            try E.gatherRedoInput(pools: pools, redo: all, day: "2026-01-02", contents: R.eventSessionContents)
         }
         let ivs = full.pending.eventIntervals
         check(ivs.map(\.id) == ["redo:\(day0)", "iv:a", "iv:b"] && ivs[0].endMs == t0 && ivs[0].frameCount == 2
@@ -912,11 +917,11 @@ enum PremiumImportSelfTest {
               && full.redo == [PremiumRedoEntry(id: "r9", day: "2026-01-02", chains: all.chains, intervals: ivs.map(\.id))],
               "reprocess a day: every interval touching it re-clustered, the part before the interval ledger as a redo: interval, its personality day")
         let portrait = try await MainActor.run {
-            try E.gatherRedoInput(dbPool: pool, redo: R.Redo(id: "r8", days: [], chains: ["portrait", "personality"]),
+            try E.gatherRedoInput(pools: pools, redo: R.Redo(id: "r8", days: [], chains: ["portrait", "personality"]),
                                   day: "2026-01-02", contents: ["ocr"])
         }
         let pers = try await MainActor.run {
-            try E.gatherRedoInput(dbPool: pool, redo: R.Redo(id: "r7", days: [], chains: ["personality"]), day: "2026-01-02",
+            try E.gatherRedoInput(pools: pools, redo: R.Redo(id: "r7", days: [], chains: ["personality"]), day: "2026-01-02",
                                   contents: ["ocr"])
         }
         check(portrait.pending.eventIntervals.isEmpty && portrait.pending.distillPending && portrait.chains == ["portrait", "personality"]
@@ -925,7 +930,7 @@ enum PremiumImportSelfTest {
 
         let root = tmp.appendingPathComponent("redo-root", isDirectory: true)
         try fm.createDirectory(at: root.appendingPathComponent("events", isDirectory: true), withIntermediateDirectories: true)
-        let ids = await E.packRedoDay(full, dbPool: pool, root: root) ?? []
+        let ids = await E.packRedoDay(full, pools: pools, root: root) ?? []
         let unpacked = tmp.appendingPathComponent("redo-unpacked", isDirectory: true)
         if let id = ids.first { try R.unpack(R.archiveURL(root, id), into: unpacked) }
         let man = try? JSONDecoder().decode(PremiumBundleManifest.self, from: Data(contentsOf: unpacked.appendingPathComponent("manifest.json")))
@@ -953,7 +958,7 @@ enum PremiumImportSelfTest {
         let suite = "premium-redo-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let ipool = try PortraitDBImpl(path: tmp.appendingPathComponent("redo-import.sqlite").path).dbPool
+        let ipool = try DBPools.open(in: tmp.appendingPathComponent("redo-import", isDirectory: true)).workflow
         let rep = try PremiumExchangeImporter.importBundle(id: rm.bundleId, dir: res, root: iroot, dbPool: ipool, defaults: defaults)
         check(read(iroot.appendingPathComponent(rels[0])) == "NEW" && !fm.fileExists(atPath: iroot.appendingPathComponent(rels[1]).path)
               && read(iroot.appendingPathComponent(rels[2])) == "LOCAL" && rep.conflicts == [rels[2]],
@@ -963,9 +968,9 @@ enum PremiumImportSelfTest {
     /// 区间台账 + personality 就绪 + v2 输入包,在独立的临时库上跑(时区偏移固定 0)。
     private static func checkLedger(tmp: URL) async throws {
         let fm = FileManager.default
-        let dbImpl = try PortraitDBImpl(path: tmp.appendingPathComponent("ledger.sqlite").path)
-        let pool = dbImpl.dbPool
-        let store = EventIntervalStore(dbPool: pool)
+        let pools = try DBPools.open(in: tmp.appendingPathComponent("ledger", isDirectory: true))
+        let pool = pools.screen
+        let store = EventIntervalStore(pools: pools)
         let m: Int64 = 60_000, h: Int64 = 3_600_000
         let t0 = Int64(ISO8601DateFormatter().date(from: "2026-01-02T00:00:00Z")!.timeIntervalSince1970 * 1000)
         func date(_ ms: Int64) -> Date { Date(timeIntervalSince1970: Double(ms) / 1000) }
@@ -983,7 +988,7 @@ enum PremiumImportSelfTest {
             try pool.read { db in try Int.fetchOne(db, sql: sql, arguments: args) ?? 0 }
         }
 
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: """
                 INSERT INTO processing_log (date, raw_status, event_status, impact_status, updated_at_ms)
                 VALUES ('2026-01-01', 'complete', 'complete', 'complete', 0)
@@ -1016,10 +1021,18 @@ enum PremiumImportSelfTest {
                   "ledger: run_now interval [last cut, now − 60 s)")
         }
         let lastCut = try store.lastCut() ?? 0
-        let wrong = try counted("""
+        // 帧和区间在两个库里:临时连接上 ATTACH workflow 再查。
+        func crossCounted(_ sql: String, _ args: StatementArguments) throws -> Int {
+            let q = try DatabaseQueue(path: pool.path)
+            return try q.inDatabase { db in
+                try db.execute(sql: "ATTACH DATABASE :p AS workflow", arguments: ["p": pools.workflow.path])
+                return try Int.fetchOne(db, sql: sql, arguments: args) ?? 0
+            }
+        }
+        let wrong = try crossCounted("""
             SELECT COUNT(*) FROM frames f
             WHERE f.timestamp_ms >= :t0 AND f.timestamp_ms < :cut AND (
-              SELECT COUNT(*) FROM event_intervals i
+              SELECT COUNT(*) FROM workflow.event_intervals i
               WHERE i.id != 'iv:origin' AND f.timestamp_ms >= i.start_ms AND f.timestamp_ms < i.end_ms
                 AND f.id > i.after_frame_id AND f.id <= i.max_frame_id) != 1
             """, ["t0": t0, "cut": lastCut])
@@ -1040,7 +1053,7 @@ enum PremiumImportSelfTest {
         check(try store.needsWork(nowMs: now).map(\.trigger) == ["gap", "backfill", "run_now"],
               "ledger: needsWork lists new intervals by start")
         let s1Id = s1.first?.id ?? ""
-        try await pool.write { db in
+        try await pools.workflow.write { db in
             try db.execute(sql: "UPDATE event_intervals SET trigger = 'nightly' WHERE id = :id", arguments: ["id": s1Id])
         }
         check(try store.interval(id: s1Id)?.trigger == "gap", "ledger: a row stored as nightly reads as gap")
@@ -1106,7 +1119,7 @@ enum PremiumImportSelfTest {
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let dir = try PremiumExchangeExporter.writeBundle(input: input, bundleId: "20260103T000000Z-v2", root: root,
                                                         parentDir: tmp.appendingPathComponent("v2", isDirectory: true),
-                                                        dbPool: pool)
+                                                        pools: pools)
         let raw = try Data(contentsOf: dir.appendingPathComponent("manifest.json"))
         let manifest = try JSONDecoder().decode(PremiumBundleManifest.self, from: raw)
         let obj = try JSONSerialization.jsonObject(with: raw) as? [String: Any] ?? [:]
@@ -1140,7 +1153,7 @@ enum PremiumImportSelfTest {
         noOCR.contents = []
         let dirNoOCR = try PremiumExchangeExporter.writeBundle(input: noOCR, bundleId: "20260103T000001Z-v2", root: root,
                                                              parentDir: tmp.appendingPathComponent("v2", isDirectory: true),
-                                                             dbPool: pool)
+                                                             pools: pools)
         let manNoOCR = try JSONDecoder().decode(PremiumBundleManifest.self,
                                                 from: Data(contentsOf: dirNoOCR.appendingPathComponent("manifest.json")))
         check(manifest.contents == ["ocr"] && ocrTexts(dir).contains { !$0.isEmpty }
@@ -1163,8 +1176,9 @@ enum PremiumImportSelfTest {
         defer { try? fm.removeItem(at: tmp) }
         print("[premium-selftest] temp root: \(tmp.path)")
 
-        let dbImpl = try PortraitDBImpl(path: root.appendingPathComponent("portrait.sqlite").path)
-        let pool = dbImpl.dbPool
+        let dbDir = tmp.appendingPathComponent("db", isDirectory: true)
+        let pools = try DBPools.open(in: dbDir)
+        let pool = pools.workflow
         let suite = "premium-selftest-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -1229,8 +1243,8 @@ enum PremiumImportSelfTest {
         for rel in PremiumExchange.listTreeFiles(root: root) {
             try write(read(root.appendingPathComponent(rel)) ?? "", pkRoot.appendingPathComponent(rel))
         }
-        let e1 = try PremiumExchangeExporter.packageForUpload(input: input, root: pkRoot, dbPool: pool)
-        let e2 = try PremiumExchangeExporter.packageForUpload(input: input, root: pkRoot, dbPool: pool)
+        let e1 = try PremiumExchangeExporter.packageForUpload(input: input, root: pkRoot, pools: pools)
+        let e2 = try PremiumExchangeExporter.packageForUpload(input: input, root: pkRoot, pools: pools)
         var nightlyManifest: PremiumBundleManifest?
         if case .exported(let id1, let arc1) = e1, case .exported(let id2, _) = e2 {
             let dir1 = tmp.appendingPathComponent("unpacked-e1", isDirectory: true)
@@ -1251,8 +1265,8 @@ enum PremiumImportSelfTest {
 
         // —— 分片包:只写 [part_from_ms, part_to_ms) 的帧,manifest 带上分片范围 ——
         print("[premium-selftest] interval part")
-        let partPool = try PortraitDBImpl(path: tmp.appendingPathComponent("parts.sqlite").path).dbPool
-        try await partPool.write { db in
+        let partPools = try DBPools.open(in: tmp.appendingPathComponent("parts", isDirectory: true))
+        try await partPools.screen.write { db in
             for t in [Int64(1100), 1300, 1500, 1600, 1900] {
                 try db.execute(sql: """
                     INSERT INTO frames (timestamp_ms, app_name, snapshot_path, capture_trigger, full_text, created_at_ms)
@@ -1267,7 +1281,7 @@ enum PremiumImportSelfTest {
         secondHalf.partFromMs = 1500; secondHalf.partToMs = 2000
         func frameTimes(_ iv: PremiumIntervalEntry) throws -> [Int64] {
             let url = tmp.appendingPathComponent("part-\(UUID().uuidString).jsonl")
-            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, mediaInto: nil, dbPool: partPool)
+            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, mediaInto: nil, pools: partPools)
             return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").compactMap {
                 (try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["timestamp_ms"] as? Int64
             }
@@ -1291,7 +1305,7 @@ enum PremiumImportSelfTest {
         rnInput.pending = input.pending.only(["portrait"])
         let rnParent = tmp.appendingPathComponent("runnow-parent", isDirectory: true)
         let rnDir = try PremiumExchangeExporter.writeBundle(input: rnInput, bundleId: "20260101T000001Z-rn",
-                                                          root: root, parentDir: rnParent, dbPool: pool)
+                                                          root: root, parentDir: rnParent, pools: pools)
         let rnManifest = try JSONDecoder().decode(
             PremiumBundleManifest.self, from: Data(contentsOf: rnDir.appendingPathComponent("manifest.json")))
         check(rnManifest.trigger == "nightly" && rnManifest.chains == ["portrait"]
@@ -1420,7 +1434,7 @@ enum PremiumImportSelfTest {
         check(read(q) == "Q0", "_quarantine untouched")
         check(r1.written == 2 && r1.deleted == 1 && r1.conflicts.count == 1,
               "report counts (written 2, deleted 1, conflicts 1) — got \(r1.written)/\(r1.deleted)/\(r1.conflicts.count)")
-        let row = ProcessingLogStore(path: root.appendingPathComponent("portrait.sqlite").path).row(for: "2026-01-01")
+        let row = ProcessingLogStore(path: dbDir.appendingPathComponent("workflow.sqlite").path).row(for: "2026-01-01")
         check(row?.event == .complete && row?.impact == .complete && row?.personality == .pending,
               "processing_log upserted by column")
         check(try count(pool, "SELECT COUNT(*) FROM processing_log WHERE date='_distill_anchor' AND distill_status='complete'") == 1,
@@ -1466,7 +1480,7 @@ enum PremiumImportSelfTest {
         print("[premium-selftest] rollback")
         try PremiumExchangeImporter.rollback(bundleId: id, root: root, dbPool: pool)
         check(PremiumExchange.hashTrees(root: root) == preImport, "trees restored to pre-import state")
-        let back = ProcessingLogStore(path: root.appendingPathComponent("portrait.sqlite").path).row(for: "2026-01-01")
+        let back = ProcessingLogStore(path: dbDir.appendingPathComponent("workflow.sqlite").path).row(for: "2026-01-01")
         check(back?.event == .pending && back?.impact == .idle, "processing_log row restored")
         check(try count(pool, "SELECT COUNT(*) FROM processing_log WHERE date='_distill_anchor'") == 0,
               "anchor row inserted by import removed")

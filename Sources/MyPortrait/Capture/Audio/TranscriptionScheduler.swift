@@ -708,7 +708,7 @@ actor TranscriptionScheduler {
         }
     }
 
-    /// 转录完(或重试用完、彻底失败)的段搬出 `audio_queue/`(10-27 update):WAV 和 .meta.json 挪进 `raw_data/audio/<日>/`,
+    /// 转录完(或重试用完、彻底失败)的段搬出 `metadata/audio_queue/`(10-27 update):WAV 和 .meta.json 挪进 `metadata/audio/<日>/`,
     /// 旧版写在旁边的 .transcript.json 挪进 `metadata/transcript/<日>/`,再改库里的路径。
     /// 文件早就不在的段(删过的)也把路径改过去,免得每轮都被扫到。
     private func archiveTranscribed() async {

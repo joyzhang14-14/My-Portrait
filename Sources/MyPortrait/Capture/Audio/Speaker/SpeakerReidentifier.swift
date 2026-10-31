@@ -33,7 +33,7 @@ actor SpeakerReidentifier {
             let ex = try SpeakerEmbeddingExtractor(modelPath: mp.path, fbank: FbankExtractor())
             var dbCfg = Configuration()
             dbCfg.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
-            let q = try DatabaseQueue(path: Storage.portraitDBPath, configuration: dbCfg)
+            let q = try DatabaseQueue(path: Storage.audioDBPath, configuration: dbCfg)
 
             // 2. gallery(当前模型,非幻听):每人 centroid + 存的样本
             let cands: [Cand] = try await q.read { db in

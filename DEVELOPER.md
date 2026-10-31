@@ -134,30 +134,38 @@ skips it (a GB-scale OCR corpus being full-text indexed by `mdworker` is not fre
 ```
 ~/.portrait/
 ├── config.toml                     # user-editable TOML  (Settings/ConfigStore)
-├── portrait.sqlite                 # frames / video_chunks / OCR / audio / transcriptions / FTS
+├── metadata/                       # capture data: three databases + the media they reference
+│   ├── screen.sqlite               # frames / frames_fts / video_chunks / ocr_pending
+│   ├── audio.sqlite                # audio_chunks / transcriptions / transcriptions_fts / speakers
+│   ├── input.sqlite                # keystroke_log / mouse_log / typing_events / clipboard_log
+│   ├── frames/<date>/{ts_ms}_m{monitor}.jpg    # hot JPG tier
+│   ├── video/<date>/m{id}_{startTs}.mp4        # HEVC compaction tier
+│   ├── audio/<date>/               # transcribed WAV + .meta.json
+│   ├── audio_queue/                # VAD-segmented WAV waiting for transcription
+│   ├── transcript/<date>/          # JSON copies of transcripts (the database is authoritative)
+│   └── voice_training/<speaker_id>.wav
+├── pipeline/
+│   ├── workflow.sqlite             # event_intervals / personality_days / processing_log / writing style
+│   ├── logs/                       # append-only pipeline maintenance log (budget, archive)
+│   └── llm_dump/                   # unparseable model replies, kept for debugging
 ├── secrets/                        # provider credentials: secrets.sqlite + its AES master.key
 ├── portrait/<category>/            # long-term distilled portrait (one dir per category)
 ├── events/<yyyy-MM-dd>/            # semantic event files (one .md per event)
-├── pipeline/logs/                  # append-only pipeline maintenance log (budget, archive)
 ├── logs/                           # daily raw JSON
-├── raw_data/
-│   ├── frames/<date>/{ts_ms}_m{monitor}.jpg    # hot JPG tier
-│   └── video/<date>/m{id}_{startTs}.mp4        # HEVC compaction tier
-├── audio_queue/                    # VAD-segmented WAV + deferred-transcription queue
-├── metadata/voice_training/<speaker_id>.wav
 ├── runtime/                        # auto-installed agent runtime: bun/, pi-agent/, bin/ (PATH dir for agents)
 └── models/                         # local model cache
 ```
 
-Both SQLite databases run **WAL**. All timestamps are **INTEGER UTC milliseconds** (§6.1).
+All SQLite databases run **WAL**. `DBPools` opens the four pools; `DBSplitMigration` split the
+old single `portrait.sqlite` once (progress in `.staging/db-split.json`, `"stage": "done"` when finished). All timestamps are **INTEGER UTC milliseconds** (§6.1).
 
 ### End-to-end dataflow
 
 ```
 Screen ──► dedupe ──► JPG (returns immediately) ──┬──► OCR (Vision) ──┐
                                                   └──► DB insert ─────┤
-Mic + system audio ──► VAD ──► queue ──► transcribe ──► diarize ──────┼──► portrait.sqlite
-Keystrokes + AX ──► IME state machine ──► diff ──► writing records ───┘        + raw_data/
+Mic + system audio ──► VAD ──► queue ──► transcribe ──► diarize ──────┼──► metadata/*.sqlite
+Keystrokes + AX ──► IME state machine ──► diff ──► writing records ───┘     + metadata/ media
                                                                                     │
                                                                                     ▼
                                           per interval ┌──────────────────────────────┐
@@ -327,7 +335,7 @@ it and see the change without rebuilding.
 
 | Follows dev mode                             | Always real                                     |
 | -------------------------------------------- | ----------------------------------------------- |
-| `Storage.uiRootURL` — events, portrait       | `Storage.rootURL` — the capture DB, `raw_data/` |
+| `Storage.uiRootURL` — events, portrait       | `Storage.rootURL` — the databases, `metadata/`  |
 | UI-facing config sections                    | credentials (`secrets.sqlite`)                  |
 
 Two paths that must not disagree are the classic bug source here: a background job writing
@@ -339,7 +347,7 @@ which root it belongs to and use the explicit accessor — never `uiRootURL` by 
 Read-only is always safe:
 
 ```bash
-sqlite3 "file:$HOME/.portrait/portrait.sqlite?mode=ro" \
+sqlite3 "file:$HOME/.portrait/metadata/screen.sqlite?mode=ro" \
   "SELECT id, timestamp_ms, app_name FROM frames ORDER BY timestamp_ms DESC LIMIT 5;"
 ```
 
@@ -398,8 +406,10 @@ the custom tokenizer, which is registered only in GRDB's `prepareDatabase`. Any 
 errors inside the trigger and rolls back. CLI data fixes may only touch tables with no FTS
 trigger (e.g. `speakers`, `speaker_embeddings`).
 
-**Migrations are append-only.** A shipped `DatabaseMigrator` migration must never be edited —
-clients have already applied it. Removed-feature columns therefore stay as dead columns; unused
+**Migrations are append-only.** Each database has its own migrator that starts from a baseline
+(`screen_v1` / `audio_v1` / `input_v1` / `workflow_v1`, see `DB/Schema.swift`); schema changes are
+new migrations appended to the matching database's migrator. A shipped migration must never be
+edited — clients have already applied it. Removed-feature columns therefore stay as dead columns; unused
 BLOBs live on overflow pages, so not reading them costs nothing. Do not confuse the dead
 text-embedding columns with the **live** speaker voiceprint vectors.
 
@@ -413,7 +423,7 @@ single-writer/many-reader assumption. UI calls through the `SearchEngine` protoc
 implementation stays swappable.
 
 **The screenpipe source library is read-only.** The importer copies and writes only into
-`portrait.sqlite` / `raw_data/`, tagging imported rows so they are distinguishable. Never write,
+`screen.sqlite` / `audio.sqlite` and the media under `metadata/`, tagging imported rows so they are distinguishable. Never write,
 move or delete anything under `~/.screenpipe` — `cp`, never `mv`.
 
 ### 6.2 Build and dependencies
@@ -558,7 +568,7 @@ provider is connected, and leaves it unselected otherwise; chains changed by han
 
 **Event intervals.** The event chain (with impact and classify) works on *intervals*, not days:
 half-open UTC-ms ranges `[start_ms, end_ms)` between long idle gaps, one row each in
-`event_intervals` (portrait.sqlite, migration `v44_event_intervals`). Both the local path and
+`event_intervals` (`pipeline/workflow.sqlite`). Both the local path and
 the Premium path read the same ledger (`EventIntervalStore`); statuses follow processing_log
 semantics (`ProcessingStatus`, `retry_count`, `MemoryScheduler.backoffMs`) and advance only
 from processing results (a local run or an imported Premium result), never from sending a bundle.

@@ -47,15 +47,14 @@ enum OcrBackfillCLI {
 
     private static func backfill(limit: Int?, day: String?, force: Bool,
                                  minId: Int64?) async throws -> Int {
-        let dbPath = NSString(string: "~/.portrait/portrait.sqlite").expandingTildeInPath
+        let dbPath = Storage.screenDBPath
         var config = Configuration()
         config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
         // app 在前台跑时会持有写锁;等而不是立刻失败(默认 busyMode 是 .immediateError)。
         config.busyMode = .timeout(30)
         let dbPool = try DatabasePool(path: dbPath, configuration: config)
-        // CLI 不经过 PortraitDBImpl.init,schema 可能还停在旧版本(v43 的补跑列
-        // 是本次新增)。migrator 幂等,已迁移过就是空操作。
-        try DBSchema.migrator().migrate(dbPool)
+        // CLI 不经过 Services,自己跑一遍 screen 的迁移(幂等,已迁移过就是空操作)。
+        try DBSchema.screenMigrator().migrate(dbPool)
         let root = NSString(string: "~/.portrait").expandingTildeInPath
 
         let range = day.flatMap(utcDayRange)

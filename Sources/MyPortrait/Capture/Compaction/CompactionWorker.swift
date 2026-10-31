@@ -12,7 +12,7 @@ import os.log
 ///   4. 每组按时间排序，切成 ≤ 60s 时长的 chunk（≤ 100 帧为安全帽）
 ///   5. 每个 chunk：
 ///       - 探第一帧拿尺寸
-///       - HEVCEncoder 编码 → 写 raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4
+///       - HEVCEncoder 编码 → 写 metadata/video/YYYY-MM-DD/m{id}_{startTs}.mp4
 ///       - db.replaceFramesWithVideoChunk（事务）
 ///       - 删除原 JPG 文件
 ///
@@ -135,8 +135,8 @@ actor CompactionWorker {
     /// 枚举 `dir` 下指定扩展名、mtime 早于 `cutoff` 的文件,删掉 DB 不引用的。
     /// 返回删除数。查询失败 → 一个都不删(宁可留垃圾,不误删)。
     ///
-    /// 两道大规模误删护栏 —— 数据树是 relocatable 的,portrait.sqlite 和
-    /// raw_data 是独立文件,用户删库重建 / 只迁移媒体目录时「DB 不引用」
+    /// 两道大规模误删护栏 —— 数据树是 relocatable 的,screen.sqlite 和
+    /// 媒体目录是独立文件,用户删库重建 / 只迁移媒体目录时「DB 不引用」
     /// 不等于「是孤儿」:
     ///  1. 候选不少而 DB 引用为空 → 多半是新建/重置过的库,整目录跳过
     ///  2. 单次删除量超过 sweepMaxRemovals → 只告警不删(误判宁可留垃圾)

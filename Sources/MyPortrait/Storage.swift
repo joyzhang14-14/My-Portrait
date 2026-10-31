@@ -46,14 +46,14 @@ enum Storage {
     /// Subdirs are dates (yyyy-MM-dd).
     static var eventsDir: URL { rootURL.appendingPathComponent("events", isDirectory: true) }
 
-    /// 待转录的录音段(VAD 切好的 WAV + .meta.json)。转录完就搬进 `audioDir/<日>/`,
-    /// 这里只剩还没转的(10-27 update)。
-    static var audioQueueDir: URL { rootURL.appendingPathComponent("audio_queue", isDirectory: true) }
+    /// 待转录的录音段(VAD 切好的 WAV + .meta.json),`~/.portrait/metadata/audio_queue/`。
+    /// 转录完就搬进 `audioDir/<日>/`,这里只剩还没转的。
+    static var audioQueueDir: URL { metadataDir.appendingPathComponent("audio_queue", isDirectory: true) }
 
     /// 转录结果的 JSON 副本,`metadata/transcript/<日>/<段名>.transcript.json`。
-    /// 正本在数据库(audio_transcriptions),这里只是按文件翻看用。
+    /// 正本在 audio.sqlite(audio_transcriptions),这里只是按文件翻看用。
     static var transcriptDir: URL {
-        rootURL.appendingPathComponent("metadata/transcript", isDirectory: true)
+        metadataDir.appendingPathComponent("transcript", isDirectory: true)
     }
 
     /// 一段录音的转录副本位置,按文件名里的日期(`seg_YYYY-MM-DD…`)分目录。
@@ -81,30 +81,44 @@ enum Storage {
         rootURL.appendingPathComponent("pipeline/llm_dump", isDirectory: true)
     }
 
-    // MARK: - Capture layer (Capture/ module)
+    // MARK: - 采集数据(metadata/)和 workflow 数据(pipeline/)
 
-    /// Raw data produced by the capture layer (screen frames + MP4 chunks).
-    /// Owned by `Capture/`. All paths inside this tree are stored RELATIVE
-    /// to `rootURL` so the whole `~/.portrait` folder can be moved or
-    /// shipped to a different user without rewriting any path.
-    static var rawDataDir: URL { rootURL.appendingPathComponent("raw_data", isDirectory: true) }
+    /// `~/.portrait/metadata/` —— 采集到的原始数据:三个库和它们引用的截图、视频、录音。
+    /// 库里存的媒体路径都相对 `rootURL`(`metadata/…`),整个 `~/.portrait` 可以整体搬走。
+    static var metadataDir: URL { rootURL.appendingPathComponent("metadata", isDirectory: true) }
 
-    /// Per-day JPG snapshot directory. Path:
-    /// `~/.portrait/raw_data/frames/YYYY-MM-DD/{ts_ms}_m{monitor}.jpg`.
-    /// Hot-cache only — JPGs are compacted into MP4 chunks after ~10 minutes (P3).
-    static var framesDir: URL { rawDataDir.appendingPathComponent("frames", isDirectory: true) }
+    /// `~/.portrait/pipeline/` —— workflow 加工出来的台账和结果。
+    static var pipelineDir: URL { rootURL.appendingPathComponent("pipeline", isDirectory: true) }
 
-    /// Per-day HEVC MP4 chunk directory (P3+). Path:
-    /// `~/.portrait/raw_data/video/YYYY-MM-DD/m{id}_{startTs}.mp4`.
-    static var videoDir: URL { rawDataDir.appendingPathComponent("video", isDirectory: true) }
+    /// 每天的 JPG 截图:`metadata/frames/YYYY-MM-DD/{ts_ms}_m{monitor}.jpg`。
+    /// 只是热缓存,约 10 分钟后压进 MP4。
+    static var framesDir: URL { metadataDir.appendingPathComponent("frames", isDirectory: true) }
 
-    /// 留存的录音,`~/.portrait/raw_data/audio/YYYY-MM-DD/`:转录完从 `audioQueueDir`
-    /// 搬来的 WAV + .meta.json,以及 screenpipe import 拷进来的音频副本(retention 只删
+    /// 每天的 HEVC MP4:`metadata/video/YYYY-MM-DD/m{id}_{startTs}.mp4`。
+    static var videoDir: URL { metadataDir.appendingPathComponent("video", isDirectory: true) }
+
+    /// 留存的录音,`metadata/audio/YYYY-MM-DD/`:转录完从 `audioQueueDir` 搬来的
+    /// WAV + .meta.json,以及 screenpipe import 拷进来的音频副本(retention 只删
     /// ~/.portrait 里的副本,永不碰只读的 ~/.screenpipe 原始文件)。
-    static var audioDir: URL { rawDataDir.appendingPathComponent("audio", isDirectory: true) }
+    static var audioDir: URL { metadataDir.appendingPathComponent("audio", isDirectory: true) }
 
-    /// SQLite written by the capture layer (frames / video_chunks / OCR / audio).
-    static var portraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
+    /// 屏幕采集:帧、帧全文索引、视频块、OCR 队列。
+    static var screenDBPath: String { metadataDir.appendingPathComponent("screen.sqlite").path }
+    /// 音频采集:录音段、转录、转录全文索引、说话人、声纹。
+    static var audioDBPath: String { metadataDir.appendingPathComponent("audio.sqlite").path }
+    /// 输入采集:击键、鼠标、打字事件、剪贴板。
+    static var inputDBPath: String { metadataDir.appendingPathComponent("input.sqlite").path }
+    /// workflow 的台账和结果:事件区间、性格日、处理台账、写作风格。
+    static var workflowDBPath: String { pipelineDir.appendingPathComponent("workflow.sqlite").path }
+
+    /// 拆库之前的单库和剪贴板库,只给一次性拆库迁移(`DBSplitMigration`)用。
+    static var legacyPortraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
+    static var legacyClipboardDBPath: String { rootURL.appendingPathComponent("clipboard.sqlite").path }
+
+    /// 拆库的锁和进度标记(`~/.portrait/.staging/`)。实验室脚本也读这个标记。
+    static var stagingDir: URL { rootURL.appendingPathComponent(".staging", isDirectory: true) }
+    static var dbSplitLockPath: String { stagingDir.appendingPathComponent("db-split.lock").path }
+    static var dbSplitMarkerPath: String { stagingDir.appendingPathComponent("db-split.json").path }
 
     /// Local model cache (bge-m3 embeddings, future Whisper local cache, etc).
     /// `~/.portrait/models/`.
@@ -122,7 +136,7 @@ enum Storage {
         let fm = FileManager.default
         for url in [
             rootURL, portraitDir, eventsDir, audioQueueDir, dailyLogsDir,
-            pipelineLogsDir, transcriptDir, rawDataDir, framesDir, videoDir,
+            pipelineLogsDir, transcriptDir, metadataDir, pipelineDir, framesDir, videoDir,
             voiceTrainingDir,
         ] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)

@@ -64,23 +64,22 @@ final class Services {
         settings.bindUnimplementedFlag(from: reporter)
         self.settings = settings
 
-        // 真 DB —— 失败抛错冒到 AppDelegate，那边弹 alert 退出。
-        // 失败常见原因：磁盘满 / 权限不对 / migration 失败。开发期罕见。
-        let dbImpl: PortraitDBImpl
+        // 四个库(screen / audio / input / workflow)—— 失败常见原因：磁盘满 / 权限不对 /
+        // migration 失败。启动期 DB 打不开是致命的,直接 fatalError 比挂个 stub 上线更诚实。
+        let pools: DBPools
         do {
-            dbImpl = try PortraitDBImpl()
+            pools = try DBPools.open()
         } catch {
-            // 启动期 DB 打不开是致命的。直接 fatalError 比挂个 stub 上线更诚实。
             fatalError("PortraitDB failed to open: \(error)")
         }
+        let dbImpl = PortraitDBImpl(pools: pools)
         self.db = dbImpl
-        // 共用同一个 DatabasePool（WAL 多 reader 安全）。
-        MemoryScheduler.useLedgerPool(dbImpl.dbPool)
-        MemoryTrim.dbPool = dbImpl.dbPool
+        // 区间台账、Premium 打包和导入共用同一份连接池(WAL 多 reader 安全)。
+        MemoryScheduler.useDBPools(pools)
+        MemoryTrim.dbPools = pools.all
         // 旧帧词框小数截到 5 位,后台一次性跑完(进度在库里,中途退出下次接着跑)。
-        let pool = dbImpl.dbPool
-        Task.detached(priority: .background) { await OCRWordsSlimmer.run(dbPool: pool) }
-        let ftsEngine = FTSSearchEngine(dbPool: dbImpl.dbPool)
+        Task.detached(priority: .background) { await OCRWordsSlimmer.run(dbPool: pools.screen) }
+        let ftsEngine = FTSSearchEngine(screenPool: pools.screen, audioPool: pools.audio)
 
         // 纯 FTS5 关键词搜索。语义搜索（bge-m3 向量 + RRF 融合）已整体移除。
         self.searchEngine = ftsEngine
@@ -124,28 +123,28 @@ final class Services {
         // 不是单例 —— 建好之后接给 CaptureLampState,否则它只能一直报"没权限"。
         CaptureLampState.shared.attach(musicMonitor: musicMonitor, permissions: permissions)
 
-        // 打字采集。共用同一个 DatabasePool（WAL 多 reader 安全）。
+        // 打字采集,写 input.sqlite。
         // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。
-        let typingStore = TypingEventStore(dbPool: dbImpl.dbPool)
-        let keystrokeStore = KeystrokeStore(dbPool: dbImpl.dbPool)
+        let typingStore = TypingEventStore(dbPool: pools.input)
+        let keystrokeStore = KeystrokeStore(dbPool: pools.input)
         self.typingStore = typingStore
         self.typingObserver = TypingObserver(
             store: typingStore,
             keystrokeStore: keystrokeStore,
-            clipboardLogger: ClipboardLogger()
+            clipboardLogger: ClipboardLogger(dbPool: pools.input)
         )
 
-        // Data → Input 读击键的入口(共用同一 DatabasePool)。
-        WritingCaptureStore.shared = WritingCaptureStore(dbPool: dbImpl.dbPool)
+        // Data → Input 读击键(input)和写作记录(workflow)的入口。
+        WritingCaptureStore.shared = WritingCaptureStore(inputPool: pools.input, workflowPool: pools.workflow)
 
         // 一次性把老的 portrait/speech_style/ 文件夹 + .md frontmatter 迁到
         // writing_style/(配套 DB 的 v36 改名 + config 旧 key 回退)。幂等,跑过即
         // no-op。放在 UI / pipeline 读 portrait 之前。
         PortraitPaths.migrateSpeechStyleToWritingStyle()
 
-        // writing_style 提炼链路(独立于写作采集 + memory pipeline)。也共用
-        // 同一 DatabasePool。注册到 WritingStyleDistiller.shared 给 UI / scheduler 用。
-        let ssStore = WritingStyleStore(dbPool: dbImpl.dbPool)
+        // writing_style 提炼链路(独立于写作采集 + memory pipeline),读写 workflow.sqlite。
+        // 注册到 WritingStyleDistiller.shared 给 UI / scheduler 用。
+        let ssStore = WritingStyleStore(dbPool: pools.workflow)
         WritingStyleDistiller.shared = WritingStyleDistiller(store: ssStore)
         // 启动时清残留 zombie processing 行 —— 上次进程崩 / 用户硬退之后
         // 没改回 final status 的 run。

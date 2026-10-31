@@ -32,9 +32,8 @@ private func sqlErr(_ db: OpaquePointer?) -> String {
     sqlite3_errmsg(db).flatMap { String(cString: $0) } ?? "unknown"
 }
 
-/// Read/write client for the unified timeline database
-/// (`~/.portrait/portrait.sqlite`). Same DB the capture layer writes to —
-/// the legacy snapshot was migrated into this schema 2026-05-19.
+/// Read/write client for the capture databases (`~/.portrait/metadata/screen.sqlite`
+/// and `audio.sqlite`). Same files the capture layer writes to.
 ///
 /// Schema highlights (capture / GRDB):
 ///   - `frames.timestamp_ms`  INTEGER  UTC milliseconds since epoch
@@ -97,38 +96,27 @@ struct AudioTranscriptEntry: Identifiable, Hashable {
 }
 
 struct TimelineDB: Sendable {
-    let dbPath: String
+    /// 帧、视频块、OCR 队列。
+    let screenPath: String
+    /// 录音段、转录、说话人。
+    let audioPath: String
+    /// 击键、鼠标、打字事件、剪贴板(只有隐私删除碰)。
+    let inputPath: String
 
-    init(path: String? = nil) {
-        if let path {
-            self.dbPath = path
-            return
-        }
-        // Default order:
-        //   1. User-overridden directory in Settings → Storage → Data directory
-        //      (lets people relocate to an external drive).
-        //   2. The unified capture/timeline DB at ~/.portrait/portrait.sqlite.
-        let userDir = ConfigStore.snapshot.dataDirectory
-        if !userDir.isEmpty {
-            let candidate = (userDir as NSString).expandingTildeInPath
-                + "/portrait.sqlite"
-            if FileManager.default.fileExists(atPath: candidate) {
-                self.dbPath = candidate
-                return
-            }
-        }
-        self.dbPath = Storage.portraitDBPath
+    init(screenPath: String = Storage.screenDBPath, audioPath: String = Storage.audioDBPath,
+         inputPath: String = Storage.inputDBPath) {
+        self.screenPath = screenPath
+        self.audioPath = audioPath
+        self.inputPath = inputPath
     }
 
     // Path resolution is centralised in `AssetPath.resolve` — see
     // PortraitDBImpl + Sources/MyPortrait/AssetPath.swift. TimelineDB
     // delegates so the two read paths agree.
 
-    var exists: Bool {
-        FileManager.default.fileExists(atPath: dbPath)
-    }
+    var screenExists: Bool { FileManager.default.fileExists(atPath: screenPath) }
+    var audioExists: Bool { FileManager.default.fileExists(atPath: audioPath) }
 
-    /// Convert a Swift Date to UTC milliseconds since 1970-01-01.
     private static func dbMs(_ date: Date) -> Int64 {
         Int64(date.timeIntervalSince1970 * 1000)
     }
@@ -159,10 +147,10 @@ struct TimelineDB: Sendable {
     /// `limit` < 0 = 不设上限。按 (timestamp_ms, id) 升序。
     private func queryFrames(startMs: Int64, endMs: Int64, afterId: Int64, maxId: Int64,
                              limit: Int) -> [TimelineFrame] {
-        guard exists else { return [] }
+        guard screenExists else { return [] }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             return []
         }
         defer { sqlite3_close(db) }
@@ -233,10 +221,10 @@ struct TimelineDB: Sendable {
     /// Reads `frames.full_text` directly (capture schema inlines OCR per
     /// frame — no separate ocr_text table).
     func ocrText(forFrameIds frameIds: [Int64], maxChars: Int = 1500) -> String {
-        guard exists, !frameIds.isEmpty else { return "" }
+        guard screenExists, !frameIds.isEmpty else { return "" }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return "" }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return "" }
         defer { sqlite3_close(db) }
 
         // SQLite parameter binding limit is 999 by default — chunk if larger.
@@ -291,10 +279,10 @@ struct TimelineDB: Sendable {
     /// 大小写不敏感)。给 PersonalityRefresh 的 OCR 验证器用,窗口 = 该本地日 [00:00, 24:00)。
     /// 空 keywords → 返回 0。
     func frameCount(fromMs startMs: Int64, toMs endMs: Int64, keywords: [String]) -> Int {
-        guard exists, !keywords.isEmpty else { return 0 }
+        guard screenExists, !keywords.isEmpty else { return 0 }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
 
         // 拼 N 个 LOWER(...) LIKE ? 用 OR 串。SQLite ASCII LIKE 自带
@@ -325,10 +313,10 @@ struct TimelineDB: Sendable {
     /// [startMs, endMs) 里 OCR 文本超过 4 个字的帧数:PersonalityRefresh 关键词命中率的分母,
     /// 文本口径同 frameCount。读库失败返回 nil(调用方按失败重试,不当成有字帧太少的空日)。
     func ocrFrameCount(fromMs startMs: Int64, toMs endMs: Int64) -> Int? {
-        guard exists else { return nil }
+        guard screenExists else { return nil }
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
 
         let sql = """
@@ -349,13 +337,13 @@ struct TimelineDB: Sendable {
     /// Distinct app/window combinations active around the given moment.
     /// Used by the Timeline sidebar's "Active Apps" panel.
     func activeApps(around moment: Date, window: TimeInterval = 45) -> [ActiveAppEntry] {
-        guard exists else { return [] }
+        guard screenExists else { return [] }
 
         let startMs = Self.dbMs(moment.addingTimeInterval(-window))
         let endMs = Self.dbMs(moment.addingTimeInterval(window))
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
         let sql = """
@@ -406,13 +394,13 @@ struct TimelineDB: Sendable {
         after: TimeInterval = 30,
         limit: Int = 60
     ) -> [AudioTranscriptEntry] {
-        guard exists else { return [] }
+        guard audioExists else { return [] }
 
         let startMs = Self.dbMs(moment.addingTimeInterval(-before))
         let endMs = Self.dbMs(moment.addingTimeInterval(after))
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
         // Window by **recording** time, not transcription time — WhisperKit
@@ -479,9 +467,9 @@ struct TimelineDB: Sendable {
     /// Day-bounded set of distinct dates that have at least one frame.
     /// Used to gray-out empty days in the calendar.
     func availableDays(monthsBack: Int = 3) -> Set<DateComponents> {
-        guard exists else { return [] }
+        guard screenExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
         let cutoffMs = Self.dbMs(
@@ -527,9 +515,9 @@ struct TimelineDB: Sendable {
     /// 采集过的所有 app 名（去重），按出现次数从多到少。供 Settings → Privacy
     /// 的 "ignored apps" 下拉用——让用户从真实捕获过的名字里挑，不用猜精确名。
     func distinctAppNames(limit: Int = 200) -> [String] {
-        guard exists else { return [] }
+        guard screenExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(screenPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
 
         let sql = """
@@ -574,8 +562,8 @@ struct TimelineDB: Sendable {
     /// 整条语句连同事务回滚,写入静默失败(详见 `mergeSpeakers` 的长注释)。
     /// GRDB 连接通过 `prepareDatabase` 注册分词器,触发器才能跑通。
     @discardableResult
-    private func withTokenizerWrite<T>(_ body: (Database) throws -> T) -> T? {
-        guard exists else { return nil }
+    private func withTokenizerWrite<T>(at path: String, _ body: (Database) throws -> T) -> T? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
         do {
             var config = Configuration()
             // 主 DatabasePool(capture 每帧写 / 转录写 / compaction 长事务)持有
@@ -584,7 +572,7 @@ struct TimelineDB: Sendable {
             // app 常驻采集 = 写流量持续存在,必须等锁(5s)。
             config.busyMode = .timeout(5)
             config.prepareDatabase { db in db.add(tokenizer: FoundationTokenizer.self) }
-            let queue = try DatabaseQueue(path: dbPath, configuration: config)
+            let queue = try DatabaseQueue(path: path, configuration: config)
             return try queue.write { db in try body(db) }
         } catch {
             timelineLog.error("withTokenizerWrite failed: \(String(describing: error), privacy: .public)")
@@ -592,27 +580,25 @@ struct TimelineDB: Sendable {
         }
     }
 
-    /// Delete frames + audio transcriptions strictly *after* `cutoff`.
+    /// Delete frames + audio transcriptions + input data strictly *after* `cutoff`.
     ///
     /// 隐私删除("Delete last 15m/30m/1h")。只删 DB 行不够:
     ///   - 截图 JPG / 录音 WAV 会留盘成孤儿(敏感内容还在磁盘上);
     ///   - 窗口内还没转录的 audio_chunks 行不删的话,稍后被 TranscriptionScheduler
     ///     转录,敏感文本会在"删除"之后重新出现。
+    /// 这段时间的击键、鼠标、打字事件、剪贴板一起删。
     /// 限制:跨 cutoff 的 MP4(开始于窗口之前)无法部分重编码,保留 —— 只删
     /// 完整落在窗口内的 MP4(它的帧本来就全在删除范围里)。
     @discardableResult
     func deleteAfter(_ cutoff: Date) -> DeleteResult {
-        guard exists else { return DeleteResult() }
+        guard screenExists || audioExists else { return DeleteResult() }
         let cutoffMs = Self.dbMs(cutoff)
-        // frames + audio_transcriptions 都挂 foundation_icu 的 FTS5 触发器 ——
-        // 必须走带分词器的 GRDB 连接,否则 DELETE 会触发器报错回滚。
-        var doomedMedia: [String] = []
-        var doomedAudio: [String] = []
-        var doomedTranscripts: [String] = []
-        let r = withTokenizerWrite { db -> DeleteResult in
-            var res = DeleteResult()
-            // 先收集窗口内媒体文件路径 —— 事务提交后再删盘(文件删除无法回滚,
-            // 不能在事务里做)。resolve 失败 = 文件已不在,没东西可删。
+        var result = DeleteResult()
+        // screen、audio 各一个事务,各自提交后再删对应的文件(文件删除无法回滚,
+        // 不能在事务里做)。frames + audio_transcriptions 都挂 foundation_icu 的
+        // FTS5 触发器 —— 必须走带分词器的 GRDB 连接,否则 DELETE 会触发器报错回滚。
+        // resolve 失败 = 文件已不在,没东西可删。
+        let doomedMedia: [String]? = withTokenizerWrite(at: screenPath) { db in
             let snaps = try String.fetchAll(db, sql: """
                 SELECT snapshot_path FROM frames
                 WHERE snapshot_path IS NOT NULL AND timestamp_ms >= :ms
@@ -620,31 +606,35 @@ struct TimelineDB: Sendable {
             let mp4s = try String.fetchAll(db, sql: """
                 SELECT file_path FROM video_chunks WHERE start_ts_ms >= :ms
                 """, arguments: ["ms": cutoffMs])
-            let wavs = try String.fetchAll(db, sql: """
-                SELECT file_path FROM audio_chunks WHERE recorded_at_ms >= :ms
-                """, arguments: ["ms": cutoffMs])
-            doomedMedia = (snaps + mp4s).compactMap(AssetPath.resolve)
-            doomedAudio = wavs.compactMap(AssetPath.resolve)
-            // 转录副本按文件名定位,录音文件已经不在了也照删(里面有转录全文)。
-            doomedTranscripts = wavs.compactMap { Storage.transcriptURL(forAudio: $0)?.path }
-
             try db.execute(sql: "DELETE FROM frames WHERE timestamp_ms >= :ms",
                            arguments: ["ms": cutoffMs])
-            res.frames = db.changesCount
+            result.frames = db.changesCount
             // ocr_pending 没有外键,删帧要顺手清掉,否则孤儿行会一直挡住事件封口。
             try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id NOT IN (SELECT id FROM frames)")
             try db.execute(sql: "DELETE FROM video_chunks WHERE start_ts_ms >= :ms",
                            arguments: ["ms": cutoffMs])
+            return (snaps + mp4s).compactMap(AssetPath.resolve)
+        }
+        let doomedWavs: [String]? = withTokenizerWrite(at: audioPath) { db in
+            let wavs = try String.fetchAll(db, sql: """
+                SELECT file_path FROM audio_chunks WHERE recorded_at_ms >= :ms
+                """, arguments: ["ms": cutoffMs])
             try db.execute(sql: "DELETE FROM audio_chunks WHERE recorded_at_ms >= :ms",
                            arguments: ["ms": cutoffMs])
             try db.execute(sql: "DELETE FROM audio_transcriptions WHERE transcribed_at_ms >= :ms",
                            arguments: ["ms": cutoffMs])
-            res.audio = db.changesCount
-            return res
+            result.audio = db.changesCount
+            return wavs
         }
-        guard let result = r else {
-            return DeleteResult(error: "Couldn't open DB read-write at \(dbPath)")
+        let inputDeleted: Int? = withTokenizerWrite(at: inputPath) { db in
+            try InputDataDeletion.delete(db, fromMs: cutoffMs, beforeMs: nil)
         }
+        if doomedMedia == nil || doomedWavs == nil || inputDeleted == nil {
+            result.error = "Couldn't open DB read-write under \(Storage.metadataDir.path)"
+        }
+        let doomedAudio = (doomedWavs ?? []).compactMap(AssetPath.resolve)
+        // 转录副本按文件名定位,录音文件已经不在了也照删(里面有转录全文)。
+        let doomedTranscripts = (doomedWavs ?? []).compactMap { Storage.transcriptURL(forAudio: $0)?.path }
         // 删盘(事务已提交)。硬护栏同 RetentionWorker.deleteFiles:只删
         // ~/.portrait 树内文件 —— 历史 screenpipe import 的 audio_chunks 行
         // 可能指向只读的 ~/.screenpipe 原始录音,绝不能删。
@@ -655,7 +645,7 @@ struct TimelineDB: Sendable {
             guard path.hasPrefix(rootPrefix) else { return }
             try? fm.removeItem(atPath: path)
         }
-        for p in doomedMedia { safeRemove(p) }
+        for p in doomedMedia ?? [] { safeRemove(p) }
         for p in doomedAudio {
             safeRemove(p)
             safeRemove(URL(fileURLWithPath: p).deletingPathExtension().appendingPathExtension("meta.json").path)
@@ -666,11 +656,11 @@ struct TimelineDB: Sendable {
 
     /// Speakers: pull a few representative transcripts so the LLM-driven
     /// organiser can guess a name. Filters out short / one-word lines.
-    /// Read-only — works against the unified portrait.sqlite.
+    /// Read-only — works against audio.sqlite.
     func sampleTranscripts(forSpeakerId speakerId: Int64, limit: Int = 5) -> [String] {
-        guard exists else { return [] }
+        guard audioExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
         let sql = """
             SELECT text
@@ -699,9 +689,9 @@ struct TimelineDB: Sendable {
     /// 所有未隐藏的说话人 + 转录条数 + 最后听到时间。SpeakersView 列表用。
     /// `forModel` 非空时只列该 embedding 模型绑定的说话人(声纹按模型隔离)。
     func loadSpeakers(forModel model: String? = nil) -> [SpeakerListRow] {
-        guard exists else { return [] }
+        guard audioExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
         // 列表"最后活动时间"= **严格的最后转录时间**(transcribed_at),不混
         // updated_at_ms —— 混入的话任何 admin 操作(merge / dedupe / 重训 / 命名)
@@ -752,9 +742,9 @@ struct TimelineDB: Sendable {
     /// 该 speaker 最近一条转录所属 audio chunk 的绝对文件路径,用于试听。
     /// nil = 没数据 / 文件已被清理。
     func latestAudioPath(forSpeakerId speakerId: Int64) -> String? {
-        guard exists else { return nil }
+        guard audioExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
         let sql = """
             SELECT c.file_path
@@ -772,7 +762,7 @@ struct TimelineDB: Sendable {
         guard sqlite3_step(stmt) == SQLITE_ROW,
               let cstr = sqlite3_column_text(stmt, 0) else { return nil }
         let raw = String(cString: cstr)
-        // file_path 通常是相对 ~/.portrait/ 的 raw_data/audio/xxx.mp4。
+        // file_path 通常是相对 ~/.portrait/ 的 metadata/audio/xxx.wav。
         // resolve 到绝对路径,文件不存在就当无音频。
         return AssetPath.resolve(raw)
     }
@@ -803,9 +793,9 @@ struct TimelineDB: Sendable {
     /// 时间窗 [fromMs, toMs] 内、来自麦克风输入设备的音频块被分到的所有
     /// speaker_id（含重复，调用方计票）。声纹训练用。
     func inputSpeakerVotes(fromMs: Int64, toMs: Int64) -> [Int64] {
-        guard exists else { return [] }
+        guard audioExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
         let sql = """
             SELECT t.speaker_id
@@ -846,7 +836,7 @@ struct TimelineDB: Sendable {
         // 会触发 FTS5 同步触发器,必须带 foundation_icu 分词器(裸 sqlite 会回滚、
         // dupe 合并静默失败);② 跨 speakers / speaker_embeddings /
         // audio_transcriptions 的多条写放进一个事务,避免中途失败留下半合并脏状态。
-        let result: Int64?? = withTokenizerWrite { db -> Int64? in
+        let result: Int64?? = withTokenizerWrite(at: audioPath) { db -> Int64? in
             // 1) 找所有同名(case-insensitive,排除 hallucination)。
             //    历史 bug:有时 diarization 自动建的 speaker 在用户改名前先被
             //    rename,name 时机错位 → 上次 upsert 没命中老条目,又 INSERT
@@ -912,9 +902,9 @@ struct TimelineDB: Sendable {
     /// voice training screenpipe 风格用 —— 不依赖 diarization,只看
     /// 转录是否产出行。≥1 就可以触发 reassignInputTranscriptionsToSpeaker。
     func transcribedInputCount(fromMs: Int64, toMs: Int64) -> Int {
-        guard exists else { return 0 }
+        guard audioExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
         let sql = """
             SELECT count(*) FROM audio_transcriptions t
@@ -932,9 +922,9 @@ struct TimelineDB: Sendable {
     /// 找已有同名 speaker(case-insensitive 不算,精确匹配)→ 返回 id;
     /// 没找到 → 新建一行返回新 id。voice training screenpipe 风格用。
     func findOrCreateSpeaker(name: String) -> Int64? {
-        guard exists else { return nil }
+        guard audioExists else { return nil }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
         // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败。
         sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
@@ -967,7 +957,7 @@ struct TimelineDB: Sendable {
     ) -> Int {
         // UPDATE audio_transcriptions 触发 FTS5 同步触发器 —— 必须走带分词器的
         // GRDB 连接,裸 sqlite 会触发器报错回滚(改不动 speaker_id)。
-        let r = withTokenizerWrite { db -> Int in
+        let r = withTokenizerWrite(at: audioPath) { db -> Int in
             try db.execute(sql: """
                 UPDATE audio_transcriptions
                 SET speaker_id = :sid
@@ -985,9 +975,9 @@ struct TimelineDB: Sendable {
     /// voice training 用它判断「训练窗口的音频是否已全部转录 + 分离完」，
     /// 全部处理完再统计声纹簇，避免只拿到先处理完的那部分。
     func pendingInputChunkCount(fromMs: Int64, toMs: Int64) -> Int {
-        guard exists else { return 0 }
+        guard audioExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
         let sql = """
             SELECT count(*) FROM audio_chunks
@@ -1009,9 +999,9 @@ struct TimelineDB: Sendable {
     /// 当前待转录的音频 chunk 总数(status 不是 done/failed)。给 Audio Capture
     /// 设置页的转录状态行用。只读。
     func pendingAudioCount() -> Int {
-        guard exists else { return 0 }
+        guard audioExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db,
@@ -1024,9 +1014,9 @@ struct TimelineDB: Sendable {
     /// 正在转录中的音频 chunk 数(status = in_progress)。> 0 = 模型真在跑;
     /// 队列非空但这里为 0 = 在攒批等待。给转录状态行区分 Transcribing / Waiting。
     func inProgressAudioCount() -> Int {
-        guard exists else { return 0 }
+        guard audioExists else { return 0 }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return 0 }
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db,
@@ -1039,9 +1029,9 @@ struct TimelineDB: Sendable {
     /// 找声音相似的说话人（centroid 余弦相似度 > 0.25，按相似度降序取前 limit）。
     /// 用于在 Speakers 页建议「这俩是不是同一个人 → 合并」。
     func similarSpeakers(to speakerId: Int64, limit: Int = 5) -> [SimilarSpeaker] {
-        guard exists else { return [] }
+        guard audioExists else { return [] }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
         let sql = "SELECT id, name, centroid FROM speakers WHERE hallucination = 0 AND centroid IS NOT NULL"
         var stmt: OpaquePointer?
@@ -1081,13 +1071,13 @@ struct TimelineDB: Sendable {
     /// 合并静默失败。GRDB 连接通过 prepareDatabase 注册分词器。
     @discardableResult
     func mergeSpeakers(keep keepId: Int64, merge mergeId: Int64) -> Bool {
-        guard exists, keepId != mergeId else { return false }
+        guard audioExists, keepId != mergeId else { return false }
         do {
             var config = Configuration()
             config.prepareDatabase { db in
                 db.add(tokenizer: FoundationTokenizer.self)
             }
-            let queue = try DatabaseQueue(path: dbPath, configuration: config)
+            let queue = try DatabaseQueue(path: audioPath, configuration: config)
             try queue.write { db in
                 // dict-form 参数:绕开 [Int64,Int64] → [any DatabaseValueConvertible]
                 // existential 转换里 Swift runtime _getWitnessTable 偶发死循环。
@@ -1110,9 +1100,9 @@ struct TimelineDB: Sendable {
     /// 各 speaker 的质心向量（id → centroid）。给 "Organize with AI" 的声纹护栏用：
     /// 同名簇只有质心 cosine 够高才合并，挡住"名同声不同"(如 #20 挂本人的名实为对方)。
     func speakerCentroids() -> [Int64: [Float]] {
-        guard exists else { return [:] }
+        guard audioExists else { return [:] }
         do {
-            let queue = try DatabaseQueue(path: dbPath)
+            let queue = try DatabaseQueue(path: audioPath)
             return try queue.read { db in
                 var out: [Int64: [Float]] = [:]
                 for r in try Row.fetchAll(db, sql: "SELECT id, centroid FROM speakers WHERE centroid IS NOT NULL") {
@@ -1130,9 +1120,9 @@ struct TimelineDB: Sendable {
     /// 的声纹护栏用:质心在被拆散的簇上不可靠(同人不同簇 cosine 可低至负数),改比
     /// 「两簇最接近的一条样本」(best-of-N),对齐 matchSpeaker 的判据。
     func speakerSampleEmbeddings() -> [Int64: [[Float]]] {
-        guard exists else { return [:] }
+        guard audioExists else { return [:] }
         do {
-            let queue = try DatabaseQueue(path: dbPath)
+            let queue = try DatabaseQueue(path: audioPath)
             return try queue.read { db in
                 var out: [Int64: [[Float]]] = [:]
                 for r in try Row.fetchAll(db, sql: "SELECT speaker_id, embedding FROM speaker_embeddings") {
@@ -1150,9 +1140,9 @@ struct TimelineDB: Sendable {
 
     /// speakers 表的单语句写入小工具。
     private func runSpeakerWrite(sql: String, bind: (OpaquePointer?) -> Void) -> Bool {
-        guard exists else { return false }
+        guard audioExists else { return false }
         var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
+        guard sqlite3_open_v2(audioPath, &db, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK else { return false }
         defer { sqlite3_close(db) }
         // 主 pool 写锁在手时等 5s 而非立即 SQLITE_BUSY 失败。
         sqlite3_exec(db, "PRAGMA busy_timeout=5000;", nil, nil, nil)
