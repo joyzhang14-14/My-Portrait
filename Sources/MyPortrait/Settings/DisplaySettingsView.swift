@@ -409,8 +409,8 @@ private struct MenuBarLampCard: View {
                 // 合并/延后到窗口重新激活,卡片就冻在切走那一刻(实测:切到微信、
                 // Spotify 之后仍显示 "Terminal is a terminal")。
                 // 墙钟 TimelineView 每 tick 重新求值 body,直接读单例当前值,
-                // 绕开推送这一层。
-                SwiftUI.TimelineView(.periodic(from: .now, by: 1.0 / 20)) { tl in
+                // 绕开推送这一层。窗口看不见 / 屏幕关了时降到 2s 一帧(见 LampSchedule)。
+                SwiftUI.TimelineView(LampSchedule()) { tl in
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
                         // 底片模拟菜单栏,**跟随系统外观**:深色模式深底、浅色模式浅底,
@@ -479,6 +479,35 @@ private struct MenuBarLampCard: View {
                     .foregroundStyle(Theme.textPrimary.opacity(lamp.on ? 0.55 : 0.42))
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+/// 灯卡的墙钟:平时 20 帧/秒(星尘漂浮 + 拉取灯状态);本 app 没有露在屏幕上的窗口、
+/// 或显示器睡了 / 亮度调到最低时,降到 2s 一帧 —— 看不见还按 20 帧重画,整夜挂着设置页
+/// 能吃掉 30%+ CPU。条件每秒最多查一次;不能停表:后台窗口收不到推送,停了就醒不过来。
+private struct LampSchedule: TimelineSchedule {
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        var next = startDate
+        var hidden = false
+        var checkedAt = Date.distantPast
+        return AnyIterator {
+            let now = Date()
+            if now.timeIntervalSince(checkedAt) >= 1 {
+                checkedAt = now
+                hidden = Self.hidden()
+            }
+            let t = max(next, now)
+            next = t.addingTimeInterval(hidden || mode == .lowFrequency ? 2 : 1.0 / 20)
+            return t
+        }
+    }
+
+    private static func hidden() -> Bool {
+        if CGDisplayIsAsleep(CGMainDisplayID()) != 0 || DisplayBrightness.isAtMinimum() { return true }
+        guard Thread.isMainThread else { return false }
+        return MainActor.assumeIsolated {
+            !NSApp.windows.contains { $0.isVisible && $0.occlusionState.contains(.visible) }
         }
     }
 }
