@@ -50,6 +50,8 @@ actor CaptureCoordinator {
     /// 这次等稳开始时的画面(灰度格)和开始时刻。
     private var settleBaseline: [UInt8]?
     private var settleStartedAt: Date?
+    /// 这一串切换最晚什么时候抓。连着切(每次都顶掉上一次)也不往后推,不然一直有切换就一直不抓。
+    private var settleDeadline: Date?
 
     /// 切换等稳:切 app 后新画面要过一阵才上屏,快的机器 0.1s,慢的机器 / 冷启动的 app 要几秒,
     /// 所以不按固定时间等,每 settlePollMs 截一张小图看画面:前台读数稳定、画面变过且停住才抓;
@@ -188,6 +190,7 @@ actor CaptureCoordinator {
         settleTask = nil
         settleBaseline = nil
         settleStartedAt = nil
+        settleDeadline = nil
 
         await drmWatcher.stop()
         await sleepWakeBox.stop()
@@ -454,13 +457,17 @@ actor CaptureCoordinator {
             if Task.isCancelled { return }
         }
         let started = settleStartedAt ?? Date()
+        if settleDeadline == nil {
+            settleDeadline = started.addingTimeInterval(Double(settleTimeoutMs) / 1000)
+        }
+        let deadline = settleDeadline ?? started
         var prev = settleBaseline
         var changed = false
         while true {
             try? await Task.sleep(nanoseconds: UInt64(settlePollMs) * 1_000_000)
             if Task.isCancelled { return }   // stop() 或新的切 app 顶掉了
             let waitedMs = Int(Date().timeIntervalSince(started) * 1000)
-            if waitedMs >= settleTimeoutMs { break }
+            if Date() >= deadline { break }
             let grid = try? await screen.captureGrid()
             if Task.isCancelled { return }
             var still = false
@@ -481,6 +488,7 @@ actor CaptureCoordinator {
         settleTask = nil
         settleBaseline = nil
         settleStartedAt = nil
+        settleDeadline = nil
         do {
             try await captureOneFrame(trigger: trigger, force: true, fromSettle: true)
         } catch {
