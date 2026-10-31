@@ -683,6 +683,8 @@ private let titleChangedCallback: AXObserverCallback = { _, _, _, refcon in
     let box = Unmanaged<FocusTitleObserverBox>.fromOpaque(refcon).takeUnretainedValue()
     guard let probe = box.probe else { return }
     Task { await probe.refresh() }
+    // 菜单栏灯的标题 / URL 也跟着刷:屏蔽判定和击键的 URL 黑名单都读它。
+    Task { @MainActor in CaptureLampState.shared.refreshFocusedWindow() }
 }
 
 /// 一次前台读数(见 `FocusProbe.liveFront()`)。

@@ -106,7 +106,9 @@ final class KeystrokeCharLogger {
         blacklistLock.unlock()
         DispatchQueue.main.async {
             let app = FocusProbe.focusedPanelApp()?.bundleIdentifier ?? front
+            // URL 黑名单:问菜单栏打字灯同一份当前 URL(换标签页由标题变化回调刷新)。
             let redact = secureInput || blacklist.contains(app)
+                || CaptureLampState.shared.typingURLBlocked(bundleId: app)
             writeQueue.async {
                 do {
                     var entry = KeystrokeEntry(

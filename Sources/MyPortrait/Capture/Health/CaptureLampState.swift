@@ -12,9 +12,11 @@ import Foundation
 ///
 /// | 灯 | 功能开关 | 权限 | 前台 app 排除 | 其它暂停 |
 /// |----|---------|------|--------------|---------|
-/// | 屏幕(紫) | `capture.screen.enabled` | 录屏 | `IgnoreGate`:app 名/标题子串 | `DRMGate`(pausedApps / 受保护视频) |
+/// | 屏幕(紫) | `capture.screen.enabled` | 录屏 | `IgnoreGate.shouldMaskWindow`(和抓帧同一个函数) | `DRMGate`(pausedApps / 受保护视频) |
 /// | 音频(黄) | `capture.audio.enabled`  | 麦克风 | —— 音频不认 app | 暂停名单 app 正在出声(`MusicPlaybackMonitor`) |
-/// | 打字(蓝) | `capture.typingCaptureEnabled` | 辅助功能 | `TypingPrivacyFilter`:bundle id 黑名单 | —— |
+/// | 打字(蓝) | `capture.typingCaptureEnabled` | 辅助功能 | `TypingPrivacyFilter`:bundle id / URL 黑名单 | —— |
+///
+/// 「当前这个 app」和采集同一口径:Spotlight、Bob 这类面板拿着键盘焦点时是面板的 app,否则是前台 app。
 ///
 /// ⚠️ 屏幕那一路要留意语义:`IgnoreGate` 命中是把**该窗口**从帧里抠掉,
 /// 帧本身照拍(桌面/其它窗口仍在,时间轴不断)。所以紫灯灭 = "你当前这个
@@ -54,18 +56,20 @@ final class CaptureLampState: ObservableObject {
     private var frontName = ""
     private var frontBundleId = ""
     private var frontPid: pid_t = 0
-    /// 前台浏览器当前标签页的 URL(非浏览器 = nil)。屏幕的 `ignoredUrls` 和打字的
-    /// URL 级黑名单都按它判 —— 只看 bundle id 会漏掉"同一个浏览器,这个站屏蔽、
-    /// 那个站不屏蔽"的情况。
+    /// 当前 app 焦点窗口的标题。屏幕灯拿它和 app 名一起问 IgnoreGate,跟抓帧逐窗口判同一口径。
+    private var windowTitle: String?
+    /// 前台浏览器当前标签页的 URL(非浏览器 = nil)。打字的 URL 级黑名单按它判 ——
+    /// 只看 bundle id 会漏掉"同一个浏览器,这个站屏蔽、那个站不屏蔽"的情况。
+    /// 击键写入也读这一份(`typingURLBlocked`),灯和采集不会各说各的。
     ///
-    /// ⚠️ 不能读 `FocusProbe.snapshot().browserUrl`:那个缓存只在**切 app** 时刷新,
-    /// **换标签页不刷**。从屏蔽站切到普通站时它还停在旧 URL → 灯说没记、实际在记,
-    /// 正是最危险的那个方向。所以这里自己做一次窄读(只取 URL,不走 AX 全树)。
+    /// 标题和 URL 都是自己做的窄读(不走 AX 全树):切 app、2s tick、FocusProbe 的
+    /// 标题变化回调(换标签页 / 跳页)都会刷。
     private var browserUrl: String?
-    /// 两个信号源都是 Services 持有的实例(不是单例),起来之后 attach 进来。
+    /// 信号源都是 Services 持有的实例(不是单例),起来之后 attach 进来。
     /// **没 attach 之前权限当未授** —— 三灯全灭。宁可该亮时灭。
     private weak var permissions: PermissionMonitor?
     private weak var musicMonitor: MusicPlaybackMonitor?
+    private var ignoreGate: IgnoreGate?
 
     private init() {
         adoptFrontmost(NSWorkspace.shared.frontmostApplication)
@@ -80,16 +84,20 @@ final class CaptureLampState: ObservableObject {
             // 先把三个标量取出来再进 MainActor —— Notification / NSRunningApplication
             // 都不是 Sendable,整个传进去编译器会报 data race。
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            let name = app?.localizedName ?? ""
+            let name = app?.cleanName ?? ""
             let bid = app?.bundleIdentifier ?? ""
             let pid = app?.processIdentifier ?? 0
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.frontName = name
-                self.frontBundleId = bid
-                self.frontPid = pid
+                if let panel = FocusProbe.focusedPanelApp() {
+                    self.adoptFrontmost(panel)
+                } else {
+                    self.frontName = name
+                    self.frontBundleId = bid
+                    self.frontPid = pid
+                }
                 self.recompute()
-                self.refreshBrowserURL()
+                self.refreshFocusedWindow()
             }
         }
         recompute()
@@ -98,45 +106,60 @@ final class CaptureLampState: ObservableObject {
 
     /// 把 NSRunningApplication 拆成三个标量存下来。
     private func adoptFrontmost(_ app: NSRunningApplication?) {
-        frontName = app?.localizedName ?? ""
+        frontName = app?.cleanName ?? ""
         frontBundleId = app?.bundleIdentifier ?? ""
         frontPid = app?.processIdentifier ?? 0
     }
 
-    /// 窄读前台浏览器的当前 URL —— **只取 URL**,不做 FocusProbe 那种 AX 全树遍历。
+    /// 窄读当前 app 焦点窗口的标题和(浏览器的)URL,不做 FocusProbe 那种 AX 全树遍历。
     ///
     /// AX 调用一律走 `AXSerialQueue`(全 app 唯一那条串行队列):AX 的 C API 并发
     /// 调用会让框架内部状态打架,历史上炸出过主线程死锁和后台队列崩溃。
-    /// 读完跳回 MainActor,URL 变了才重算。
-    private func refreshBrowserURL() {
+    /// 读完跳回 MainActor,变了才重算。
+    func refreshFocusedWindow() {
         let pid = frontPid
-        let bid = frontBundleId
-        guard pid > 0, FocusProbe.browserBundleIds.contains(bid)
-        else {
-            if browserUrl != nil { browserUrl = nil; recompute() }
+        let isBrowser = FocusProbe.browserBundleIds.contains(frontBundleId)
+        guard pid > 0 else {
+            if windowTitle != nil || browserUrl != nil { windowTitle = nil; browserUrl = nil; recompute() }
             return
         }
         AXSerialQueue.shared.async { [weak self] in
             let appEl = AXUIElementCreateApplication(pid)
             var winRef: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(
+            var title: String?
+            var url: String?
+            if AXUIElementCopyAttributeValue(
                 appEl, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
-                CFGetTypeID(winRef) == AXUIElementGetTypeID()
-            else { return }
-            let url = FocusProbe.extractBrowserURL(focusedWindow: winRef as! AXUIElement)
+               CFGetTypeID(winRef) == AXUIElementGetTypeID() {
+                let win = winRef as! AXUIElement
+                var titleRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleRef) == .success {
+                    title = titleRef as? String
+                }
+                if isBrowser { url = FocusProbe.extractBrowserURL(focusedWindow: win) }
+            }
             Task { @MainActor in
-                guard let self, self.browserUrl != url else { return }
+                guard let self, self.frontPid == pid,
+                      self.windowTitle != title || self.browserUrl != url else { return }
+                self.windowTitle = title
                 self.browserUrl = url
                 self.recompute()
             }
         }
     }
 
+    /// 当前浏览器页面是否在打字 URL 黑名单里。KeystrokeCharLogger 写每颗键前问它,和打字灯同一份 URL。
+    func typingURLBlocked(bundleId: String) -> Bool {
+        guard bundleId == frontBundleId, let url = browserUrl else { return false }
+        return TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url)
+    }
+
     /// 外部信号源接线。Services 起来之后调一次;MusicPlaybackMonitor 拿不到
     /// 只是少一个刷新触发点,不影响正确性(recompute 读的是它的当前值)。
-    func attach(musicMonitor: MusicPlaybackMonitor?, permissions: PermissionMonitor?) {
+    func attach(musicMonitor: MusicPlaybackMonitor?, permissions: PermissionMonitor?, ignoreGate: IgnoreGate) {
         self.musicMonitor = musicMonitor
         self.permissions = permissions
+        self.ignoreGate = ignoreGate
         musicMonitor?.$musicDetected
             .removeDuplicates()
             .sink { [weak self] _ in Task { @MainActor in self?.recompute() } }
@@ -167,10 +190,10 @@ final class CaptureLampState: ObservableObject {
                     guard let self else { return }
                     // **自愈**:重读一次前台 app。通知那条路万一漏了/读早了,
                     // 这里最多 2s 就纠正回来(此刻系统属性一定已 settle)。
-                    self.adoptFrontmost(NSWorkspace.shared.frontmostApplication)
+                    self.adoptFrontmost(FocusProbe.focusedPanelApp() ?? NSWorkspace.shared.frontmostApplication)
                     self.recompute()
-                    // 换标签页不发任何系统通知,只能靠这个 tick 兜,灯最多滞后一个 tick。
-                    self.refreshBrowserURL()
+                    // 标题变化回调只在屏幕采集跑着时挂着,这个 tick 兜底,最多滞后一个 tick。
+                    self.refreshFocusedWindow()
                 }
             }
             .store(in: &cancellables)
@@ -201,14 +224,11 @@ final class CaptureLampState: ObservableObject {
             s = Lamp(on: false, reason: "The display is asleep — nothing to capture.")
         } else if pause.drmActive {
             s = Lamp(on: false, reason: "Paused — protected video is playing on screen.")
-        } else if let hit = Self.ignoredAppHit(appName: appName, cfg: cfg) {
-            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored apps list — the screenshot is still taken, but this window is blanked out of it.")
-        } else if let url = browserUrl,
-                  let hit = cfg.privacy.ignoredUrls.first(where: {
-                      !$0.isEmpty && url.lowercased().contains($0.lowercased())
-                  }) {
-            // IgnoreGate 把 ignoredUrls 当"URL / 窗口标题子串"用,这里同口径。
-            s = Lamp(on: false, reason: "“\(hit)” is on your Ignored URLs list — the screenshot is still taken, but this window is blanked out of it.")
+        } else if !appName.isEmpty,
+                  ignoreGate?.shouldMaskWindow(appName: appName, bundleId: bundleId.isEmpty ? nil : bundleId,
+                                               title: windowTitle) == true {
+            // 抓帧逐窗口问的就是这个函数(app 名 / 标题 / 类别 / 遮罩总开关),灯不另写一份。
+            s = Lamp(on: false, reason: "This window matches your Ignored apps, URLs or categories — the screenshot is still taken, but this window is blanked out of it.")
         }
         if screen != s { screen = s }        // 只在真变了才发通知
 
@@ -238,21 +258,12 @@ final class CaptureLampState: ObservableObject {
             // 判据跟 TypingObserver.attach 共用同一个函数,不重写一份。
             // 终端只是不读 AX,击键照记,灯照亮。
             t = Lamp(on: false, reason: "\(appName) is on your typing blacklist — nothing you type here is saved.")
-        } else if !bundleId.isEmpty, let url = browserUrl,
-                  TypingPrivacyFilter.isBlacklisted(bundleId: bundleId, url: url) {
-            // 打字还有一道 **URL 级**闸(TypingRecordWriter.persist 落库时判)。
+        } else if !bundleId.isEmpty, typingURLBlocked(bundleId: bundleId) {
+            // URL 级闸:KeystrokeCharLogger 写键时问同一个函数。
             // 只按 bundle id 判会漏掉"这个浏览器里,这个站屏蔽、那个站不屏蔽"。
             t = Lamp(on: false, reason: "This page is on your typing blacklist — nothing you type here is saved.")
         }
         if typing != t { typing = t }
-    }
-
-    /// 前台 app 名是否命中 ignoredApps —— 跟 `IgnoreGate` 同口径:**小写子串**匹配。
-    /// 返回命中的那条名单项(给 tooltip 说明"因为哪条规则灭的")。
-    private static func ignoredAppHit(appName: String, cfg: ConfigStore) -> String? {
-        guard !appName.isEmpty else { return nil }
-        let lower = appName.lowercased()
-        return cfg.privacy.ignoredApps.first { !$0.isEmpty && lower.contains($0.lowercased()) }
     }
 
     /// 三行说明,菜单栏 tooltip 用。

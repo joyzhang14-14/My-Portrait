@@ -119,9 +119,10 @@ final class Services {
         self.stallDriver = StallDetectorDriver(db: dbImpl, permissions: permissions)
         self.musicMonitor = MusicPlaybackMonitor()
         self.screenLockMonitor = ScreenLockMonitor()
-        // 菜单栏三盏采集灯的两个信号源(权限 / 音频暂停)都是这里的实例,
+        // 菜单栏三盏采集灯的信号源(权限 / 音频暂停 / 遮罩闸)都是这里的实例,
         // 不是单例 —— 建好之后接给 CaptureLampState,否则它只能一直报"没权限"。
-        CaptureLampState.shared.attach(musicMonitor: musicMonitor, permissions: permissions)
+        CaptureLampState.shared.attach(musicMonitor: musicMonitor, permissions: permissions,
+                                       ignoreGate: coordinator.ignore)
 
         // 打字采集,写 input.sqlite。
         // 启停由 startManagedLifecycle 按 recording.typingCaptureEnabled 驱动。

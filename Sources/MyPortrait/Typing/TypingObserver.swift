@@ -105,8 +105,8 @@ final class TypingObserver {
         // 立刻活,callback 已经会读 ledger.charLogger。
         if let charLogger = keystrokeCharLogger {
             // 同步 typing 黑名单 snapshot 给 keystroke_log 写入路径。
-            // 只塞 app 级名单:keystroke_log 行级没有 URL 信息,只能按
-            // bundle_id 屏蔽。URL 级屏蔽走 TypingRecordWriter 那条路。
+            // 这里只塞 app 级名单;URL 级屏蔽由 KeystrokeCharLogger 写键时问
+            // CaptureLampState.typingURLBlocked。
             let appLevel = ConfigStore.shared.privacy.typingBlacklistApps
             let hardcoded = TypingPrivacyFilter.defaultBlacklist
             let union = Set(hardcoded).union(appLevel)

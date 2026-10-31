@@ -33,7 +33,8 @@ actor CaptureCoordinator {
     /// 采集时不做 OCR,帧存全分辨率 HEIC 进 `ocr_pending`,由 DeferredOCRWorker 补。
     /// Services 在 config 变化时推。
     private var deferOCR: Bool = false
-    private let ignore: IgnoreGate
+    /// 菜单栏屏幕灯也问它(CaptureLampState),灯和抓帧同一套遮罩判定。
+    let ignore: IgnoreGate
     private let events: EventSources
     private let drmWatcher: DRMWatcher
     private let sleepWakeBox: SleepWakeBox
