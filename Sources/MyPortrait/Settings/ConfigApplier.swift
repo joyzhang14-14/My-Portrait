@@ -30,6 +30,7 @@ final class ConfigApplier {
     private var lastDockIcon: String = ConfigApplier.unapplied
     private var lastShowInMenuBar: Bool? = nil
     private var lastShowDockIcon: Bool? = nil
+    private var lastMenuBarIconSize: Int? = nil
     private var lastAppName: String = ConfigApplier.unapplied
     private var lastLaunchAtLogin: Bool? = nil
     private var premiumAgentSynced = false
@@ -58,6 +59,7 @@ final class ConfigApplier {
             _ = ConfigStore.shared.display.customDockIcon
             _ = ConfigStore.shared.display.showInMenuBar
             _ = ConfigStore.shared.display.showDockIcon
+            _ = ConfigStore.shared.display.menuBarIconSize
             _ = ConfigStore.shared.display.appName
             _ = ConfigStore.shared.general.launchAtLogin
             _ = ConfigStore.shared.scheduler
@@ -141,6 +143,12 @@ final class ConfigApplier {
         if lastShowInMenuBar != display.showInMenuBar {
             lastShowInMenuBar = display.showInMenuBar
             statusBar?.setVisible(display.showInMenuBar)
+        }
+
+        // 菜单栏图标大小:拖滑块时实时重画。
+        if lastMenuBarIconSize != display.menuBarIconSize {
+            lastMenuBarIconSize = display.menuBarIconSize
+            statusBar?.refreshIcon()
         }
 
         // Launch at login

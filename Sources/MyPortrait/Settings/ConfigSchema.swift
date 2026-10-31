@@ -536,6 +536,8 @@ struct DisplayConfig: Codable, Equatable {
     /// ⚠️ 跟 showInMenuBar 都关 + 关窗 → 没可见入口,只能从 Spotlight/Finder
     /// 重启唤回(applicationShouldHandleReopen 处理)。UI 有红字提醒该组合。
     var showDockIcon:            Bool   = true
+    /// 菜单栏图标边长(pt),16–36,默认 24。
+    var menuBarIconSize:         Int    = 24
     /// Memories 列表排序规则:weight(默认)/ created / last_occurred。
     /// 文件夹分组内的 event 也跟随。值取自 MemorySortOrder.rawValue。
     var memorySortOrder:         String = "weight"
@@ -567,6 +569,7 @@ struct DisplayConfig: Codable, Equatable {
         case customDockIcon           = "custom_dock_icon"
         case showInMenuBar            = "show_in_menu_bar"
         case showDockIcon             = "show_dock_icon"
+        case menuBarIconSize          = "menu_bar_icon_size"
         case memorySortOrder          = "memory_sort_order"
         case graphAnimationSpeed      = "graph_animation_speed"
         case graphPulseSpeed          = "graph_pulse_speed"
@@ -584,6 +587,7 @@ struct DisplayConfig: Codable, Equatable {
         customDockIcon          = c.dflt(String.self, .customDockIcon, customDockIcon)
         showInMenuBar           = c.dflt(Bool.self,   .showInMenuBar, showInMenuBar)
         showDockIcon            = c.dflt(Bool.self,   .showDockIcon, showDockIcon)
+        menuBarIconSize         = c.dflt(Int.self,    .menuBarIconSize, menuBarIconSize)
         memorySortOrder         = c.dflt(String.self, .memorySortOrder, memorySortOrder)
         graphAnimationSpeed     = c.dflt(SpeedLevel.self, .graphAnimationSpeed, graphAnimationSpeed)
         graphPulseSpeed         = c.dflt(SpeedLevel.self, .graphPulseSpeed, graphPulseSpeed)

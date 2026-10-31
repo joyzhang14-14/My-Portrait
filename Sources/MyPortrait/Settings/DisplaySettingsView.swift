@@ -396,6 +396,7 @@ private struct IconSlot: View {
 /// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
 private struct MenuBarLampCard: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var config = ConfigStore.shared
 
     var body: some View {
         SettingsCard(
@@ -456,6 +457,23 @@ private struct MenuBarLampCard: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+            SettingsDivider()
+            SettingsRow("Icon size",
+                        description: "How big the icon is in the menu bar, 16–36 pt.",
+                        icon: "menubar.rectangle") {
+                let r = StatusBarMenu.iconSizeRange
+                HStack(spacing: 10) {
+                    Slider(value: Binding(
+                               get: { Double(config.current.display.menuBarIconSize) },
+                               set: { v in config.mutate { $0.display.menuBarIconSize = Int(v.rounded()) } }),
+                           in: Double(r.lowerBound)...Double(r.upperBound), step: 1)
+                        .frame(width: 180)
+                    Text("\(config.current.display.menuBarIconSize) pt")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.7))
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
         }
     }
 

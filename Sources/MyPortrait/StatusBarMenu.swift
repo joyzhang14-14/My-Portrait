@@ -285,7 +285,10 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         statusItem.isVisible = visible
     }
 
-    private func refreshIcon() {
+    /// 菜单栏图标边长(pt),设置里的 16–36。
+    static let iconSizeRange = 16...36
+
+    func refreshIcon() {
         let unhealthy = HealthMonitor.shared.unhealthy
         // 菜单栏图标永远保持角色图 / 用户自定义图,**不再**因健康异常(stall 等)
         // 切成红色惊叹号 —— 用户不喜欢那个刺眼图标。健康状态仍由下面的 tooltip
@@ -306,9 +309,11 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
             // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
             let lamps = CaptureLampState.shared
             if let img = NSImage(named: lamps.assetName) {
-                // 24pt 画布:实心环约 20pt,和别的菜单栏图标齐平;外圈星尘散到画布边
-                img.size = NSSize(width: 24 * img.size.width / max(img.size.height, 1),
-                                  height: 24)
+                // 图标是 24pt 画布(实心环约 20pt,外圈星尘散到画布边),按设置的边长缩放;
+                // 素材有 3x,放大到 36pt 在 2x 屏上也不糊。
+                let r = Self.iconSizeRange
+                let side = CGFloat(min(max(ConfigStore.shared.display.menuBarIconSize, r.lowerBound), r.upperBound))
+                img.size = NSSize(width: side * img.size.width / max(img.size.height, 1), height: side)
                 img.isTemplate = false
                 statusItem.button?.image = img
             }
