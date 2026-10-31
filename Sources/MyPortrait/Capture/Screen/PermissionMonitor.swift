@@ -99,6 +99,7 @@ final class PermissionMonitor: ObservableObject {
             logger.info("full disk access: \(String(describing: self.fullDiskAccess), privacy: .public) → \(String(describing: newFDA), privacy: .public)")
             fullDiskAccess = newFDA
         }
+        SleepHelperClient.shared.recordApprovalIfGranted()
     }
 
     // MARK: - 触发系统对话框

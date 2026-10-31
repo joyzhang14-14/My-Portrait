@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ServiceManagement
 import os.log
@@ -99,18 +100,75 @@ final class SleepHelperClient {
             log.info("launch sync register threw code=\((error as NSError).code, privacy: .public), status=\(self.statusName, privacy: .public)")
         }
         // 批准被打回检测:上次记录已批准、这次却 requiresApproval(app 更新后
-        // BTM 认不出新 cdhash,或上次会话的自愈重注册)→ 弹通知引导重批,
-        // 不再静默。批准状态每次启动落 UserDefaults,重批后自动归位。
+        // BTM 认不出新 cdhash,或上次会话的自愈重注册)→ 弹窗引导重批,
+        // 不再静默。批准状态每次启动落 UserDefaults,运行中批准由
+        // recordApprovalIfGranted 补记,重批后自动归位。
         let ud = UserDefaults.standard
         let wasApproved = ud.bool(forKey: Self.wasApprovedKey)
         if wasApproved, service.status == .requiresApproval {
-            log.error("helper 批准被打回 requiresApproval(更新/重注册)→ 弹通知")
-            NotificationCenterService.shared.post(.helperApprovalLost)
+            log.error("helper 批准被打回 requiresApproval(更新/重注册)→ 弹窗")
+            showApprovalLostAlert()
         }
         ud.set(service.status == .enabled, forKey: Self.wasApprovedKey)
     }
 
     private static let wasApprovedKey = "SleepHelper.wasApproved"
+
+    private var lastApprovalCheck = Date.distantPast
+
+    /// 运行中批准了也要记下(PermissionMonitor 轮询时调,30s 查一次):否则这次批准
+    /// 要到下次启动才落盘,中间更新就漏掉「被打回」的提醒。批准了顺手收起弹窗。
+    func recordApprovalIfGranted() {
+        let ud = UserDefaults.standard
+        guard !ud.bool(forKey: Self.wasApprovedKey),
+              Date().timeIntervalSince(lastApprovalCheck) >= 30 else { return }
+        lastApprovalCheck = Date()
+        guard service.status == .enabled else { return }
+        ud.set(true, forKey: Self.wasApprovedKey)
+        closeApprovalAlert()
+    }
+
+    // MARK: - 批准被打回的弹窗
+
+    /// 非模态:runModal 会停住默认 run loop mode,打字采集和剪贴板的 Timer 跟着停;
+    /// 用户不在电脑前时这个框可能挂几个小时。点掉之前一直在。
+    private var approvalAlert: NSAlert?
+    private var approvalAlertTarget: AlertButtonTarget?
+
+    private func showApprovalLostAlert() {
+        guard approvalAlert == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Background activity helper needs re-approval"
+        alert.informativeText = """
+        The update reset its permission. Click Open Settings, then switch \
+        My Portrait back on under "Allow in the Background".
+
+        Until then, background work pauses while the lid is closed.
+        """
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Later")
+        alert.layout()
+        let target = AlertButtonTarget { [weak self] index in
+            if index == 0 { self?.openSystemSettings() }
+            self?.closeApprovalAlert()
+        }
+        for (i, button) in alert.buttons.enumerated() {
+            button.tag = i
+            button.target = target
+            button.action = #selector(AlertButtonTarget.pressed(_:))
+        }
+        approvalAlert = alert
+        approvalAlertTarget = target
+        alert.window.level = .floating
+        alert.window.center()
+        alert.window.orderFrontRegardless()
+    }
+
+    private func closeApprovalAlert() {
+        approvalAlert?.window.orderOut(nil)
+        approvalAlert = nil
+        approvalAlertTarget = nil
+    }
 
     /// 注册与 launchd 脱钩时的自愈。
     ///
@@ -144,7 +202,7 @@ final class SleepHelperClient {
         log.notice("repair done, status=\(self.statusName, privacy: .public) —— 若为 requiresApproval 需用户重新批准")
         if service.status == .requiresApproval {
             UserDefaults.standard.set(false, forKey: Self.wasApprovedKey)
-            NotificationCenterService.shared.post(.helperApprovalLost)
+            showApprovalLostAlert()
         }
     }
 
@@ -246,4 +304,11 @@ final class SleepHelperClient {
         @unknown default:       return "unknown"
         }
     }
+}
+
+/// NSAlert 不走 runModal 时按钮没人接,换成这个 target。
+private final class AlertButtonTarget: NSObject {
+    private let onPress: (Int) -> Void
+    init(_ onPress: @escaping (Int) -> Void) { self.onPress = onPress }
+    @objc func pressed(_ sender: NSButton) { onPress(sender.tag) }
 }
