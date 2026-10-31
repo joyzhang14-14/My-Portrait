@@ -1171,6 +1171,18 @@ enum DBSchema {
             }
         }
 
+        // 存量帧的 app_name / visible_app 按 AppName.clean 洗一遍(10-31 update),
+        // 和新采的帧同一写法。
+        m.registerMigration("v51_frames_clean_app_name") { db in
+            for col in ["app_name", "visible_app"] {
+                let names = try String.fetchAll(db, sql: "SELECT DISTINCT \(col) FROM frames WHERE \(col) IS NOT NULL")
+                for old in names where AppName.clean(old) != old {
+                    try db.execute(sql: "UPDATE frames SET \(col) = :new WHERE \(col) = :old",
+                                   arguments: ["new": AppName.clean(old), "old": old])
+                }
+            }
+        }
+
         return m
     }
 }

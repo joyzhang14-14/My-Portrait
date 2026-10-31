@@ -230,7 +230,7 @@ actor FocusProbe {
                 }
                 if visiblePid == nil {
                     visiblePid = pid
-                    visibleOwner = w[kCGWindowOwnerName as String] as? String
+                    visibleOwner = (w[kCGWindowOwnerName as String] as? String).map(AppName.clean)
                     if !displays.isEmpty, let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
                         let rect = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
                                           width: b["Width"] ?? 0, height: b["Height"] ?? 0)
@@ -252,8 +252,8 @@ actor FocusProbe {
                     if pid == activePid, cover.byOthers <= 0.05 * cover.area { activeUnoccluded = true }
                     let share = cover.fresh
                     if share >= VisibleWindow.minShare {
-                        let name = NSRunningApplication(processIdentifier: pid)?.localizedName
-                            ?? w[kCGWindowOwnerName as String] as? String ?? "?"
+                        let name = NSRunningApplication(processIdentifier: pid)?.cleanName
+                            ?? (w[kCGWindowOwnerName as String] as? String).map(AppName.clean) ?? "?"
                         visibleWindows.append(VisibleWindow(
                             app: name,
                             left: (rect.minX - screen.minX) / screen.width,
@@ -265,16 +265,16 @@ actor FocusProbe {
             }
             if activeHasOverlay {
                 visiblePid = activePid
-                visibleOwner = active?.localizedName
+                visibleOwner = active?.cleanName
                 activeHasWindow = true
                 frontOffscreen = false
             }
             // 名字统一取 localizedName,和 app_name 列同一口径;取不到再退回窗口所属名。
             let visibleName = visiblePid.flatMap {
-                NSRunningApplication(processIdentifier: $0)?.localizedName
+                NSRunningApplication(processIdentifier: $0)?.cleanName
             } ?? visibleOwner
             return FrontReading(
-                activeName: active?.localizedName ?? "Unknown",
+                activeName: active?.cleanName ?? "Unknown",
                 activeBundleId: active?.bundleIdentifier,
                 activePid: activePid,
                 visibleName: visibleName,
@@ -349,7 +349,7 @@ actor FocusProbe {
 
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
 
-        let name = app.localizedName ?? "Unknown"
+        let name = app.cleanName ?? "Unknown"
         let bundleId = app.bundleIdentifier
         let pid = app.processIdentifier
 
@@ -814,4 +814,17 @@ public struct FocusInfo: Equatable, Sendable {
         self.axIdentifier = axIdentifier
         self.isFocused = isFocused
     }
+}
+
+/// app 名去掉控制字符和首尾空白。有的 app 自带的本地化名带不可见的控制字符
+/// (如开头多一个 U+0092),不洗就和干净的写法对不上,同一个 app 会被当成两个。
+enum AppName {
+    static func clean(_ raw: String) -> String {
+        String(String.UnicodeScalarView(raw.unicodeScalars.filter { $0.properties.generalCategory != .control }))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+extension NSRunningApplication {
+    var cleanName: String? { localizedName.map(AppName.clean) }
 }

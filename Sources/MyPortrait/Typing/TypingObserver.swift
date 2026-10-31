@@ -295,7 +295,7 @@ final class TypingObserver {
         let pid = app.processIdentifier
         guard pid > 0 else { return }
         let bundleId = app.bundleIdentifier ?? "unknown"
-        let appName = app.localizedName
+        let appName = app.cleanName
 
         // 判据集中在 TypingPrivacyFilter.exclusionReason —— 菜单栏采集灯读的是
         // 同一个函数,两边不许各写一份(见那边注释里的事故)。
