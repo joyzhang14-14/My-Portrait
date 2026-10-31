@@ -107,14 +107,15 @@ final class ConfigApplier {
         if lastShowDockIcon != display.showDockIcon {
             // 启动时第一次 apply 只设 policy,不开窗口:开机自启 / --background 要留在后台。
             let isLaunchApply = lastShowDockIcon == nil
+            let windowWasVisible = mainWindow?.isVisible == true
             lastShowDockIcon = display.showDockIcon
             NSApp.setActivationPolicy(display.showDockIcon ? .regular : .accessory)
-            // 切回 .regular 后 app 可能不在前台 + 窗口被压在后面 —— 主动激活并
-            // 把窗口拉到前。切到 .accessory 不用动:窗口留在原位继续可见可用。
-            // 走 showMainWindow 而不是直接 orderFront:窗口关着时视图树是卸掉的
-            // (见 AppDelegate.installMainContent),直接拉到前台会是一张空窗。
-            if display.showDockIcon, !isLaunchApply {
-                AppDelegate.current?.showMainWindow()
+            // 切回 .regular 后 app 可能不在前台 + 窗口被压在后面;切到 .accessory 时系统会把
+            // app 切到后台、窗口跟着不见。两种情况都在下一轮 runloop(策略切换生效后)把
+            // 窗口拉回前台。走 showMainWindow 而不是直接 orderFront:窗口关着时视图树是
+            // 卸掉的(见 AppDelegate.installMainContent),直接拉到前台会是一张空窗。
+            if !isLaunchApply, display.showDockIcon || windowWasVisible {
+                DispatchQueue.main.async { AppDelegate.current?.showMainWindow() }
             }
         }
 
