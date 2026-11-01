@@ -371,7 +371,7 @@ struct CaptureHealthView: View {
 extension VisionSnapshot {
     static var zero: VisionSnapshot {
         VisionSnapshot(captureAttempts: 0, framesPersisted: 0, dedupSkips: 0,
-                       intentionalSkips: 0,
+                       intentionalSkips: 0, inFlight: 0,
                        lastAttemptMs: 0, lastDbWriteMs: 0, startedAtMs: 0)
     }
 }

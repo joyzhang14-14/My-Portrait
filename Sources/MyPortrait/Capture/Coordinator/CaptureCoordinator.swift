@@ -286,8 +286,8 @@ actor CaptureCoordinator {
         }
 
         // 健康度埋点:这帧真正进入抓帧流水线(过了 DRM/防抖 gate)。
-        // dedup / DB 失败仍计入 attempt — silent_loss = attempts - persisted -
-        // dedup 才能算对。
+        // 之后每条出口都要记一个结果(persisted / dedup / intentionalSkip / lost),
+        // VisionMetrics 靠它结束 in-flight,silent_loss 才算得对。
         await VisionMetrics.shared.recordAttempt()
 
         // 1. 焦点信息（actor，O(1) 读缓存）。
@@ -298,6 +298,7 @@ actor CaptureCoordinator {
         //    invalidateStream),并给轮询器补记 lastBlocked —— 否则 DRM 内容在一个
         //    轮询间隔内开了又关,轮询器没见过 blocked,永远不发 clear,drmActive 锁死。
         if drm.isBlocked(focusInfo) {
+            await VisionMetrics.shared.recordIntentionalSkip()
             await handleDRMState(true)
             await drmWatcher.noteInlineBlock()
             return
@@ -325,7 +326,13 @@ actor CaptureCoordinator {
         //    masking:帧照拍,那个窗口在帧里被抠掉)。
         //    截图后立即读前台(激活 app + 画面最前 app),判这帧的焦点状态。
         //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
-        let image = try await screen.captureMainDisplay()
+        let image: CGImage
+        do {
+            image = try await screen.captureMainDisplay()
+        } catch {
+            await VisionMetrics.shared.recordLost()
+            throw error
+        }
         let front = await focus.liveFront()
         var focusState = FrameFocusState.classify(front)
         // 等稳期间截的帧、或截图途中来了切换通知(点别的 app 时点击帧先截、激活后到):
@@ -431,6 +438,7 @@ actor CaptureCoordinator {
                 "app":      focusInfo.appName,
                 "err":      String(describing: error),
             ])
+            await VisionMetrics.shared.recordLost()
             return
         }
         // 健康度埋点:真落库成功 → lastDbWriteMs 跳。StallDetector 拿这个
