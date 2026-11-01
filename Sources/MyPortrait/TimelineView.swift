@@ -1278,8 +1278,8 @@ struct RingGeo {
     var midR: CGFloat { size.width - midL }
 
     /// 截图和它上方日期药丸 / URL / 信息行的位置。圆形视图:16:10 贴着内圈的
-    /// 最大矩形,四角落在内圈上。聚焦视图:在 midL…midR 之间放到最大(高度上限
-    /// 约 1.5 倍),中心比窗口中心略高,上面一摞(到药丸上沿约 128pt)放在页面
+    /// 最大矩形,四角落在内圈上。聚焦视图:在 midL…midR 之间放到最大,中心比
+    /// 窗口中心略高,上面一摞(到药丸上沿约 128pt)放在页面
     /// 切换栏下面,下面让出条带。
     func shot(focused: Bool) -> ShotLayout {
         if !focused {
@@ -1292,7 +1292,7 @@ struct RingGeo {
         let top = 50 + 17 * k + pillGap + urlGap + infoGap
         let bottom = size.height - Self.stripH - 12
         let cy = min(c.y - 12 * k, (top + bottom) / 2)
-        let h = max(120, min(606 * k, (midR - midL) / 1.6, 2 * (cy - top), 2 * (bottom - cy)))
+        let h = max(120, min((midR - midL) / 1.6, 2 * (cy - top), 2 * (bottom - cy)))
         let infoY = cy - h / 2 - infoGap
         return ShotLayout(w: h * 1.6, h: h, cy: cy, infoW: h * 1.6 - 20, infoY: infoY,
                           urlY: infoY - urlGap, pillY: infoY - urlGap - pillGap)
