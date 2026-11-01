@@ -459,7 +459,7 @@ private struct MenuBarLampCard: View {
             .padding(.vertical, 12)
             SettingsDivider()
             SettingsRow("Icon size",
-                        description: "How big the icon is in the menu bar, 16–36 pt.",
+                        description: "How big the icon is in the menu bar, 16–28 pt.",
                         icon: "menubar.rectangle") {
                 let r = StatusBarMenu.iconSizeRange
                 HStack(spacing: 10) {

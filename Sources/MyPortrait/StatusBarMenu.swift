@@ -285,8 +285,8 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         statusItem.isVisible = visible
     }
 
-    /// 菜单栏图标边长(pt),设置里的 16–36。
-    static let iconSizeRange = 16...36
+    /// 菜单栏图标边长(pt),设置里的 16–28。
+    static let iconSizeRange = 16...28
 
     func refreshIcon() {
         let unhealthy = HealthMonitor.shared.unhealthy
