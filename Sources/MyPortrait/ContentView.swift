@@ -178,10 +178,10 @@ struct ContentView: View {
                     // 第一帧 layout 报小尺寸,window 被收到 onboarding size。
                     // 虽然 hosting.sizingOptions=[] 禁了持续反馈,但 swap 时
                     // 那一帧仍会触发 setContentSize。这里 finish 后主动复位回
-                    // App.swift 启动时设的 1600×960。用户不需要再点 Timeline 才正常。
+                    // App.swift 启动时设的默认尺寸。用户不需要再点 Timeline 才正常。
                     DispatchQueue.main.async {
                         if let win = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
-                            win.setContentSize(NSSize(width: 1600, height: 960))
+                            win.setContentSize(AppDelegate.defaultContentSize())
                             win.center()
                         }
                     }
