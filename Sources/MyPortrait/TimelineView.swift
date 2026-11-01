@@ -84,6 +84,9 @@ struct TimelineView: View {
     @State private var drag: RingDrag? = nil
     /// 选帧竖线换焦点时的过渡量(单位:帧):先挪回旧位置,再动画回到 0。
     @State private var tickShift: Double = 0
+    /// 主图解码尺寸(pt):当前模式下截图的显示宽度,向上取到 320pt 一档 —— 拖窗口
+    /// 时缓存 key 不跟着每个像素变;预取用同一档。
+    @State private var shotPx: CGFloat = 960
 
     static let tickStep: Double = 2.4
     /// 聚焦条带一列宽(12pt 竖条 + 6pt 缝)。
@@ -143,12 +146,16 @@ struct TimelineView: View {
                 pageSwitcher
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .onAppear { ui.size = proxy.size }
-            .onChange(of: proxy.size) { ui.size = proxy.size }
+            .onAppear { ui.size = proxy.size; updateShotPx() }
+            .onChange(of: proxy.size) { ui.size = proxy.size; updateShotPx() }
         }
         .ignoresSafeArea()
         .onAppear { installMonitor() }
-        .onDisappear { removeMonitor() }
+        .onDisappear { removeMonitor(); ImageThumbnailCache.shared.removePreviews() }
+        // 进出聚焦后换解码档:等 0.45s 的过渡走完再换,过渡中不解码。
+        .onChange(of: ui.focused) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { updateShotPx() }
+        }
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         // 长按方向键的系统重复键走同一个限速闸;单按不限。
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
@@ -168,6 +175,7 @@ struct TimelineView: View {
         // focusIndex 一变:选帧竖线做一段转动过渡。
         .onChange(of: state.focusIndex) { old, new in
             animateTicks(new - old)
+            warmPreviews()
         }
         // 换天时回到圆盘:专注视图只对当前这一天的帧有意义
         .task(id: state.selectedDay) { ui.calendarOpen = false; ui.focused = false; reload() }
@@ -246,8 +254,31 @@ struct TimelineView: View {
 
     // MARK: Loading
 
-    /// 预取当前 focusIndex 前后各 5 帧。targetPixelSize 跟主图一致(1800),
+    /// 预取当前 focusIndex 前后各 5 帧。targetPixelSize 跟主图一致(shotPx),
     /// 命中同一 cache key。
+    private func updateShotPx() {
+        let w = RingGeo(size: ui.size).shot(focused: isFocused).w
+        let px = max(320, (w / 320).rounded(.up) * 320)
+        if px != shotPx { shotPx = px }
+    }
+
+    /// 拨帧预览(长边 480px):焦点所在 MP4 chunk 里前后 40 帧整批顺序解;
+    /// JPG 帧解前后 15 帧。已有 / 在解的跳过,所以每步调一次也便宜。
+    private func warmPreviews() {
+        let frames = state.frames
+        let f = state.focusIndex
+        guard frames.indices.contains(f) else { return }
+        let chunk = frames[f].videoPath
+        var pick: [TimelineFrame] = []
+        for i in max(0, f - 40)...min(frames.count - 1, f + 40) {
+            let fr = frames[i]
+            if fr.snapshotPath != nil ? abs(i - f) <= 15 : (chunk != nil && fr.videoPath == chunk) {
+                pick.append(fr)
+            }
+        }
+        ImageThumbnailCache.shared.warmPreviews(pick)
+    }
+
     private func prefetchAround() {
         let frames = state.frames
         guard !frames.isEmpty else { return }
@@ -255,7 +286,7 @@ struct TimelineView: View {
         let lo = max(0, state.focusIndex - radius)
         let hi = min(frames.count - 1, state.focusIndex + radius)
         for i in lo...hi where i != state.focusIndex {
-            ImageThumbnailCache.shared.prefetch(frames[i], targetPixelSize: 1800)
+            ImageThumbnailCache.shared.prefetch(frames[i], targetPixelSize: shotPx)
         }
     }
 
@@ -768,7 +799,7 @@ struct TimelineView: View {
                 .position(x: g.c.x, y: sl.urlY)
             }
             // 原图完整显示:按比例放进框里,不裁边、不切圆角
-            FrameShot(frame: f, contentMode: .fit)
+            FrameShot(frame: f, contentMode: .fit, pt: shotPx)
                 .frame(width: sl.w, height: sl.h)
                 .contentShape(Rectangle())
                 .onTapGesture { toggleFocus() }
@@ -826,8 +857,8 @@ final class TimelineUI {
     /// 触控板甩一下每个事件能有上百 pt,原来一秒能走一两百帧。现在:
     /// - 22pt 一步:鼠标滚轮一格(按行滚,×22 换算)正好一帧;
     /// - 两步至少隔 40ms,即每秒 ≤ 25 帧,和系统长按方向键的重复速度相当;
-    /// - 主图没缓存时晚 80ms 才解码,连拨时一闪而过的帧不解码,慢拨(<12 帧/秒)
-    ///   每帧都看得到;
+    /// - 连拨时先显示长边 480px 的预览(按 chunk 整批预解),主图按显示尺寸解,
+    ///   没缓存时晚 30ms、有预览时晚 50ms 才解,连拨中一闪而过的帧不解清晰图;
     /// - 预取和四周列表等焦点停稳 180ms 才跑。
     static let wheelStep: CGFloat = 22
     static let minStepInterval: TimeInterval = 0.04
@@ -1509,6 +1540,11 @@ enum Fmt {
 private struct FrameShot: View {
     let frame: TimelineFrame
     let contentMode: ContentMode
+    /// 解码尺寸(pt),见 TimelineView.shotPx。
+    let pt: CGFloat
+    /// 解码前等 30ms(连拨时一闪而过的帧不解);有预览时至少等 50ms,见
+    /// AsyncDiskThumbnail.previewSettle。
+    private let delay: Duration = .milliseconds(30)
     var body: some View {
         // Color.clear 严格取槽位尺寸,图 overlay 上去 —— 直接放 fill 的图会上报
         // 超过槽位的布局尺寸。
@@ -1516,12 +1552,13 @@ private struct FrameShot: View {
             if !frame.hasViewableMedia {
                 NoMediaPlaceholder()
             } else if let path = frame.snapshotPath {
-                AsyncDiskThumbnail(path: path, targetPixelSize: 1800, contentMode: contentMode,
-                                   decodeDelay: .milliseconds(80))
+                AsyncDiskThumbnail(path: path, targetPixelSize: pt, contentMode: contentMode,
+                                   decodeDelay: delay, previewKey: ImageThumbnailCache.previewKey(frame))
             } else if let vpath = frame.videoPath {
                 AsyncMP4FrameThumbnail(videoPath: vpath, offsetMs: frame.videoOffsetMs,
-                                       fps: frame.videoFps, targetPixelSize: 1800,
-                                       contentMode: contentMode, decodeDelay: .milliseconds(80))
+                                       fps: frame.videoFps, targetPixelSize: pt,
+                                       contentMode: contentMode, decodeDelay: delay,
+                                       previewKey: ImageThumbnailCache.previewKey(frame))
             }
         }
         .clipped()

@@ -23,10 +23,66 @@ final class ImageThumbnailCache {
 
     func cached(_ key: String) -> NSImage? { cache.object(forKey: key as NSString) }
 
+    /// 拨帧预览:长边 480px 的小图,单独一个 NSCache(16:10 一张约 0.6MB,
+    /// 48MB ≈ 80 张),Timeline 页面消失时整个清掉。
+    nonisolated static let previewPixel: CGFloat = 480
+    private let previews: NSCache<NSString, NSImage> = {
+        let c = NSCache<NSString, NSImage>()
+        c.totalCostLimit = 48 * 1024 * 1024
+        return c
+    }()
+    /// 正在解预览的 key(JPG 帧 / MP4 整个 chunk),防同一份活重复排队。
+    private var warming = Set<String>()
+
+    static func previewKey(_ frame: TimelineFrame) -> String? {
+        guard frame.hasViewableMedia else { return nil }
+        if let p = frame.snapshotPath { return "pv:\(p)" }
+        if let v = frame.videoPath { return "pv:mp4:\(v)#\(frame.videoOffsetMs)" }
+        return nil
+    }
+    func preview(_ key: String) -> NSImage? { previews.object(forKey: key as NSString) }
+    func removePreviews() { previews.removeAllObjects() }
+    private func storePreview(_ image: NSImage, for key: String) {
+        let rep = image.representations.first
+        previews.setObject(image, forKey: key as NSString,
+                           cost: (rep?.pixelsWide ?? 0) * (rep?.pixelsHigh ?? 0) * 4)
+    }
+
+    /// 给这些帧解预览(已有的跳过)。JPG 一帧一个 ImageIO 缩略图;MP4 同一个
+    /// chunk 的帧按时间顺序交给一个复用的生成器顺序解,比逐帧 seek 便宜得多。
+    func warmPreviews(_ frames: [TimelineFrame]) {
+        var chunks: [String: [(key: String, seconds: Double)]] = [:]
+        for f in frames {
+            guard let key = Self.previewKey(f), previews.object(forKey: key as NSString) == nil else { continue }
+            if let path = f.snapshotPath {
+                guard warming.insert(key).inserted else { continue }
+                Task.detached(priority: .utility) {
+                    let img = AsyncDiskThumbnail.downsample(path: path, maxPixel: Self.previewPixel)
+                    await MainActor.run {
+                        if let img { ImageThumbnailCache.shared.storePreview(img, for: key) }
+                        ImageThumbnailCache.shared.warming.remove(key)
+                    }
+                }
+            } else if let v = f.videoPath {
+                chunks[v, default: []].append((key, AsyncMP4FrameThumbnail.seconds(f.videoOffsetMs)))
+            }
+        }
+        for (path, items) in chunks {
+            let tag = "chunk:\(path)"
+            guard warming.insert(tag).inserted else { continue }
+            Task.detached(priority: .utility) {
+                await MP4Generators.shared.images(path: path, items: items, maxPixel: Self.previewPixel) { key, img in
+                    await MainActor.run { ImageThumbnailCache.shared.storePreview(img, for: key) }
+                }
+                await MainActor.run { _ = ImageThumbnailCache.shared.warming.remove(tag) }
+            }
+        }
+    }
+
     /// 全清。窗口关闭 / app 隐藏时调 —— NSCache 只在系统内存压力下才自动
     /// 回收,后台常驻进程等不到那一天,不主动清就一直占着(实测可达数百 MB)。
     /// 代价只是重开窗口后缩略图从磁盘重新解码。
-    func removeAll() { cache.removeAllObjects() }
+    func removeAll() { cache.removeAllObjects(); previews.removeAllObjects() }
     func store(_ image: NSImage, for key: String) {
         // cost = 解码后近似字节数(像素宽×高×4),让 totalCostLimit 生效
         let rep = image.representations.first
@@ -77,8 +133,12 @@ struct AsyncDiskThumbnail: View {
     /// 没命中缓存时先等这么久再解码;期间换了帧(.task 被取消)就不解码。
     /// Timeline 快速拨帧时用它跳过一闪而过的帧。
     var decodeDelay: Duration = .zero
+    /// ImageThumbnailCache.previewKey:有就在清晰图解出来前先显示那张小预览。
+    var previewKey: String? = nil
 
     @State private var image: NSImage?
+    /// 当前 image 属于哪一帧(预览或清晰图)。
+    @State private var shownID: String?
 
     var body: some View {
         Group {
@@ -96,22 +156,24 @@ struct AsyncDiskThumbnail: View {
                     )
             }
         }
-        .task(id: path) { await load() }
+        .task(id: "\(path)|\(Int(targetPixelSize))") { await load() }
     }
 
     private func load() async {
         let key = "\(path)|\(Int(targetPixelSize))"
         if let cached = ImageThumbnailCache.shared.cached(key) {
             self.image = cached
+            shownID = path
             return
         }
+        let delay = showPreview(id: path) ? max(decodeDelay, Self.previewSettle) : decodeDelay
         // Race-defensive: the file may have existed when the TimelineFrame
         // was built but been deleted since (e.g. CompactionWorker embeds
         // it into an MP4 chunk and rm's the JPG). Skip silently to avoid
         // ImageIO logging "*** ERROR: can't open" to stderr.
         guard FileManager.default.fileExists(atPath: path) else { return }
-        if decodeDelay > .zero {
-            try? await Task.sleep(for: decodeDelay)
+        if delay > .zero {
+            try? await Task.sleep(for: delay)
             if Task.isCancelled { return }
         }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
@@ -123,9 +185,21 @@ struct AsyncDiskThumbnail: View {
             // .task(id:) 切帧时已 cancel 本 task,但 detached 解码不传播取消;
             // await 回来若已取消说明 path 已换 —— 只进缓存不回写,防慢的旧帧
             // 结果覆盖已显示的新帧。
-            if !Task.isCancelled { self.image = loaded }
+            if !Task.isCancelled { self.image = loaded; shownID = path }
         }
     }
+
+    /// 有预览就先上预览;同一帧已经显示着(只是换了尺寸档)就不退回预览。
+    private func showPreview(id: String) -> Bool {
+        guard shownID != id, let pk = previewKey, let pv = ImageThumbnailCache.shared.preview(pk) else { return false }
+        image = pv
+        shownID = id
+        return true
+    }
+
+    /// 先上了预览时,清晰图至少等 50ms 再解:比拨帧最小间隔 40ms 长,连拨
+    /// 过程中不解清晰图,停下就解。
+    static let previewSettle: Duration = .milliseconds(50)
 
     nonisolated static func downsample(path: String, maxPixel: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path) as CFURL
@@ -154,8 +228,12 @@ struct AsyncMP4FrameThumbnail: View {
     /// 没命中缓存时先等这么久再解码;期间换了帧(.task 被取消)就不解码。
     /// Timeline 快速拨帧时用它跳过一闪而过的帧。
     var decodeDelay: Duration = .zero
+    /// ImageThumbnailCache.previewKey:有就在清晰图解出来前先显示那张小预览。
+    var previewKey: String? = nil
 
     @State private var image: NSImage?
+    /// 当前 image 属于哪一帧(预览或清晰图)。
+    @State private var shownID: String?
 
     var body: some View {
         Group {
@@ -173,17 +251,25 @@ struct AsyncMP4FrameThumbnail: View {
                     )
             }
         }
-        .task(id: "\(videoPath)#\(offsetMs)") { await load() }
+        .task(id: "\(videoPath)#\(offsetMs)|\(Int(targetPixelSize))") { await load() }
     }
 
     private func load() async {
         let key = "mp4:\(videoPath)#\(offsetMs)|\(Int(targetPixelSize))"
+        let id = "\(videoPath)#\(offsetMs)"
         if let cached = ImageThumbnailCache.shared.cached(key) {
             self.image = cached
+            shownID = id
             return
         }
-        if decodeDelay > .zero {
-            try? await Task.sleep(for: decodeDelay)
+        var delay = decodeDelay
+        if shownID != id, let pk = previewKey, let pv = ImageThumbnailCache.shared.preview(pk) {
+            image = pv
+            shownID = id
+            delay = max(delay, AsyncDiskThumbnail.previewSettle)
+        }
+        if delay > .zero {
+            try? await Task.sleep(for: delay)
             if Task.isCancelled { return }
         }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
@@ -197,41 +283,73 @@ struct AsyncMP4FrameThumbnail: View {
             ImageThumbnailCache.shared.store(loaded, for: key)
             // 同 AsyncDiskThumbnail:MP4 抽帧慢,切帧后迟到的旧结果只进缓存,
             // 不回写 image,防错帧画面一直挂着。
-            if !Task.isCancelled { self.image = loaded }
+            if !Task.isCancelled { self.image = loaded; shownID = id }
         }
+    }
+
+    /// offset_ms 是在 MP4 里的位置;没记(老 chunk 一帧一个文件)就取第 0 帧。
+    nonisolated static func seconds(_ offsetMs: Int) -> Double {
+        offsetMs > 0 ? Double(offsetMs) / 1000.0 : 0
     }
 
     nonisolated static func extract(videoPath: String, offsetMs: Int, fps: Double, maxPixel: CGFloat) async -> NSImage? {
         guard FileManager.default.fileExists(atPath: videoPath) else { return nil }
-        let url = URL(fileURLWithPath: videoPath)
-
-        let asset = AVURLAsset(url: url)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        generator.maximumSize = CGSize(width: maxPixel, height: maxPixel)
-
-        // offset_ms is the position into the MP4. If the migration didn't
-        // record one (offsetMs == 0 for legacy chunks before timestamp_ms
-        // alignment), fall back to fps-based reasoning so the first frame
-        // still renders.
-        let seconds: Double
-        if offsetMs > 0 {
-            seconds = Double(offsetMs) / 1000.0
-        } else {
-            // No offset recorded — assume frame 0. Used by legacy MP4 chunks
-            // where each chunk corresponds to one frame.
-            let effectiveFps = fps > 0 ? fps : 0.5
-            seconds = max(0.0 / effectiveFps, 0)
-        }
-        let time = CMTime(seconds: seconds, preferredTimescale: 600)
-
-        do {
-            let (cgImage, _) = try await generator.image(at: time)
-            return NSImage(cgImage: cgImage, size: .zero)
-        } catch {
-            return nil
-        }
+        return await MP4Generators.shared.image(path: videoPath, seconds: seconds(offsetMs), maxPixel: maxPixel)
     }
 }
+
+/// 按 chunk 复用 AVURLAsset + AVAssetImageGenerator(LRU,≈4 个 chunk × 清晰 / 预览
+/// 两档尺寸 = 8 个),不再每抽一帧就新建一套、重新解析 MP4 头。生成器只在这个
+/// actor 里用。
+actor MP4Generators {
+    static let shared = MP4Generators()
+    private var lru: [(key: String, gen: AVAssetImageGenerator)] = []
+
+    private func generator(_ path: String, _ maxPixel: CGFloat) -> AVAssetImageGenerator {
+        let key = "\(path)|\(Int(maxPixel))"
+        if let i = lru.firstIndex(where: { $0.key == key }) {
+            let e = lru.remove(at: i)
+            lru.append(e)
+            return e.gen
+        }
+        let g = AVAssetImageGenerator(asset: AVURLAsset(url: URL(fileURLWithPath: path)))
+        g.appliesPreferredTrackTransform = true
+        g.requestedTimeToleranceBefore = .zero
+        g.requestedTimeToleranceAfter = .zero
+        g.maximumSize = CGSize(width: maxPixel, height: maxPixel)
+        lru.append((key, g))
+        if lru.count > 8 { lru.removeFirst() }
+        return g
+    }
+
+    func image(path: String, seconds: Double, maxPixel: CGFloat) async -> NSImage? {
+        let g = generator(path, maxPixel)
+        let (stream, cont) = AsyncStream.makeStream(of: NSImage?.self)
+        g.generateCGImageAsynchronously(for: CMTime(seconds: seconds, preferredTimescale: 600)) { cg, _, _ in
+            cont.yield(cg.map { NSImage(cgImage: $0, size: .zero) })
+            cont.finish()
+        }
+        for await img in stream { return img }
+        return nil
+    }
+
+    /// 同一个 chunk 的多帧按时间顺序一次性交给生成器,解出一张回调一张。
+    func images(path: String, items: [(key: String, seconds: Double)], maxPixel: CGFloat,
+                each: @Sendable (String, NSImage) async -> Void) async {
+        guard FileManager.default.fileExists(atPath: path), !items.isEmpty else { return }
+        let g = generator(path, maxPixel)
+        let times = items.map { CMTime(seconds: $0.seconds, preferredTimescale: 600) }.sorted { $0 < $1 }
+        var keys: [Int64: String] = [:]
+        for it in items { keys[CMTime(seconds: it.seconds, preferredTimescale: 600).value] = it.key }
+        let byTime = keys, last = times[times.count - 1]
+        let (stream, cont) = AsyncStream.makeStream(of: (String, NSImage).self)
+        g.generateCGImagesAsynchronously(forTimes: times.map { NSValue(time: $0) }) { req, cg, _, _, _ in
+            if let cg, let key = byTime[req.convertScale(600, method: .roundHalfAwayFromZero).value] {
+                cont.yield((key, NSImage(cgImage: cg, size: .zero)))
+            }
+            if CMTimeCompare(req, last) == 0 { cont.finish() }
+        }
+        for await (key, img) in stream { await each(key, img) }
+    }
+}
+
