@@ -607,14 +607,14 @@ struct TimelineView: View {
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
         .onTapGesture { }   // 药丸空白处不落到下面的拖窗手势
-        .position(x: g.c.x, y: g.c.y - 305 * g.k)
+        .position(x: g.c.x, y: g.c.y - 312 * g.k)
     }
 
     @ViewBuilder
     private func innerLayer(_ g: RingGeo) -> some View {
         if let f = currentFrame {
             let k = g.k, fk = g.fk
-            let shotW = 624 * k, shotH = 390 * k   // 居中时四角刚好落在内圈里
+            let shotW = 646 * k, shotH = 404 * k   // 16:10 贴着内圈的最大矩形,四角落在内圈上
             if let url = f.browserUrl, !url.isEmpty {
                 let secure = url.hasPrefix("https://")
                 HStack(spacing: 8) {
@@ -633,7 +633,7 @@ struct TimelineView: View {
                 .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: 460 * k)
-                .position(x: g.c.x, y: g.c.y - 254 * k)
+                .position(x: g.c.x, y: g.c.y - 262 * k)
             }
             // 原图完整显示:按比例放进框里,不裁边、不切圆角
             FrameShot(frame: f, contentMode: .fit)
@@ -658,7 +658,7 @@ struct TimelineView: View {
                     .foregroundStyle(pal.muted)
                     .layoutPriority(1)
             }
-            .frame(width: shotW - 40)   // 挪到截图上方后收窄,两端不碰内圈
+            .frame(width: shotW - 80)   // 在截图上方,收窄让两端不碰内圈
             .position(x: g.c.x, y: g.c.y - shotH / 2 - 11 * fk - 10 * k)
         }
     }
@@ -1094,7 +1094,7 @@ private struct EmptyState: View {
 // =============================================================================
 
 /// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 至少 180pt 侧栏 +
-/// 10pt 间隙,上下留 30pt;时刻标签外沿在 440/392·R。
+/// 10pt 间隙,上下留 22pt;时刻标签外沿在 440/392·R。
 struct RingGeo {
     static let edge: CGFloat = 20
     let size: CGSize
@@ -1107,7 +1107,7 @@ struct RingGeo {
         self.size = size
         let ext: CGFloat = 440.0 / 392.0
         let rw = (size.width / 2 - Self.edge - 180 - 10) / ext
-        let rh = (size.height / 2 - 30) / ext
+        let rh = (size.height / 2 - 22) / ext
         let r = max(160, min(392, rw, rh))
         self.r = r
         k = r / 392

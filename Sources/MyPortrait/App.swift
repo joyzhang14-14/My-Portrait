@@ -578,7 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(ConfigStore.shared.display.showDockIcon ? .regular : .accessory)
 
         window = ChromelessWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 835),
+            contentRect: NSRect(x: 0, y: 0, width: 1600, height: 960),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: true   // 第一次显示才建窗口后备缓冲;后台启动用不上
@@ -608,9 +608,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.zoomButton)?.isHidden = false
         // 关掉 NSWindow 默认的 state restoration —— 用户上次手动 resize
         // 后,macOS 会偷偷把那个尺寸记下,下次启动 contentRect 被覆盖,
-        // 看上去"初始窗口变大了"。关掉后每次启动都老老实实 1200×835。
+        // 看上去"初始窗口变大了"。关掉后每次启动都老老实实 1600×960。
         window.isRestorable = false
-        window.setContentSize(NSSize(width: 1200, height: 835))
+        window.setContentSize(NSSize(width: 1600, height: 960))
 
         // Host the SwiftUI ContentView inside the AppKit window. 开机自启不建,
         // 等用户从菜单栏 / Dock 打开(showMainWindow)时再建。
