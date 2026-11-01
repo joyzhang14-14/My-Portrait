@@ -62,6 +62,9 @@ final class TimelineState {
 // 信息行和沿下半圈排开的选帧竖线;圆四周四个角:Active Apps / Audio /
 // Event Session / Today。设计稿在 1600×960 上按外圈半径 392 画,这里按窗口
 // 可用空间求半径,圆相关的常数都乘 k = R / 392(见 RingGeo)。
+// 点截图进聚焦视图:圆和四个角淡出,截图放大约 1.5 倍上移,选帧竖线从下半圈
+// 变形成窗口底部的横排条带;再点截图或按 Esc 原路返回。两套布局都从窗口尺寸
+// 算(RingGeo.shot / ticksLayer),同一个 spring 驱动,切换时不重新取数、不解码。
 
 struct TimelineView: View {
     /// Hoisted to ContentView so the focus/frames survive page switches.
@@ -78,10 +81,13 @@ struct TimelineView: View {
     @State private var hover: RingHover? = nil
     @State private var hotApp: String? = nil
     @State private var drag: RingDrag? = nil
-    /// 选帧竖线换焦点时的过渡角度:先转回旧位置,再动画转到 0。
+    /// 选帧竖线换焦点时的过渡量(单位:帧):先挪回旧位置,再动画回到 0。
     @State private var tickShift: Double = 0
 
     static let tickStep: Double = 2.4
+    /// 聚焦条带一列宽(12pt 竖条 + 6pt 缝)。
+    static let stripCol: CGFloat = 18
+    static let focusAnim = Animation.spring(duration: 0.45, bounce: 0.12)
 
     private var pal: RingPalette { RingPalette(dark: colorScheme == .dark) }
 
@@ -103,26 +109,37 @@ struct TimelineView: View {
     var body: some View {
         GeometryReader { proxy in
             let g = RingGeo(size: proxy.size)
+            let fm = isFocused
+            let sl = g.shot(focused: fm)
+            // 圆和四个角淡出时跟着日期药丸一起往上走一半的位移
+            let lift = fm ? (sl.pillY - g.shot(focused: false).pillY) / 2 : 0
             ZStack(alignment: .topLeading) {
                 backdrop(g)
                 ringCanvas(g)
-                ringHitArea(g)
+                    .scaleEffect(fm ? 1.06 : 1)
+                    .offset(y: lift)
+                    .opacity(fm ? 0 : 1)
+                ringHitArea(g).allowsHitTesting(!fm)
                 if state.frames.isEmpty {
                     EmptyState(loading: state.loading, hasDB: services != nil)
                         .position(g.c)
                 } else {
+                    stripBackdrop(g).opacity(fm ? 1 : 0)
                     ticksLayer(g)
-                    innerLayer(g)
+                    innerLayer(g, sl)
                     corners(g)
+                        .compositingGroup()
+                        .offset(y: lift)
+                        .opacity(fm ? 0 : 1)
+                        .allowsHitTesting(!fm)
                 }
-                datePill(g)
+                datePill(g, sl)
                 tooltip(g)
                 pageSwitcher
-                if ui.zoomed, let f = currentFrame { zoomOverlay(f, g) }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .onAppear { ui.center = g.c; ui.radius = g.r2 + 12 * g.k }
-            .onChange(of: proxy.size) { ui.center = g.c; ui.radius = g.r2 + 12 * g.k }
+            .onAppear { ui.size = proxy.size }
+            .onChange(of: proxy.size) { ui.size = proxy.size }
         }
         .ignoresSafeArea()
         .onAppear { installMonitor() }
@@ -169,11 +186,18 @@ struct TimelineView: View {
                 reload(preserveFocus: true)
             }
         }
-        .onChange(of: ui.calendarOpen) { ui.wheelBlocked = ui.calendarOpen || ui.zoomed }
-        .onChange(of: ui.zoomed) { ui.wheelBlocked = ui.calendarOpen || ui.zoomed }
+        .onChange(of: ui.calendarOpen) { ui.wheelBlocked = ui.calendarOpen }
     }
 
     // MARK: Focus
+
+    /// 当天没帧时聚焦视图没东西可看,按圆形视图画。
+    private var isFocused: Bool { ui.focused && !state.frames.isEmpty }
+
+    private func toggleFocus() {
+        hover = nil; hotApp = nil
+        withAnimation(Self.focusAnim) { ui.focused.toggle() }
+    }
 
     private static func isRepeat(_ note: Notification) -> Bool {
         (note.userInfo?["isRepeat"] as? Bool) ?? false
@@ -192,7 +216,7 @@ struct TimelineView: View {
     private func animateTicks(_ delta: Int) {
         guard delta != 0, abs(delta) <= 16 else { return }
         var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) { tickShift = -Double(delta) * Self.tickStep }
+        withTransaction(t) { tickShift = -Double(delta) }
         DispatchQueue.main.async {
             withAnimation(.easeOut(duration: 0.18)) { tickShift = 0 }
         }
@@ -281,19 +305,27 @@ struct TimelineView: View {
 
     // MARK: Wheel / Esc
 
-    /// 滚轮只在指针落在圆里(含外圈)时拨帧,圆外的列表照常滚;Esc 关放大图。
+    /// 圆形视图里滚轮只在指针落在圆里(含外圈)时拨帧,圆外的列表照常滚;聚焦视图
+    /// 里落在截图或底部条带上才拨。Esc 退出聚焦。
     private func installMonitor() {
         guard ui.monitor == nil else { return }
         let ui = self.ui, state = self.state
         ui.monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown]) { e in
             if e.type == .keyDown {
-                if e.keyCode == 53, ui.zoomed { ui.zoomed = false; return nil }
+                if e.keyCode == 53, ui.focused {
+                    withAnimation(Self.focusAnim) { ui.focused = false }
+                    return nil
+                }
                 return e
             }
             guard !ui.wheelBlocked, !state.frames.isEmpty,
                   let cv = e.window?.contentView else { return e }
             let p = CGPoint(x: e.locationInWindow.x, y: cv.bounds.height - e.locationInWindow.y)
-            guard hypot(p.x - ui.center.x, p.y - ui.center.y) <= ui.radius else { return e }
+            let g = RingGeo(size: ui.size)
+            let inside = ui.focused
+                ? p.y >= g.size.height - RingGeo.stripH || g.shot(focused: true).rect(g).contains(p)
+                : g.dist(p) <= g.r2 + 12 * g.k
+            guard inside else { return e }
             var dx = e.scrollingDeltaX, dy = e.scrollingDeltaY
             if !e.hasPreciseScrollingDeltas { dx *= TimelineUI.wheelStep; dy *= TimelineUI.wheelStep }
             ui.wheelAcc += abs(dx) > abs(dy) ? -dx : -dy
@@ -525,49 +557,77 @@ struct TimelineView: View {
         .foregroundStyle(pal.fg)
     }
 
-    // MARK: Frame ticks (bottom inner arc)
+    // MARK: Frame ticks (bottom inner arc / focus strip)
 
-    /// 选帧竖线:沿圆的下半圈排开,当前帧在正下方,往右是更晚的帧。
+    /// 选帧竖线。圆形视图:沿圆的下半圈排开,当前帧在正下方,往右是更晚的帧。
+    /// 聚焦视图:同一批竖线变成窗口底部的横排条带(竖条从窗口底边长出来,app
+    /// 换了在竖条上方放图标,两端渐隐)。每根竖线按帧号保持身份,切换时位置 /
+    /// 角度 / 尺寸一起插值;条带多出来的列淡入。
     private func ticksLayer(_ g: RingGeo) -> some View {
-        let frames = state.frames
+        let frames = state.frames, fm = isFocused
         let f = min(max(0, state.focusIndex), frames.count - 1)
-        let lo = max(0, f - 20), hi = min(frames.count - 1, f + 20)
+        let span = fm ? max(20, Int(g.size.width / Self.stripCol / 2) + 2) : 20
+        let lo = max(0, f - span), hi = min(frames.count - 1, f + span)
         var icons = Set<Int>()
         var lastIcon = -99
-        for i in lo...hi where (i == 0 || frames[i - 1].appName != frames[i].appName)
-            && abs(i - f) <= 14 && i - lastIcon >= 3 {
-            icons.insert(i); lastIcon = i
+        for i in lo...hi where i == 0 || frames[i - 1].appName != frames[i].appName {
+            if fm ? i - lastIcon >= 2 : (abs(i - f) <= 14 && i - lastIcon >= 3) {
+                icons.insert(i); lastIcon = i
+            }
         }
-        let k = g.k
+        let col = Self.stripCol
         return ZStack(alignment: .topLeading) {
             ForEach(Array(lo...hi), id: \.self) { i in
-                let d = abs(i - f), cur = i == f
-                let a = 180 - Double(i - f) * Self.tickStep
-                let len = (cur ? 64 : 36) * k
-                let fade = max(0, 1 - Double(max(0, d - 14)) / 6)
-                ZStack(alignment: .top) {
-                    Capsule()
-                        .fill(TimelineBarColor.barColor(for: frames[i].appName))
-                        .frame(width: 11 * k, height: len + 11 * k)
-                        .shadow(color: cur ? pal.curglow : .clear, radius: 6 * k)
-                }
-                .frame(width: 18 * k, height: 76 * k, alignment: .top)
-                .contentShape(Rectangle())
-                .rotationEffect(.degrees(a))
-                .position(g.pt(330 * k, a))
-                .opacity(fade)
-                .onTapGesture { setFocus(i) }
-                if icons.contains(i) {
-                    RealAppIcon(appName: frames[i].appName, size: 26 * k)
-                        .position(g.pt(276 * k, a))
-                        .opacity(fade)
-                        .allowsHitTesting(false)
-                }
+                tick(i, f: f, g: g, fm: fm, icon: icons.contains(i))
             }
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
-        .rotationEffect(.degrees(tickShift),
+        .drawingGroup()
+        .rotationEffect(.degrees(fm ? 0 : tickShift * Self.tickStep),
                         anchor: UnitPoint(x: g.c.x / max(1, g.size.width), y: g.c.y / max(1, g.size.height)))
+        .offset(x: fm ? -tickShift * col : 0)
+    }
+
+    @ViewBuilder
+    private func tick(_ i: Int, f: Int, g: RingGeo, fm: Bool, icon: Bool) -> some View {
+        let app = state.frames[i].appName
+        let k = g.k, H = g.size.height, col = Self.stripCol
+        let d = abs(i - f), cur = i == f
+        let a: Double = 180 - Double(i - f) * Self.tickStep
+        let x: CGFloat = g.c.x + CGFloat(i - f) * col
+        // 条带的竖条往窗口底边下多伸 6pt,藏掉底下的圆角
+        let boxH: CGFloat = fm ? RingGeo.stripH + 6 : 76 * k
+        let barH: CGFloat = fm ? (cur ? 106 : 62) : ((cur ? 64 : 36) + 11) * k
+        let fade: Double = fm ? Double(min(1, max(0, (g.size.width / 2 - abs(x - g.c.x)) / 180)))
+                              : max(0, 1 - Double(max(0, d - 14)) / 6)
+        let barPos: CGPoint = fm ? CGPoint(x: x, y: H + 6 - boxH / 2) : g.pt(330 * k, a)
+        let iconPos: CGPoint = fm ? CGPoint(x: x, y: H - RingGeo.stripH + 16) : g.pt(276 * k, a)
+        ZStack(alignment: .bottom) {
+            RoundedRectangle(cornerRadius: fm ? 5 : 5.5 * k, style: .continuous)
+                .fill(TimelineBarColor.barColor(for: app))
+                .frame(width: fm ? 12 : 11 * k, height: barH)
+                .shadow(color: cur ? pal.curglow : .clear, radius: cur ? 6 : 0)
+        }
+        .frame(width: fm ? col : col * k, height: boxH, alignment: .bottom)
+        .contentShape(Rectangle())
+        .rotationEffect(.degrees(fm ? 0 : a - 180))
+        .position(barPos)
+        .opacity(fade)
+        .onTapGesture { setFocus(i) }
+        if icon {
+            RealAppIcon(appName: app, size: fm ? 32 : 26 * k)
+                .position(iconPos)
+                .opacity(fade)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// 聚焦条带底下那层由下往上的淡底。
+    private func stripBackdrop(_ g: RingGeo) -> some View {
+        LinearGradient(colors: [Theme.hover, .clear], startPoint: .bottom, endPoint: .top)
+            .frame(width: g.size.width, height: RingGeo.stripH)
+            .position(x: g.c.x, y: g.size.height - RingGeo.stripH / 2)
+            .allowsHitTesting(false)
     }
 
     // MARK: Inside the circle
@@ -582,7 +642,7 @@ struct TimelineView: View {
         state.selectedDay = d
     }
 
-    private func datePill(_ g: RingGeo) -> some View {
+    private func datePill(_ g: RingGeo, _ sl: ShotLayout) -> some View {
         let fk = g.fk
         let canNext = (Calendar.current.date(byAdding: .day, value: 1, to: day0) ?? .distantFuture) <= Date()
         let db = services?.db
@@ -618,14 +678,13 @@ struct TimelineView: View {
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
         .onTapGesture { }   // 药丸空白处不落到下面的拖窗手势
-        .position(x: g.c.x, y: g.c.y - 312 * g.k)
+        .position(x: g.c.x, y: sl.pillY)
     }
 
     @ViewBuilder
-    private func innerLayer(_ g: RingGeo) -> some View {
+    private func innerLayer(_ g: RingGeo, _ sl: ShotLayout) -> some View {
         if let f = currentFrame {
             let k = g.k, fk = g.fk
-            let shotW = 646 * k, shotH = 404 * k   // 16:10 贴着内圈的最大矩形,四角落在内圈上
             if let url = f.browserUrl, !url.isEmpty {
                 let secure = url.hasPrefix("https://")
                 HStack(spacing: 8) {
@@ -644,14 +703,14 @@ struct TimelineView: View {
                 .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: 460 * k)
-                .position(x: g.c.x, y: g.c.y - 262 * k)
+                .position(x: g.c.x, y: sl.urlY)
             }
             // 原图完整显示:按比例放进框里,不裁边、不切圆角
             FrameShot(frame: f, contentMode: .fit)
-                .frame(width: shotW, height: shotH)
+                .frame(width: sl.w, height: sl.h)
                 .contentShape(Rectangle())
-                .onTapGesture { ui.zoomed = true }
-                .position(x: g.c.x, y: g.c.y)
+                .onTapGesture { toggleFocus() }
+                .position(x: g.c.x, y: sl.cy)
             HStack(spacing: 9) {
                 RealAppIcon(appName: f.appName, size: 22 * fk)
                 Text(f.appName.isEmpty ? "(unknown app)" : f.appName)
@@ -669,22 +728,9 @@ struct TimelineView: View {
                     .foregroundStyle(pal.muted)
                     .layoutPriority(1)
             }
-            .frame(width: shotW - 80)   // 在截图上方,收窄让两端不碰内圈
-            .position(x: g.c.x, y: g.c.y - shotH / 2 - 11 * fk - 10 * k)
+            .frame(width: sl.infoW)
+            .position(x: g.c.x, y: sl.infoY)
         }
-    }
-
-    private func zoomOverlay(_ f: TimelineFrame, _ g: RingGeo) -> some View {
-        ZStack {
-            Color.black.opacity(0.55)
-            FrameShot(frame: f, contentMode: .fit)
-                .frame(width: g.size.width * 0.875, height: g.size.height * 0.9)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .shadow(color: .black.opacity(0.5), radius: 30, y: 20)
-        }
-        .frame(width: g.size.width, height: g.size.height)
-        .contentShape(Rectangle())
-        .onTapGesture { ui.zoomed = false }
     }
 
     // MARK: Corners
@@ -704,13 +750,12 @@ struct TimelineView: View {
 /// 只给滚轮监听 / Esc 用的引用型状态 —— NSEvent 闭包里要读写它。
 @Observable
 final class TimelineUI {
-    var zoomed = false
+    var focused = false
     var calendarOpen = false
     /// 指针位置只由 RingTooltip 读,移动鼠标时只重画 tooltip 那一层。
     var hoverPoint: CGPoint = .zero
     @ObservationIgnored var wheelBlocked = false
-    @ObservationIgnored var center: CGPoint = .zero
-    @ObservationIgnored var radius: CGFloat = 0
+    @ObservationIgnored var size: CGSize = .zero
     @ObservationIgnored var wheelAcc: CGFloat = 0
     @ObservationIgnored var monitor: Any?
     @ObservationIgnored private var lastStep: TimeInterval = 0
@@ -1160,6 +1205,40 @@ struct RingGeo {
         return a < 0 ? a + 360 : a
     }
     func dist(_ p: CGPoint) -> CGFloat { hypot(p.x - c.x, p.y - c.y) }
+
+    /// 聚焦条带高度(图标槽 32 + 竖条最高 100 + 余量)。
+    static let stripH: CGFloat = 140
+
+    /// 截图和它上方日期药丸 / URL / 信息行的位置。圆形视图:16:10 贴着内圈的
+    /// 最大矩形,四角落在内圈上。聚焦视图:最大约 1.5 倍,中心比窗口中心略高,
+    /// 上面一摞(到药丸上沿约 128pt)放在页面切换栏下面,下面让出条带。
+    func shot(focused: Bool) -> ShotLayout {
+        if !focused {
+            let h = 404 * k
+            return ShotLayout(w: 646 * k, h: h, cy: c.y, infoW: 646 * k - 80,
+                              infoY: c.y - h / 2 - 11 * fk - 10 * k,
+                              urlY: c.y - 262 * k, pillY: c.y - 312 * k)
+        }
+        let infoGap = 11 * fk + 10 * k, urlGap = 36 * k, pillGap = 44 * k
+        let top = 50 + 17 * k + pillGap + urlGap + infoGap
+        let bottom = size.height - Self.stripH - 12
+        let cy = min(c.y - 12 * k, (top + bottom) / 2)
+        let h = max(120, min(606 * k, (size.width - 80) / 1.6, 2 * (cy - top), 2 * (bottom - cy)))
+        let infoY = cy - h / 2 - infoGap
+        return ShotLayout(w: h * 1.6, h: h, cy: cy, infoW: h * 1.6 - 20, infoY: infoY,
+                          urlY: infoY - urlGap, pillY: infoY - urlGap - pillGap)
+    }
+}
+
+struct ShotLayout {
+    let w: CGFloat
+    let h: CGFloat
+    let cy: CGFloat
+    let infoW: CGFloat
+    let infoY: CGFloat
+    let urlY: CGFloat
+    let pillY: CGFloat
+    func rect(_ g: RingGeo) -> CGRect { CGRect(x: g.c.x - w / 2, y: cy - h / 2, width: w, height: h) }
 }
 
 struct RingPalette {
