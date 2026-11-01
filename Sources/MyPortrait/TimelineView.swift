@@ -352,14 +352,14 @@ struct TimelineView: View {
             ctx.stroke(RingPaths.arc(g, g.ra, 0, 360), with: .color(pal.track), lineWidth: 5 * k)
             for h in 0..<24 {
                 let a = Double(h) * 15, major = h % 3 == 0
-                let p = g.pt(426 * k, a), rr = (major ? 2.6 : 1.6) * k
+                let p = g.pt(416 * k, a), rr = (major ? 2.6 : 1.6) * k
                 ctx.fill(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)),
                          with: .color(pal.tick.opacity(major ? 1 : 0.6)))
                 if major {
                     ctx.draw(Text(String(format: "%02d", h))
                                 .font(.system(size: 14 * g.fk, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(pal.muted),
-                             at: g.pt(449 * k, a))
+                             at: g.pt(430 * k, a))
                 }
             }
             for gp in model.gaps {
@@ -607,14 +607,14 @@ struct TimelineView: View {
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
         .onTapGesture { }   // 药丸空白处不落到下面的拖窗手势
-        .position(x: g.c.x, y: g.c.y - 293 * g.k)
+        .position(x: g.c.x, y: g.c.y - 305 * g.k)
     }
 
     @ViewBuilder
     private func innerLayer(_ g: RingGeo) -> some View {
         if let f = currentFrame {
             let k = g.k, fk = g.fk
-            let shotW = 600 * k, shotH = 375 * k
+            let shotW = 624 * k, shotH = 390 * k   // 居中时四角刚好落在内圈里
             if let url = f.browserUrl, !url.isEmpty {
                 let secure = url.hasPrefix("https://")
                 HStack(spacing: 8) {
@@ -633,15 +633,14 @@ struct TimelineView: View {
                 .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: 460 * k)
-                .position(x: g.c.x, y: g.c.y - 246 * k)
+                .position(x: g.c.x, y: g.c.y - 254 * k)
             }
-            FrameShot(frame: f, contentMode: .fill)
+            // 原图完整显示:按比例放进框里,不裁边、不切圆角
+            FrameShot(frame: f, contentMode: .fit)
                 .frame(width: shotW, height: shotH)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
                 .contentShape(Rectangle())
                 .onTapGesture { ui.zoomed = true }
-                .position(x: g.c.x, y: g.c.y - 226 * k + shotH / 2)
+                .position(x: g.c.x, y: g.c.y)
             HStack(spacing: 9) {
                 RealAppIcon(appName: f.appName, size: 22 * fk)
                 Text(f.appName.isEmpty ? "(unknown app)" : f.appName)
@@ -659,8 +658,8 @@ struct TimelineView: View {
                     .foregroundStyle(pal.muted)
                     .layoutPriority(1)
             }
-            .frame(width: shotW - 16)
-            .position(x: g.c.x, y: g.c.y + 160 * k + 11 * fk)
+            .frame(width: shotW - 40)   // 挪到截图上方后收窄,两端不碰内圈
+            .position(x: g.c.x, y: g.c.y - shotH / 2 - 11 * fk - 10 * k)
         }
     }
 
@@ -1094,8 +1093,8 @@ private struct EmptyState: View {
 // MARK: - Ring geometry / palette / paths
 // =============================================================================
 
-/// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 至少 220pt 侧栏 +
-/// 10pt 间隙,上下给标题栏留 44pt;时刻标签外沿在 459/392·R。
+/// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 至少 180pt 侧栏 +
+/// 10pt 间隙,上下留 30pt;时刻标签外沿在 440/392·R。
 struct RingGeo {
     static let edge: CGFloat = 20
     let size: CGSize
@@ -1106,20 +1105,20 @@ struct RingGeo {
 
     init(size: CGSize) {
         self.size = size
-        let ext: CGFloat = 459.0 / 392.0
-        let rw = (size.width / 2 - Self.edge - 220 - 10) / ext
-        let rh = (size.height / 2 - 44) / ext
+        let ext: CGFloat = 440.0 / 392.0
+        let rw = (size.width / 2 - Self.edge - 180 - 10) / ext
+        let rh = (size.height / 2 - 30) / ext
         let r = max(160, min(392, rw, rh))
         self.r = r
         k = r / 392
         c = CGPoint(x: size.width / 2, y: size.height / 2)
-        sideW = max(220, min(300, size.width / 2 - Self.edge - 10 - r * ext))
+        sideW = max(180, min(300, size.width / 2 - Self.edge - 10 - r * ext))
     }
 
     var band: CGFloat { 18 * k }
     var r1: CGFloat { r - band / 2 }
     var r2: CGFloat { r + band / 2 }
-    var ra: CGFloat { 412 * k }
+    var ra: CGFloat { 406 * k }
     /// 圆里的字号跟着缩,但不小于稿子的 78%,否则看不清。
     var fk: CGFloat { max(0.78, k) }
 
@@ -1354,6 +1353,9 @@ private struct FrameShot: View {
 
 /// 圆四周四个角。位置钉死:上排两个标题在一条线上,下排两个标题在圆心水平线
 /// 下方 24pt;左列左对齐、右列右对齐。折叠状态只随用户操作变,换帧不动。
+/// 四个角面板的字号系数:面板收窄给圆让位,字跟着小一号。
+private let panelFont: CGFloat = 0.88
+
 private struct TimelineCorners: View {
     let g: RingGeo
     let pal: RingPalette
@@ -1528,15 +1530,15 @@ private struct TimelineCorners: View {
             RealAppIcon(appName: a.appName, size: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(a.appName.isEmpty ? "(unknown app)" : a.appName)
-                    .font(.system(size: 14.5, weight: .semibold)).foregroundStyle(pal.fg)
+                    .font(.system(size: 14.5 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
                 if !a.windowName.isEmpty {
-                    Text(a.windowName).font(.system(size: 13)).foregroundStyle(pal.muted)
+                    Text(a.windowName).font(.system(size: 13 * panelFont)).foregroundStyle(pal.muted)
                         .lineLimit(1).truncationMode(.tail)
                 }
                 if let u = a.browserUrl, !u.isEmpty {
                     HStack(spacing: 5) {
-                        Image(systemName: "link").font(.system(size: 10))
-                        Text(Fmt.displayURL(u)).font(.system(size: 12, design: .monospaced))
+                        Image(systemName: "link").font(.system(size: 10 * panelFont))
+                        Text(Fmt.displayURL(u)).font(.system(size: 12 * panelFont, design: .monospaced))
                             .lineLimit(1).truncationMode(.tail)
                     }
                     .foregroundStyle(pal.faint)
@@ -1575,7 +1577,7 @@ private struct TimelineCorners: View {
             if let p = prev { jumpLink("Previous: ", p) }
             if let n = next { jumpLink("Next: ", n) }
         }
-        .font(.system(size: 14))
+        .font(.system(size: 14 * panelFont))
         .foregroundStyle(pal.faint)
         .padding(.horizontal, 12).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1596,7 +1598,7 @@ private struct TimelineCorners: View {
             SectionTitle(pal: pal, title: "EVENT SESSION", count: nil, action: reset) {
                 HStack(spacing: 2) {
                     navButton("chevron.left", enabled: si > 0) { jumpToFrame(model.blocks[si - 1].f0) }
-                    Text("\(n == 0 ? 0 : si + 1) / \(n)").font(.system(size: 12, design: .monospaced))
+                    Text("\(n == 0 ? 0 : si + 1) / \(n)").font(.system(size: 12 * panelFont, design: .monospaced))
                     navButton("chevron.right", enabled: si + 1 < n) { jumpToFrame(model.blocks[si + 1].f0) }
                 }
             }
@@ -1607,15 +1609,15 @@ private struct TimelineCorners: View {
                         RealAppIcon(appName: b.app, size: 30)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(b.app.isEmpty ? "(unknown app)" : b.app)
-                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(pal.fg)
+                                .font(.system(size: 16 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
                                 .lineLimit(1)
                             Text("\(Fmt.hms(b.start)) – \(Fmt.hms(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
-                                .font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.faint)
+                                .font(.system(size: 12.5 * panelFont, design: .monospaced)).foregroundStyle(pal.faint)
                                 .lineLimit(1)
                         }
                     }
                     Text("Not summarized yet.")
-                        .font(.system(size: 14)).foregroundStyle(pal.muted)
+                        .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
                         .padding(.top, 10)
                 }
                 .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
@@ -1629,7 +1631,7 @@ private struct TimelineCorners: View {
 
     private func navButton(_ symbol: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+            Image(systemName: symbol).font(.system(size: 12 * panelFont, weight: .semibold))
                 .padding(.horizontal, 6).padding(.vertical, 2).contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -1643,13 +1645,13 @@ private struct TimelineCorners: View {
         let frac = CGFloat(t.secs / max(1, model.totals.first?.secs ?? 1))
         return HStack(spacing: 9) {
             Circle().fill(color).frame(width: 10, height: 10)
-            Text(t.app.isEmpty ? "(unknown app)" : t.app).font(.system(size: 14)).foregroundStyle(pal.fg)
+            Text(t.app.isEmpty ? "(unknown app)" : t.app).font(.system(size: 14 * panelFont)).foregroundStyle(pal.fg)
                 .lineLimit(1).frame(width: 108, alignment: .leading)
             Capsule().fill(pal.track).frame(height: 6)
                 .overlay(alignment: .leading) {
                     GeometryReader { p in Capsule().fill(color).frame(width: p.size.width * frac) }
                 }
-            Text(Fmt.dur(t.secs)).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.muted)
+            Text(Fmt.dur(t.secs)).font(.system(size: 12.5 * panelFont, design: .monospaced)).foregroundStyle(pal.muted)
                 .frame(width: 62, alignment: .trailing)
         }
         .padding(.horizontal, 4)
@@ -1680,8 +1682,8 @@ private struct SectionTitle<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(title).font(.system(size: 12, weight: .semibold)).kerning(0.96)
-            if let count { Text(count).font(.system(size: 12, design: .monospaced)) }
+            Text(title).font(.system(size: 12 * panelFont, weight: .semibold)).kerning(0.96)
+            if let count { Text(count).font(.system(size: 12 * panelFont, design: .monospaced)) }
             Spacer(minLength: 0)
             trailing()
         }
@@ -1711,7 +1713,7 @@ private struct FoldRow: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 14, weight: open ? .semibold : .regular))
+            .font(.system(size: 14 * panelFont, weight: open ? .semibold : .regular))
             .foregroundStyle(open ? pal.accent : (hovering ? pal.fg : pal.muted))
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
@@ -1738,13 +1740,13 @@ private struct AudioRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 7) {
-                Text(time).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
-                Text(speaker).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(pal.muted)
+                Text(time).font(.system(size: 11.5 * panelFont, design: .monospaced)).foregroundStyle(pal.faint)
+                Text(speaker).font(.system(size: 12.5 * panelFont, weight: .semibold)).foregroundStyle(pal.muted)
                 Image(systemName: isInput ? "mic.fill" : "speaker.wave.2.fill")
-                    .font(.system(size: 9)).foregroundStyle(pal.faint)
+                    .font(.system(size: 9 * panelFont)).foregroundStyle(pal.faint)
             }
             Text(text)
-                .font(.system(size: 14)).lineSpacing(3)
+                .font(.system(size: 14 * panelFont)).lineSpacing(3)
                 .foregroundStyle(near ? pal.fg : pal.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
