@@ -63,8 +63,8 @@ final class TimelineState {
 // Event Session / Today。设计稿在 1600×960 上按外圈半径 392 画,这里按窗口
 // 可用空间求半径,圆相关的常数都乘 k = R / 392(见 RingGeo)。
 // 点截图进聚焦视图:圆、下半圈选帧竖线和 Today 淡出,截图在左右两列之间放到
-// 最大并上移,窗口底部长出横排条带;Active Apps / Audio / Event Session 留着
-// 照常用。再点截图或按 Esc 原路返回。两套布局都从窗口尺寸算(RingGeo.shot /
+// 最大并上移,窗口底部长出横排条带;Active Apps / Audio / Event Session 挪进
+// 按窗口比例钉死的区域照常用。再点截图或按 Esc 原路返回。两套布局都从窗口尺寸算(RingGeo.shot /
 // midL / midR),同一个 spring 驱动,切换时不重新取数、不解码。
 
 struct TimelineView: View {
@@ -329,7 +329,7 @@ struct TimelineView: View {
             let p = CGPoint(x: e.locationInWindow.x, y: cv.bounds.height - e.locationInWindow.y)
             let g = RingGeo(size: ui.size)
             let inside = ui.focused
-                ? (p.y >= g.size.height - RingGeo.stripH && p.x >= g.midL && p.x <= g.midR)
+                ? (p.y >= g.size.height - RingGeo.stripH && abs(p.x - g.c.x) <= g.stripW / 2)
                     || g.shot(focused: true).rect(g).contains(p)
                 : g.dist(p) <= g.r2 + 12 * g.k
             guard inside else { return e }
@@ -611,7 +611,7 @@ struct TimelineView: View {
 
     // MARK: Focus strip (bottom edge)
 
-    /// 聚焦视图底部的横排条带,只占左右两列之间:竖条从窗口底边长出来(进入时
+    /// 聚焦视图底部的横排条带,在面板下面铺满窗口宽:竖条从窗口底边长出来(进入时
     /// 从中间往两边错开 ≤ 0.12s 依次升起,退出时一起沉回底边),app 换了在竖条
     /// 上方放图标(跟在竖条后面淡入放大),两端渐隐。圆形视图里它常驻但高度为 0,
     /// 这样进出只是同一批视图的高度动画,没有插入 / 移除。整层 drawingGroup 合成、
@@ -619,7 +619,7 @@ struct TimelineView: View {
     private func stripLayer(_ g: RingGeo, fm: Bool) -> some View {
         let frames = state.frames, col = Self.stripCol
         let f = min(max(0, state.focusIndex), frames.count - 1)
-        let half = (g.midR - g.midL) / 2
+        let half = g.stripW / 2
         let span = Int(half / col) + 2
         let lo = max(0, f - span), hi = min(frames.count - 1, f + span)
         var icons = Set<Int>()
@@ -671,7 +671,7 @@ struct TimelineView: View {
 
     /// 条带的点击区:点在哪一列就跳到哪一帧。
     private func stripHitArea(_ g: RingGeo) -> some View {
-        let w = g.midR - g.midL
+        let w = g.stripW
         return Color.clear
             .frame(width: w, height: RingGeo.stripH)
             .contentShape(Rectangle())
@@ -684,7 +684,7 @@ struct TimelineView: View {
     /// 聚焦条带底下那层由下往上的淡底,两端跟条带一起渐隐。
     private func stripBackdrop(_ g: RingGeo) -> some View {
         LinearGradient(colors: [Theme.hover, .clear], startPoint: .bottom, endPoint: .top)
-            .frame(width: g.midR - g.midL, height: RingGeo.stripH)
+            .frame(width: g.stripW, height: RingGeo.stripH)
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.15),
                                          .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
                                  startPoint: .leading, endPoint: .trailing))
@@ -1271,11 +1271,14 @@ struct RingGeo {
     /// 聚焦条带高度(图标槽 32 + 竖条最高 100 + 余量)。
     static let stripH: CGFloat = 140
 
-    /// 聚焦视图里两侧面板收窄贴边(窗口宽的 14%,180…sideW),给截图让地方。
-    var focusSideW: CGFloat { min(sideW, max(180, size.width * 0.14)) }
-    /// 聚焦视图里左右两列之间的空地(两侧各留 16pt),截图和条带都只占这一段。
-    var midL: CGFloat { Self.edge + focusSideW + 16 }
-    var midR: CGFloat { size.width - midL }
+    /// 聚焦视图左列右沿 / 右列左沿(占窗口宽的比例)。
+    static let focusLeftR: CGFloat = 0.21
+    static let focusRightL: CGFloat = 0.785
+    /// 聚焦视图里左右两列之间的空地(两侧各留 16pt),截图放在这一段。
+    var midL: CGFloat { size.width * Self.focusLeftR + 16 }
+    var midR: CGFloat { size.width * Self.focusRightL - 16 }
+    /// 聚焦条带宽:面板都在 0.80H 以上收住,条带在它们下面铺满窗口(两边留 edge)。
+    var stripW: CGFloat { size.width - 2 * Self.edge }
 
     /// 截图和它上方日期药丸 / URL / 信息行的位置。圆形视图:16:10 贴着内圈的
     /// 最大矩形,四角落在内圈上。聚焦视图:在 midL…midR 之间放到最大,中心比
@@ -1562,9 +1565,17 @@ private struct TimelineCorners: View {
     private let todayRowH: CGFloat = 26
     private var H: CGFloat { g.size.height }
     private var leftX: CGFloat { RingGeo.edge }
-    /// 聚焦视图里列宽收到 focusSideW,位置 / 宽度跟着同一个 spring 过去。
-    private var colW: CGFloat { hideToday ? g.focusSideW : g.sideW }
-    private var rightX: CGFloat { g.size.width - RingGeo.edge - colW }
+    private var rightX: CGFloat { g.size.width - RingGeo.edge - g.sideW }
+    /// 聚焦视图里三个面板各占一块按窗口比例钉死的区域(Today 收起),放不下就在
+    /// 区域里滚:Active Apps 左列 0.07H–0.49H,Audio 左列 0.50H–0.80H,左列右沿
+    /// 0.21W;Event Session 右列 0.785W 起、0.06H 起往下到 0.75H(卡片在顶上)。
+    /// 位置 / 宽高跟着同一个 spring 过去。
+    private var leftW: CGFloat { hideToday ? g.size.width * RingGeo.focusLeftR - leftX : g.sideW }
+    /// 标题行不高过页面切换栏底下(y 48)。
+    private var appsTop: CGFloat { hideToday ? max(48, H * 0.07) : top }
+    private var esX: CGFloat { hideToday ? g.size.width * RingGeo.focusRightL : rightX }
+    private var esTop: CGFloat { hideToday ? H * 0.06 : top }
+    private var esW: CGFloat { hideToday ? g.size.width * (1 - RingGeo.focusRightL) - RingGeo.edge : g.sideW }
     private var bottomRow: CGFloat { g.c.y + 24 }
     private let anim = Animation.easeInOut(duration: 0.3)
 
@@ -1582,8 +1593,12 @@ private struct TimelineCorners: View {
     /// Active Apps:收起时不越过圆心水平线,放不下的最后一行写 “+N more”;
     /// 展开时给下面的 Audio 至少留 170pt,自己再超出就组内滚。
     private var appsFold: Fold {
-        let listTop = top + hd
+        let listTop = appsTop + hd
         let hs = apps.map { appHeights[$0.id] ?? 56 }
+        if hideToday {
+            let lh = max(0, min(stack(hs), H * 0.49 - listTop))
+            return Fold(listH: lh, label: nil, scroll: true, bottom: listTop + lh)
+        }
         if appsOpen {
             let lh = max(0, min(stack(hs), H - 20 - 170 - listTop - gap - foldH))
             return Fold(listH: lh, label: "Show less", scroll: true, bottom: listTop + lh + gap + foldH)
@@ -1635,33 +1650,33 @@ private struct TimelineCorners: View {
 
     var body: some View {
         let af = appsFold
-        let audioTop = max(bottomRow, af.bottom + 24)
-        let audioAvail = max(40, H - 20 - (audioTop + hd))
+        let audioTop = hideToday ? H * 0.50 : max(bottomRow, af.bottom + 24)
+        let audioAvail = max(40, (hideToday ? H * 0.80 : H - 20) - (audioTop + hd))
         let audioH = audioContentH > 0 ? min(audioContentH, audioAvail) : audioAvail
         let tl = todayLayout
-        let w = colW
+        let w = g.sideW, lw = leftW
         ZStack(alignment: .topLeading) {
             // ── Active Apps ──
             SectionTitle(pal: pal, title: "ACTIVE APPS", count: "\(apps.count)", action: reset)
-                .place(leftX, top, w)
+                .place(leftX, appsTop, lw)
             SideScroll(height: af.listH, enabled: af.scroll, pal: pal) {
                 ForEach(apps) { a in
                     appRow(a)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { appHeights[a.id] = $0 }
                 }
             }
-            .place(leftX, top + hd, w)
+            .place(leftX, appsTop + hd, lw)
             if let l = af.label {
                 FoldRow(pal: pal, label: l, open: appsOpen) {
                     withAnimation(anim) { appsOpen.toggle() }
                     scrollAudio(animated: true, after: 0.32)
                 }
-                .place(leftX, top + hd + af.listH + gap, w)
+                .place(leftX, appsTop + hd + af.listH + gap, lw)
             }
 
             // ── Audio ──
             SectionTitle(pal: pal, title: "AUDIO", count: "\(audio.count)", action: reset)
-                .place(leftX, audioTop, w)
+                .place(leftX, audioTop, lw)
             SideScroll(height: audioH, enabled: true, pal: pal, contentHeight: $audioContentH,
                        target: currentAudioID, token: audioScrollToken, animated: audioScrollAnimated) {
                 if audio.isEmpty {
@@ -1670,10 +1685,10 @@ private struct TimelineCorners: View {
                     ForEach(audio) { e in audioRow(e, near: e.id == nearAudioID).id(e.id) }
                 }
             }
-            .place(leftX, audioTop + hd, w)
+            .place(leftX, audioTop + hd, lw)
 
             // ── Event Session ──
-            eventSession.place(rightX, top, w)
+            eventSession.place(esX, esTop, esW)
 
             // ── Today ──
             ZStack(alignment: .topLeading) {
