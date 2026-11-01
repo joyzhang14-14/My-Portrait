@@ -62,9 +62,10 @@ final class TimelineState {
 // 信息行和沿下半圈排开的选帧竖线;圆四周四个角:Active Apps / Audio /
 // Event Session / Today。设计稿在 1600×960 上按外圈半径 392 画,这里按窗口
 // 可用空间求半径,圆相关的常数都乘 k = R / 392(见 RingGeo)。
-// 点截图进聚焦视图:圆和四个角淡出,截图放大约 1.5 倍上移,选帧竖线从下半圈
-// 变形成窗口底部的横排条带;再点截图或按 Esc 原路返回。两套布局都从窗口尺寸
-// 算(RingGeo.shot / ticksLayer),同一个 spring 驱动,切换时不重新取数、不解码。
+// 点截图进聚焦视图:圆、下半圈选帧竖线和 Today 淡出,截图在左右两列之间放到
+// 最大并上移,窗口底部长出横排条带;Active Apps / Audio / Event Session 留着
+// 照常用。再点截图或按 Esc 原路返回。两套布局都从窗口尺寸算(RingGeo.shot /
+// midL / midR),同一个 spring 驱动,切换时不重新取数、不解码。
 
 struct TimelineView: View {
     /// Hoisted to ContentView so the focus/frames survive page switches.
@@ -111,7 +112,7 @@ struct TimelineView: View {
             let g = RingGeo(size: proxy.size)
             let fm = isFocused
             let sl = g.shot(focused: fm)
-            // 圆和四个角淡出时跟着日期药丸一起往上走一半的位移
+            // 圆淡出时跟着日期药丸一起往上走一半的位移
             let lift = fm ? (sl.pillY - g.shot(focused: false).pillY) / 2 : 0
             ZStack(alignment: .topLeading) {
                 backdrop(g)
@@ -126,12 +127,16 @@ struct TimelineView: View {
                 } else {
                     stripBackdrop(g).opacity(fm ? 1 : 0)
                     ticksLayer(g)
-                    innerLayer(g, sl)
-                    corners(g)
                         .compositingGroup()
+                        .scaleEffect(fm ? 0.9 : 1, anchor: UnitPoint(x: g.c.x / max(1, g.size.width),
+                                                                    y: g.c.y / max(1, g.size.height)))
                         .offset(y: lift)
                         .opacity(fm ? 0 : 1)
                         .allowsHitTesting(!fm)
+                    stripLayer(g, fm: fm)
+                    stripHitArea(g).allowsHitTesting(fm)
+                    innerLayer(g, sl)
+                    corners(g, hideToday: fm)
                 }
                 datePill(g, sl)
                 tooltip(g)
@@ -324,7 +329,8 @@ struct TimelineView: View {
             let p = CGPoint(x: e.locationInWindow.x, y: cv.bounds.height - e.locationInWindow.y)
             let g = RingGeo(size: ui.size)
             let inside = ui.focused
-                ? p.y >= g.size.height - RingGeo.stripH || g.shot(focused: true).rect(g).contains(p)
+                ? (p.y >= g.size.height - RingGeo.stripH && p.x >= g.midL && p.x <= g.midR)
+                    || g.shot(focused: true).rect(g).contains(p)
                 : g.dist(p) <= g.r2 + 12 * g.k
             guard inside else { return e }
             var dx = e.scrollingDeltaX, dy = e.scrollingDeltaY
@@ -558,75 +564,130 @@ struct TimelineView: View {
         .foregroundStyle(pal.fg)
     }
 
-    // MARK: Frame ticks (bottom inner arc / focus strip)
+    // MARK: Frame ticks (bottom inner arc)
 
-    /// 选帧竖线。圆形视图:沿圆的下半圈排开,当前帧在正下方,往右是更晚的帧。
-    /// 聚焦视图:同一批竖线变成窗口底部的横排条带(竖条从窗口底边长出来,app
-    /// 换了在竖条上方放图标,两端渐隐)。每根竖线按帧号保持身份,切换时位置 /
-    /// 角度 / 尺寸一起插值;条带多出来的列淡入。
+    /// 选帧竖线:沿圆的下半圈排开,当前帧在正下方,往右是更晚的帧。
     private func ticksLayer(_ g: RingGeo) -> some View {
-        let frames = state.frames, fm = isFocused
+        let frames = state.frames
         let f = min(max(0, state.focusIndex), frames.count - 1)
-        let span = fm ? max(20, Int(g.size.width / Self.stripCol / 2) + 2) : 20
+        let lo = max(0, f - 20), hi = min(frames.count - 1, f + 20)
+        var icons = Set<Int>()
+        var lastIcon = -99
+        for i in lo...hi where (i == 0 || frames[i - 1].appName != frames[i].appName)
+            && abs(i - f) <= 14 && i - lastIcon >= 3 {
+            icons.insert(i); lastIcon = i
+        }
+        let k = g.k
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(lo...hi), id: \.self) { i in
+                let d = abs(i - f), cur = i == f
+                let a = 180 - Double(i - f) * Self.tickStep
+                let len = (cur ? 64 : 36) * k
+                let fade = max(0, 1 - Double(max(0, d - 14)) / 6)
+                ZStack(alignment: .top) {
+                    Capsule()
+                        .fill(TimelineBarColor.barColor(for: frames[i].appName))
+                        .frame(width: 11 * k, height: len + 11 * k)
+                        .shadow(color: cur ? pal.curglow : .clear, radius: cur ? 6 * k : 0)
+                }
+                .frame(width: 18 * k, height: 76 * k, alignment: .top)
+                .contentShape(Rectangle())
+                .rotationEffect(.degrees(a))
+                .position(g.pt(330 * k, a))
+                .opacity(fade)
+                .onTapGesture { setFocus(i) }
+                if icons.contains(i) {
+                    RealAppIcon(appName: frames[i].appName, size: 26 * k)
+                        .position(g.pt(276 * k, a))
+                        .opacity(fade)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        .rotationEffect(.degrees(tickShift * Self.tickStep),
+                        anchor: UnitPoint(x: g.c.x / max(1, g.size.width), y: g.c.y / max(1, g.size.height)))
+    }
+
+    // MARK: Focus strip (bottom edge)
+
+    /// 聚焦视图底部的横排条带,只占左右两列之间:竖条从窗口底边长出来(进入时
+    /// 从中间往两边错开 ≤ 0.12s 依次升起,退出时一起沉回底边),app 换了在竖条
+    /// 上方放图标(跟在竖条后面淡入放大),两端渐隐。圆形视图里它常驻但高度为 0,
+    /// 这样进出只是同一批视图的高度动画,没有插入 / 移除。整层 drawingGroup 合成、
+    /// 不接点击,点击由 stripHitArea 按横坐标换算成帧号。
+    private func stripLayer(_ g: RingGeo, fm: Bool) -> some View {
+        let frames = state.frames, col = Self.stripCol
+        let f = min(max(0, state.focusIndex), frames.count - 1)
+        let half = (g.midR - g.midL) / 2
+        let span = Int(half / col) + 2
         let lo = max(0, f - span), hi = min(frames.count - 1, f + span)
         var icons = Set<Int>()
         var lastIcon = -99
-        for i in lo...hi where i == 0 || frames[i - 1].appName != frames[i].appName {
-            if fm ? i - lastIcon >= 2 : (abs(i - f) <= 14 && i - lastIcon >= 3) {
-                icons.insert(i); lastIcon = i
-            }
+        for i in lo...hi where (i == 0 || frames[i - 1].appName != frames[i].appName) && i - lastIcon >= 2 {
+            icons.insert(i); lastIcon = i
         }
-        let col = Self.stripCol
         return ZStack(alignment: .topLeading) {
             ForEach(Array(lo...hi), id: \.self) { i in
-                tick(i, f: f, g: g, fm: fm, icon: icons.contains(i))
+                stripBar(i, f: f, g: g, fm: fm, half: half, icon: icons.contains(i))
             }
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
         .drawingGroup()
-        .rotationEffect(.degrees(fm ? 0 : tickShift * Self.tickStep),
-                        anchor: UnitPoint(x: g.c.x / max(1, g.size.width), y: g.c.y / max(1, g.size.height)))
-        .offset(x: fm ? -tickShift * col : 0)
+        .offset(x: -tickShift * col)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
-    private func tick(_ i: Int, f: Int, g: RingGeo, fm: Bool, icon: Bool) -> some View {
+    private func stripBar(_ i: Int, f: Int, g: RingGeo, fm: Bool, half: CGFloat, icon: Bool) -> some View {
         let app = state.frames[i].appName
-        let k = g.k, H = g.size.height, col = Self.stripCol
+        let H = g.size.height, col = Self.stripCol
         let d = abs(i - f), cur = i == f
-        let a: Double = 180 - Double(i - f) * Self.tickStep
         let x: CGFloat = g.c.x + CGFloat(i - f) * col
-        // 条带的竖条往窗口底边下多伸 6pt,藏掉底下的圆角
-        let boxH: CGFloat = fm ? RingGeo.stripH + 6 : 76 * k
-        let barH: CGFloat = fm ? (cur ? 106 : 62) : ((cur ? 64 : 36) + 11) * k
-        let fade: Double = fm ? Double(min(1, max(0, (g.size.width / 2 - abs(x - g.c.x)) / 180)))
-                              : max(0, 1 - Double(max(0, d - 14)) / 6)
-        let barPos: CGPoint = fm ? CGPoint(x: x, y: H + 6 - boxH / 2) : g.pt(330 * k, a)
-        let iconPos: CGPoint = fm ? CGPoint(x: x, y: H - RingGeo.stripH + 16) : g.pt(276 * k, a)
+        let fade: Double = Double(min(1, max(0, (half - abs(x - g.c.x)) / 120)))
+        let delay: Double = fm ? min(0.12, Double(d) * 0.004) : 0.03
+        // 往窗口底边下多伸 6pt,藏掉竖条底下的圆角
+        let boxH: CGFloat = RingGeo.stripH + 6
+        let barH: CGFloat = fm ? (cur ? 106 : 62) : 0
+        let glow = cur && fm
         ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: fm ? 5 : 5.5 * k, style: .continuous)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(TimelineBarColor.barColor(for: app))
-                .frame(width: fm ? 12 : 11 * k, height: barH)
-                .shadow(color: cur ? pal.curglow : .clear, radius: cur ? 6 : 0)
+                .frame(width: 12, height: barH)
+                .shadow(color: glow ? pal.curglow : .clear, radius: glow ? 6 : 0)
         }
-        .frame(width: fm ? col : col * k, height: boxH, alignment: .bottom)
-        .contentShape(Rectangle())
-        .rotationEffect(.degrees(fm ? 0 : a - 180))
-        .position(barPos)
+        .frame(width: col, height: boxH, alignment: .bottom)
+        .position(x: x, y: H + 6 - boxH / 2)
         .opacity(fade)
-        .onTapGesture { setFocus(i) }
+        .animation(Self.focusAnim.delay(delay), value: fm)
         if icon {
-            RealAppIcon(appName: app, size: fm ? 32 : 26 * k)
-                .position(iconPos)
-                .opacity(fade)
-                .allowsHitTesting(false)
+            RealAppIcon(appName: app, size: 32)
+                .scaleEffect(fm ? 1 : 0.5, anchor: .bottom)
+                .opacity(fm ? fade : 0)
+                .position(x: x, y: H - RingGeo.stripH + 16)
+                .animation(Self.focusAnim.delay(fm ? delay + 0.1 : 0), value: fm)
         }
     }
 
-    /// 聚焦条带底下那层由下往上的淡底。
+    /// 条带的点击区:点在哪一列就跳到哪一帧。
+    private func stripHitArea(_ g: RingGeo) -> some View {
+        let w = g.midR - g.midL
+        return Color.clear
+            .frame(width: w, height: RingGeo.stripH)
+            .contentShape(Rectangle())
+            .onTapGesture(coordinateSpace: .local) { p in
+                setFocus(state.focusIndex + Int(((p.x - w / 2) / Self.stripCol).rounded()))
+            }
+            .position(x: g.c.x, y: g.size.height - RingGeo.stripH / 2)
+    }
+
+    /// 聚焦条带底下那层由下往上的淡底,两端跟条带一起渐隐。
     private func stripBackdrop(_ g: RingGeo) -> some View {
         LinearGradient(colors: [Theme.hover, .clear], startPoint: .bottom, endPoint: .top)
-            .frame(width: g.size.width, height: RingGeo.stripH)
+            .frame(width: g.midR - g.midL, height: RingGeo.stripH)
+            .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.15),
+                                         .init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                 startPoint: .leading, endPoint: .trailing))
             .position(x: g.c.x, y: g.size.height - RingGeo.stripH / 2)
             .allowsHitTesting(false)
     }
@@ -736,12 +797,12 @@ struct TimelineView: View {
 
     // MARK: Corners
 
-    private func corners(_ g: RingGeo) -> some View {
+    private func corners(_ g: RingGeo, hideToday: Bool) -> some View {
         let focus = currentFrame?.timestamp ?? Date()
         let title = isToday ? "TODAY" : Fmt.monthDay(state.selectedDay).uppercased()
         return TimelineCorners(
             g: g, pal: pal, model: model, focusIndex: state.focusIndex, focusTime: focus,
-            dayTitle: title, apps: activeApps, audio: transcripts, audioMoments: audioMoments,
+            dayTitle: title, hideToday: hideToday, apps: activeApps, audio: transcripts, audioMoments: audioMoments,
             hotApp: $hotApp,
             jumpToFrame: { setFocus($0) },
             jumpToTime: { seek($0) })
@@ -1210,9 +1271,16 @@ struct RingGeo {
     /// 聚焦条带高度(图标槽 32 + 竖条最高 100 + 余量)。
     static let stripH: CGFloat = 140
 
+    /// 聚焦视图里两侧面板收窄贴边(窗口宽的 14%,180…sideW),给截图让地方。
+    var focusSideW: CGFloat { min(sideW, max(180, size.width * 0.14)) }
+    /// 聚焦视图里左右两列之间的空地(两侧各留 16pt),截图和条带都只占这一段。
+    var midL: CGFloat { Self.edge + focusSideW + 16 }
+    var midR: CGFloat { size.width - midL }
+
     /// 截图和它上方日期药丸 / URL / 信息行的位置。圆形视图:16:10 贴着内圈的
-    /// 最大矩形,四角落在内圈上。聚焦视图:最大约 1.5 倍,中心比窗口中心略高,
-    /// 上面一摞(到药丸上沿约 128pt)放在页面切换栏下面,下面让出条带。
+    /// 最大矩形,四角落在内圈上。聚焦视图:在 midL…midR 之间放到最大(高度上限
+    /// 约 1.5 倍),中心比窗口中心略高,上面一摞(到药丸上沿约 128pt)放在页面
+    /// 切换栏下面,下面让出条带。
     func shot(focused: Bool) -> ShotLayout {
         if !focused {
             let h = 404 * k
@@ -1224,7 +1292,7 @@ struct RingGeo {
         let top = 50 + 17 * k + pillGap + urlGap + infoGap
         let bottom = size.height - Self.stripH - 12
         let cy = min(c.y - 12 * k, (top + bottom) / 2)
-        let h = max(120, min(606 * k, (size.width - 80) / 1.6, 2 * (cy - top), 2 * (bottom - cy)))
+        let h = max(120, min(606 * k, (midR - midL) / 1.6, 2 * (cy - top), 2 * (bottom - cy)))
         let infoY = cy - h / 2 - infoGap
         return ShotLayout(w: h * 1.6, h: h, cy: cy, infoW: h * 1.6 - 20, infoY: infoY,
                           urlY: infoY - urlGap, pillY: infoY - urlGap - pillGap)
@@ -1473,6 +1541,8 @@ private struct TimelineCorners: View {
     let focusIndex: Int
     let focusTime: Date
     let dayTitle: String
+    /// 聚焦视图里只收起 Today,另外三个角照常显示、照常跟焦点更新。
+    let hideToday: Bool
     let apps: [ActiveAppEntry]
     let audio: [AudioTranscriptEntry]
     let audioMoments: [Date]
@@ -1492,7 +1562,9 @@ private struct TimelineCorners: View {
     private let todayRowH: CGFloat = 26
     private var H: CGFloat { g.size.height }
     private var leftX: CGFloat { RingGeo.edge }
-    private var rightX: CGFloat { g.size.width - RingGeo.edge - g.sideW }
+    /// 聚焦视图里列宽收到 focusSideW,位置 / 宽度跟着同一个 spring 过去。
+    private var colW: CGFloat { hideToday ? g.focusSideW : g.sideW }
+    private var rightX: CGFloat { g.size.width - RingGeo.edge - colW }
     private var bottomRow: CGFloat { g.c.y + 24 }
     private let anim = Animation.easeInOut(duration: 0.3)
 
@@ -1567,7 +1639,7 @@ private struct TimelineCorners: View {
         let audioAvail = max(40, H - 20 - (audioTop + hd))
         let audioH = audioContentH > 0 ? min(audioContentH, audioAvail) : audioAvail
         let tl = todayLayout
-        let w = g.sideW
+        let w = colW
         ZStack(alignment: .topLeading) {
             // ── Active Apps ──
             SectionTitle(pal: pal, title: "ACTIVE APPS", count: "\(apps.count)", action: reset)
@@ -1604,16 +1676,21 @@ private struct TimelineCorners: View {
             eventSession.place(rightX, top, w)
 
             // ── Today ──
-            SectionTitle(pal: pal, title: dayTitle, count: "\(Fmt.dur(model.captured)) captured", action: reset)
-                .place(rightX, tl.top, w)
-            SideScroll(height: tl.fold.listH, enabled: tl.fold.scroll, pal: pal) {
-                ForEach(Array(model.totals.enumerated()), id: \.element.app) { _, t in todayRow(t) }
+            ZStack(alignment: .topLeading) {
+                SectionTitle(pal: pal, title: dayTitle, count: "\(Fmt.dur(model.captured)) captured", action: reset)
+                    .place(rightX, tl.top, w)
+                SideScroll(height: tl.fold.listH, enabled: tl.fold.scroll, pal: pal) {
+                    ForEach(Array(model.totals.enumerated()), id: \.element.app) { _, t in todayRow(t) }
+                }
+                .place(rightX, tl.top + hd, w)
+                if let l = tl.fold.label {
+                    FoldRow(pal: pal, label: l, open: todayOpen) { withAnimation(anim) { todayOpen.toggle() } }
+                        .place(rightX, tl.top + hd + tl.fold.listH + gap, w)
+                }
             }
-            .place(rightX, tl.top + hd, w)
-            if let l = tl.fold.label {
-                FoldRow(pal: pal, label: l, open: todayOpen) { withAnimation(anim) { todayOpen.toggle() } }
-                    .place(rightX, tl.top + hd + tl.fold.listH + gap, w)
-            }
+            .compositingGroup()
+            .opacity(hideToday ? 0 : 1)
+            .allowsHitTesting(!hideToday)
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
         .onChange(of: audio) { scrollAudio(animated: false, after: 0) }
