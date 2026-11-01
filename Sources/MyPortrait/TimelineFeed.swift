@@ -36,6 +36,15 @@ enum TimelineFeed {
             afterSeconds: afterSeconds)) ?? []
         return DevTimelineSessions.keep(rows, at: \.timestamp)
     }
+
+    static func audioMomentsForDay(_ day: Date, db: PortraitDB) async -> [Date] {
+        let rows = (try? await db.audioMomentsForDay(day)) ?? []
+        return DevTimelineSessions.keep(rows, at: \.self)
+    }
+
+    static func daysWithFrames(_ days: [Date], db: PortraitDB) async -> Set<Date> {
+        (try? await db.daysWithFrames(days)) ?? []
+    }
 }
 
 /// dev mode 的开机区间账本 —— `~/.portrait-dev/timeline_sessions.json`。

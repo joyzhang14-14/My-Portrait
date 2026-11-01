@@ -812,6 +812,52 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
+    func audioMomentsForDay(_ day: Date) async throws -> [Date] {
+        let cal = Calendar(identifier: .gregorian)
+        let dayStart = cal.startOfDay(for: day)
+        let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let startMs = Int64(dayStart.timeIntervalSince1970 * 1000)
+        let endMs = Int64(dayEnd.timeIntervalSince1970 * 1000)
+        return try await audioPool.read { db in
+            let sql = """
+            SELECT c.recorded_at_ms AS ts_ms
+            FROM audio_chunks c
+            WHERE c.recorded_at_ms >= :startMs AND c.recorded_at_ms < :endMs
+              AND EXISTS (SELECT 1 FROM audio_transcriptions t
+                          WHERE t.audio_chunk_id = c.id
+                            AND t.text IS NOT NULL AND t.text != '')
+            ORDER BY c.recorded_at_ms ASC
+            """
+            let rows = try Row.fetchAll(
+                db, sql: sql,
+                arguments: ["startMs": startMs, "endMs": endMs])
+            return rows.map { row -> Date in
+                let ms: Int64 = row["ts_ms"] ?? 0
+                return Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
+            }
+        }
+    }
+
+    func daysWithFrames(_ days: [Date]) async throws -> Set<Date> {
+        let cal = Calendar(identifier: .gregorian)
+        return try await screenPool.read { db in
+            // 每天一次索引命中(idx_frames_timestamp + LIMIT 1),一个月 31 次,
+            // 比按天 GROUP BY 扫整月的帧便宜得多。
+            var hit = Set<Date>()
+            for day in days {
+                let start = cal.startOfDay(for: day)
+                let end = cal.date(byAdding: .day, value: 1, to: start) ?? start
+                let exists = try Row.fetchOne(
+                    db,
+                    sql: "SELECT 1 FROM frames WHERE timestamp_ms >= :s AND timestamp_ms < :e LIMIT 1",
+                    arguments: ["s": Int64(start.timeIntervalSince1970 * 1000),
+                                "e": Int64(end.timeIntervalSince1970 * 1000)]) != nil
+                if exists { hit.insert(day) }
+            }
+            return hit
+        }
+    }
+
     func applyRetention(mode: RetentionMode, beforeMs: Int64, audioChunkIds: [Int64]) async throws -> RetentionStats {
         switch mode {
         case .mediaOnly:

@@ -177,6 +177,12 @@ protocol PortraitDB: Sendable {
         beforeSeconds: TimeInterval,
         afterSeconds: TimeInterval
     ) async throws -> [AudioTranscriptEntry]
+
+    /// 某天里有转录文字的音频块的录制时刻(升序),Timeline 外圈的声音细圈用。
+    func audioMomentsForDay(_ day: Date) async throws -> [Date]
+
+    /// `days` 里哪些天有帧(按传入的日期原样返回),Timeline 日历区分有没有采集用。
+    func daysWithFrames(_ days: [Date]) async throws -> Set<Date>
 }
 
 // MARK: - Records
