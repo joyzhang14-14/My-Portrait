@@ -74,6 +74,9 @@ struct AsyncDiskThumbnail: View {
     /// .fill = 填满槽位、溢出裁切(HomeView 方形附件缩略图要的);
     /// .fit = 完整适配不裁像素(Timeline 主画面要的,07-21 update)。
     var contentMode: ContentMode = .fill
+    /// 没命中缓存时先等这么久再解码;期间换了帧(.task 被取消)就不解码。
+    /// Timeline 快速拨帧时用它跳过一闪而过的帧。
+    var decodeDelay: Duration = .zero
 
     @State private var image: NSImage?
 
@@ -107,6 +110,10 @@ struct AsyncDiskThumbnail: View {
         // it into an MP4 chunk and rm's the JPG). Skip silently to avoid
         // ImageIO logging "*** ERROR: can't open" to stderr.
         guard FileManager.default.fileExists(atPath: path) else { return }
+        if decodeDelay > .zero {
+            try? await Task.sleep(for: decodeDelay)
+            if Task.isCancelled { return }
+        }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let loaded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
             Self.downsample(path: path, maxPixel: pixelSize)
@@ -144,6 +151,9 @@ struct AsyncMP4FrameThumbnail: View {
     let targetPixelSize: CGFloat
     /// 同 AsyncDiskThumbnail.contentMode。
     var contentMode: ContentMode = .fill
+    /// 没命中缓存时先等这么久再解码;期间换了帧(.task 被取消)就不解码。
+    /// Timeline 快速拨帧时用它跳过一闪而过的帧。
+    var decodeDelay: Duration = .zero
 
     @State private var image: NSImage?
 
@@ -171,6 +181,10 @@ struct AsyncMP4FrameThumbnail: View {
         if let cached = ImageThumbnailCache.shared.cached(key) {
             self.image = cached
             return
+        }
+        if decodeDelay > .zero {
+            try? await Task.sleep(for: decodeDelay)
+            if Task.isCancelled { return }
         }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         let path = videoPath

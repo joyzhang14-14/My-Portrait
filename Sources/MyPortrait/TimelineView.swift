@@ -128,29 +128,34 @@ struct TimelineView: View {
         .onAppear { installMonitor() }
         .onDisappear { removeMonitor() }
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
+        // 长按方向键的系统重复键走同一个限速闸;单按不限。
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
-            guard !state.frames.isEmpty else { return }
+            guard !state.frames.isEmpty, !Self.isRepeat(note) || ui.canStep() else { return }
             let isAlt = (note.object as? Bool) ?? false
             state.focusIndex = isAlt
                 ? Self.previousAppBoundary(in: state.frames, from: state.focusIndex)
                 : max(0, state.focusIndex - 1)
         }
         .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { note in
-            guard !state.frames.isEmpty else { return }
+            guard !state.frames.isEmpty, !Self.isRepeat(note) || ui.canStep() else { return }
             let isAlt = (note.object as? Bool) ?? false
             state.focusIndex = isAlt
                 ? Self.nextAppBoundary(in: state.frames, from: state.focusIndex)
                 : min(state.frames.count - 1, state.focusIndex + 1)
         }
-        // focusIndex 一变:选帧竖线做一段转动过渡;预取前后各 5 帧进缓存 ——
-        // 快速划过时图片已解码好。已缓存的帧 prefetch 内部直接跳过。
+        // focusIndex 一变:选帧竖线做一段转动过渡。
         .onChange(of: state.focusIndex) { old, new in
             animateTicks(new - old)
-            prefetchAround()
         }
         .task(id: state.selectedDay) { ui.calendarOpen = false; reload() }
-        // 四周列表跟着焦点帧取数;换帧时旧任务被取消,迟到的结果丢弃。
-        .task(id: currentFrame?.id) { await loadAround() }
+        // 焦点停稳 180ms 才做旁路活:预取前后各 5 帧 + 四周列表取数。拨帧时每步
+        // 都会取消上一个任务,连拨过程中这些都不跑;迟到的结果按取消丢弃。
+        .task(id: currentFrame?.id) {
+            try? await Task.sleep(for: .milliseconds(180))
+            guard !Task.isCancelled else { return }
+            prefetchAround()
+            await loadAround()
+        }
         // Background workers (CompactionWorker, RetentionWorker, …) mutate
         // the frames table and delete JPGs they've embedded into MP4s.
         // If the change touches the day we're currently showing, refetch
@@ -169,6 +174,10 @@ struct TimelineView: View {
     }
 
     // MARK: Focus
+
+    private static func isRepeat(_ note: Notification) -> Bool {
+        (note.userInfo?["isRepeat"] as? Bool) ?? false
+    }
 
     private func setFocus(_ i: Int) {
         guard !state.frames.isEmpty else { return }
@@ -286,12 +295,14 @@ struct TimelineView: View {
             let p = CGPoint(x: e.locationInWindow.x, y: cv.bounds.height - e.locationInWindow.y)
             guard hypot(p.x - ui.center.x, p.y - ui.center.y) <= ui.radius else { return e }
             var dx = e.scrollingDeltaX, dy = e.scrollingDeltaY
-            if !e.hasPreciseScrollingDeltas { dx *= 22; dy *= 22 }
+            if !e.hasPreciseScrollingDeltas { dx *= TimelineUI.wheelStep; dy *= TimelineUI.wheelStep }
             ui.wheelAcc += abs(dx) > abs(dy) ? -dx : -dy
-            let n = Int(ui.wheelAcc / 22)
-            if n != 0 {
-                ui.wheelAcc -= CGFloat(n) * 22
-                state.focusIndex = max(0, min(state.frames.count - 1, state.focusIndex + n))
+            guard abs(ui.wheelAcc) >= TimelineUI.wheelStep else { return nil }
+            // 一次最多走一步,攒多的直接扔:快速甩动不会排出一串欠账,松手就停。
+            let dir = ui.wheelAcc > 0 ? 1 : -1
+            ui.wheelAcc = 0
+            if ui.canStep() {
+                state.focusIndex = max(0, min(state.frames.count - 1, state.focusIndex + dir))
             }
             return nil
         }
@@ -702,6 +713,24 @@ final class TimelineUI {
     @ObservationIgnored var radius: CGFloat = 0
     @ObservationIgnored var wheelAcc: CGFloat = 0
     @ObservationIgnored var monitor: Any?
+    @ObservationIgnored private var lastStep: TimeInterval = 0
+
+    /// 拨帧限速。每换一帧 = 一张 3600px 主图解码 + 停稳后两条 SQL + 10 张预取;
+    /// 触控板甩一下每个事件能有上百 pt,原来一秒能走一两百帧。现在:
+    /// - 22pt 一步:鼠标滚轮一格(按行滚,×22 换算)正好一帧;
+    /// - 两步至少隔 40ms,即每秒 ≤ 25 帧,和系统长按方向键的重复速度相当;
+    /// - 主图没缓存时晚 80ms 才解码,连拨时一闪而过的帧不解码,慢拨(<12 帧/秒)
+    ///   每帧都看得到;
+    /// - 预取和四周列表等焦点停稳 180ms 才跑。
+    static let wheelStep: CGFloat = 22
+    static let minStepInterval: TimeInterval = 0.04
+
+    func canStep() -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastStep >= Self.minStepInterval else { return false }
+        lastStep = now
+        return true
+    }
 }
 
 /// 跟着指针走的 tooltip,靠近窗口右 / 下边时翻到指针另一侧。
@@ -1336,11 +1365,12 @@ private struct FrameShot: View {
             if !frame.hasViewableMedia {
                 NoMediaPlaceholder()
             } else if let path = frame.snapshotPath {
-                AsyncDiskThumbnail(path: path, targetPixelSize: 1800, contentMode: contentMode)
+                AsyncDiskThumbnail(path: path, targetPixelSize: 1800, contentMode: contentMode,
+                                   decodeDelay: .milliseconds(80))
             } else if let vpath = frame.videoPath {
                 AsyncMP4FrameThumbnail(videoPath: vpath, offsetMs: frame.videoOffsetMs,
                                        fps: frame.videoFps, targetPixelSize: 1800,
-                                       contentMode: contentMode)
+                                       contentMode: contentMode, decodeDelay: .milliseconds(80))
             }
         }
         .clipped()
