@@ -246,7 +246,19 @@ struct ContentView: View {
         }
     }
 
+    /// Timeline 整窗显示(没有侧栏,页面切换在左上角的药丸里);Data / Settings
+    /// 照旧是侧栏 + 右侧内容。
+    @ViewBuilder
     private var mainSplit: some View {
+        if (selection ?? .timeline) == .timeline {
+            TimelineView(state: timeline, selection: $selection)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            sidebarSplit
+        }
+    }
+
+    private var sidebarSplit: some View {
         HStack(spacing: 0) {
             TimelineSidebar(state: timeline,
                             selection: $selection,
@@ -283,7 +295,7 @@ struct ContentView: View {
     @ViewBuilder
     private var mainPane: some View {
         switch selection ?? .timeline {
-        case .timeline:      TimelineView(state: timeline)
+        case .timeline:      TimelineView(state: timeline, selection: $selection)
         case .data:
             // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
             if dataViewMode == .text, dataScope == .textSettings {

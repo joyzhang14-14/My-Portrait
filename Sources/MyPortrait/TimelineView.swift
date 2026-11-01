@@ -54,74 +54,79 @@ final class TimelineState {
     }
 }
 
+// =============================================================================
+// MARK: - TimelineView — circular day view
+// =============================================================================
+//
+// 外圈 = 选中那天 00:00–24:00(00 点在正上方,顺时针);圆里是日期、URL、截图、
+// 信息行和沿下半圈排开的选帧竖线;圆四周四个角:Active Apps / Audio /
+// Event Session / Today。设计稿在 1600×960 上按外圈半径 392 画,这里按窗口
+// 可用空间求半径,圆相关的常数都乘 k = R / 392(见 RingGeo)。
+
 struct TimelineView: View {
-    /// Hoisted to ContentView so the sidebar can share the same focus/frames.
+    /// Hoisted to ContentView so the focus/frames survive page switches.
     let state: TimelineState
-    /// 切到真 DB（PortraitDB），不再读外部数据源。
-    /// services 注入失败（理论上不应发生）→ 显示空状态。
+    @Binding var selection: SidebarSection?
     @Environment(\.services) private var services
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var ui = TimelineUI()
+    @State private var model = DayModel()
+    @State private var audioMoments: [Date] = []
+    @State private var activeApps: [ActiveAppEntry] = []
+    @State private var transcripts: [AudioTranscriptEntry] = []
+    @State private var hover: RingHover? = nil
+    @State private var hotApp: String? = nil
+    @State private var drag: RingDrag? = nil
+    /// 选帧竖线换焦点时的过渡角度:先转回旧位置,再动画转到 0。
+    @State private var tickShift: Double = 0
+
+    static let tickStep: Double = 2.4
+
+    private var pal: RingPalette { RingPalette(dark: colorScheme == .dark) }
 
     private var currentFrame: TimelineFrame? {
         guard state.frames.indices.contains(state.focusIndex) else { return nil }
         return state.frames[state.focusIndex]
     }
 
+    private var day0: Date { Calendar.current.startOfDay(for: state.selectedDay) }
+    private var dayLength: TimeInterval {
+        let next = Calendar.current.date(byAdding: .day, value: 1, to: day0) ?? day0.addingTimeInterval(86400)
+        return next.timeIntervalSince(day0)
+    }
+    private var isToday: Bool { Calendar.current.isDateInToday(state.selectedDay) }
+
+    private func ang(_ d: Date) -> Double { d.timeIntervalSince(day0) / dayLength * 360 }
+    private func time(at a: Double) -> Date { day0.addingTimeInterval(a / 360 * dayLength) }
+
     var body: some View {
-        // 单列流式布局:日期栏无独立底色,直接浮在连续的 SidebarBackdrop 上;
-        // 截图贴边显示(见 FramePreview 横向 padding);时间轴柱子直接从
-        // 窗口底边长出来。
-        VStack(spacing: 0) {
-            TimelineControlsBar(
-                currentDate: Binding(
-                    get: { state.selectedDay },
-                    set: { state.selectedDay = $0 }
-                ),
-                onRefresh: { reload() }
-            )
-            // 内容本身被标题栏安全区(~28pt)垫着起步,这里是控件到安全区的留白。
-            // (08-09 update)padding-top=28:截图在槽里贴底显示,日期栏往下压
-            // 多少槽位就矮多少,让「URL 条→截图顶边」与「截图底边→信息行」
-            // 两处间距基本对称(前提:截图是被宽度卡住的,常规窗口比例下都是)。
-            .padding(.top, 28)
-            .padding(.bottom, 6)
-
-            // Browser URL bar — fixed-height slot so the screenshot below NEVER
-            // moves vertically when switching between frames with / without URLs.
-            let hasURL = !(currentFrame?.browserUrl?.isEmpty ?? true)
-            BrowserURLBar(url: currentFrame?.browserUrl ?? "")
-                .opacity(hasURL ? 1 : 0)
-                .frame(height: 34)              // locked height — no layout shift
-                .padding(.horizontal, 80)
-                .padding(.bottom, 6)
-
-            ZStack {
+        GeometryReader { proxy in
+            let g = RingGeo(size: proxy.size)
+            ZStack(alignment: .topLeading) {
+                backdrop(g)
+                ringCanvas(g)
+                ringHitArea(g)
                 if state.frames.isEmpty {
                     EmptyState(loading: state.loading, hasDB: services != nil)
+                        .position(g.c)
                 } else {
-                    FramePreview(frame: state.frames[min(state.focusIndex, state.frames.count - 1)])
+                    ticksLayer(g)
+                    innerLayer(g)
+                    corners(g)
                 }
+                datePill(g)
+                tooltip(g)
+                pageSwitcher
+                if ui.zoomed, let f = currentFrame { zoomOverlay(f, g) }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()  // crop the now-filled image so it doesn't bleed sideways
-
-            // Slider reserves fixed height so the screenshot area above doesn't
-            // expand/contract during loading transitions. Just hidden when
-            // there are no frames to render.
-            TimelineSlider(state: state)
-                .frame(height: 140)
-                .opacity(state.frames.isEmpty ? 0 : 1)
-                .clipped()
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .onAppear { ui.center = g.c; ui.radius = g.r2 + 12 * g.k }
+            .onChange(of: proxy.size) { ui.center = g.c; ui.radius = g.r2 + 12 * g.k }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 背景跟随侧栏同一个 SidebarBackdrop(light/dark 动态色,不强制 dark)。
-        // NoMediaPlaceholder / 截图描边 / 时间轴渐变 / 当前刻度辉光 / URL 药丸
-        // 均用 Theme.* 动态色。
-        // ⚠️ backdrop 必须带 `.ignoresSafeArea()`;外层不能再挂 `.clipped()`——
-        // 会把背景在标题栏安全区外伸出的那截剪掉,露出 window.backgroundColor
-        // (顶部出现一条实色 bar)。内部 preview / slider 各自已有 .clipped(),
-        // 不需要外层再保一道。
-        .background(SidebarBackdrop().ignoresSafeArea())
-        .ignoresSafeArea(.container, edges: .top)
+        .ignoresSafeArea()
+        .onAppear { installMonitor() }
+        .onDisappear { removeMonitor() }
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
         .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
             guard !state.frames.isEmpty else { return }
@@ -137,23 +142,50 @@ struct TimelineView: View {
                 ? Self.nextAppBoundary(in: state.frames, from: state.focusIndex)
                 : min(state.frames.count - 1, state.focusIndex + 1)
         }
-        // 按方向键 focusIndex 一变,预取前后各 5 帧进缓存 —— 快速划过时
-        // 图片已解码好,不用现等。已缓存的帧 prefetch 内部直接跳过,所以
-        // 按住方向键时实际只新解码移动方向边缘的那几帧。
-        .onChange(of: state.focusIndex) { prefetchAround() }
-        .task(id: state.selectedDay) { reload() }
+        // focusIndex 一变:选帧竖线做一段转动过渡;预取前后各 5 帧进缓存 ——
+        // 快速划过时图片已解码好。已缓存的帧 prefetch 内部直接跳过。
+        .onChange(of: state.focusIndex) { old, new in
+            animateTicks(new - old)
+            prefetchAround()
+        }
+        .task(id: state.selectedDay) { ui.calendarOpen = false; reload() }
+        // 四周列表跟着焦点帧取数;换帧时旧任务被取消,迟到的结果丢弃。
+        .task(id: currentFrame?.id) { await loadAround() }
         // Background workers (CompactionWorker, RetentionWorker, …) mutate
         // the frames table and delete JPGs they've embedded into MP4s.
         // If the change touches the day we're currently showing, refetch
         // so the in-memory `state.frames` doesn't keep pointing at dead
         // snapshot paths.
         .onReceive(NotificationCenter.default.publisher(for: .timelineFramesChanged)) { note in
-            // 后台 compaction 触发 → preserveFocus,保住用户正看的帧,不甩到最新。
+            // 后台 compaction 触发 → preserveFocus,保住正看的帧,不甩到最新。
             guard let changedDay = note.object as? Date else { reload(preserveFocus: true); return }
             let cal = Calendar(identifier: .gregorian)
             if cal.isDate(changedDay, inSameDayAs: state.selectedDay) {
                 reload(preserveFocus: true)
             }
+        }
+        .onChange(of: ui.calendarOpen) { ui.wheelBlocked = ui.calendarOpen || ui.zoomed }
+        .onChange(of: ui.zoomed) { ui.wheelBlocked = ui.calendarOpen || ui.zoomed }
+    }
+
+    // MARK: Focus
+
+    private func setFocus(_ i: Int) {
+        guard !state.frames.isEmpty else { return }
+        state.focusIndex = max(0, min(state.frames.count - 1, i))
+    }
+
+    private func seek(_ t: Date) {
+        guard !state.frames.isEmpty else { return }
+        state.snapFocus(to: t)
+    }
+
+    private func animateTicks(_ delta: Int) {
+        guard delta != 0, abs(delta) <= 16 else { return }
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { tickShift = -Double(delta) * Self.tickStep }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) { tickShift = 0 }
         }
     }
 
@@ -173,8 +205,10 @@ struct TimelineView: View {
         return min(frames.count - 1, i)
     }
 
-    /// 预取当前 focusIndex 前后各 5 帧。targetPixelSize 跟 FramePreview 主图
-    /// 一致(1800),命中同一 cache key。
+    // MARK: Loading
+
+    /// 预取当前 focusIndex 前后各 5 帧。targetPixelSize 跟主图一致(1800),
+    /// 命中同一 cache key。
     private func prefetchAround() {
         let frames = state.frames
         guard !frames.isEmpty else { return }
@@ -186,9 +220,9 @@ struct TimelineView: View {
         }
     }
 
-    /// `preserveFocus`:后台 compaction 顺带触发的刷新传 true —— 保住用户正看
-    /// 的那一帧(按时间戳吸附回最近帧),不把人甩到最新帧。主动切天 / 手动刷新
-    /// 传 false(默认),落到当天最后一帧。
+    /// `preserveFocus`:后台 compaction 顺带触发的刷新传 true —— 保住正看的
+    /// 那一帧(按时间戳吸附回最近帧),不甩到最新帧。主动切天传 false(默认),
+    /// 落到当天最后一帧。
     private func reload(preserveFocus: Bool = false) {
         state.loading = true
         let day = state.selectedDay
@@ -196,6 +230,7 @@ struct TimelineView: View {
         let keepTimestamp: Date? = preserveFocus ? currentFrame?.timestamp : nil
         guard let db = services?.db else {
             state.frames = []
+            model = DayModel()
             state.loading = false
             return
         }
@@ -203,9 +238,12 @@ struct TimelineView: View {
         let token = state.reloadToken
         Task { @MainActor in
             let fetched = await TimelineFeed.framesForDay(day, db: db)
+            let moments = await TimelineFeed.audioMomentsForDay(day, db: db)
             // 已有更新的 reload(快速切天),丢弃这次旧天结果 —— 否则慢的旧天
             // 查询迟到会盖掉新天 frames,日期栏显示新天、画面却是旧天。
             guard token == state.reloadToken else { return }
+            model = DayModel(frames: fetched, moments: moments)
+            audioMoments = moments
             state.frames = fetched
             // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
             if let target = state.pendingSeek {
@@ -219,6 +257,487 @@ struct TimelineView: View {
             state.loading = false
         }
     }
+
+    private func loadAround() async {
+        guard let moment = currentFrame?.timestamp, let db = services?.db else {
+            activeApps = []; transcripts = []; return
+        }
+        let apps = await TimelineFeed.activeAppsAround(moment, windowSeconds: 45, db: db)
+        let audio = await TimelineFeed.audioTranscriptsAround(
+            moment, beforeSeconds: 120, afterSeconds: 30, db: db)
+        guard !Task.isCancelled else { return }
+        activeApps = apps
+        transcripts = audio
+    }
+
+    // MARK: Wheel / Esc
+
+    /// 滚轮只在指针落在圆里(含外圈)时拨帧,圆外的列表照常滚;Esc 关放大图。
+    private func installMonitor() {
+        guard ui.monitor == nil else { return }
+        let ui = self.ui, state = self.state
+        ui.monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown]) { e in
+            if e.type == .keyDown {
+                if e.keyCode == 53, ui.zoomed { ui.zoomed = false; return nil }
+                return e
+            }
+            guard !ui.wheelBlocked, !state.frames.isEmpty,
+                  let cv = e.window?.contentView else { return e }
+            let p = CGPoint(x: e.locationInWindow.x, y: cv.bounds.height - e.locationInWindow.y)
+            guard hypot(p.x - ui.center.x, p.y - ui.center.y) <= ui.radius else { return e }
+            var dx = e.scrollingDeltaX, dy = e.scrollingDeltaY
+            if !e.hasPreciseScrollingDeltas { dx *= 22; dy *= 22 }
+            ui.wheelAcc += abs(dx) > abs(dy) ? -dx : -dy
+            let n = Int(ui.wheelAcc / 22)
+            if n != 0 {
+                ui.wheelAcc -= CGFloat(n) * 22
+                state.focusIndex = max(0, min(state.frames.count - 1, state.focusIndex + n))
+            }
+            return nil
+        }
+    }
+
+    private func removeMonitor() {
+        if let m = ui.monitor { NSEvent.removeMonitor(m) }
+        ui.monitor = nil
+    }
+
+    // MARK: Backdrop + page switcher
+
+    private func backdrop(_ g: RingGeo) -> some View {
+        ZStack {
+            SidebarBackdrop()
+            RadialGradient(colors: [pal.glow, .clear], center: UnitPoint(x: g.c.x / max(1, g.size.width),
+                                                                         y: g.c.y / max(1, g.size.height)),
+                           startRadius: 0, endRadius: 434 * g.k)
+                .allowsHitTesting(false)
+        }
+        .frame(width: g.size.width, height: g.size.height)
+    }
+
+    private var pageSwitcher: some View {
+        HStack(spacing: 0) {
+            ForEach(SidebarSection.allCases) { s in
+                let on = (selection ?? .timeline) == s
+                Button { selection = s } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: s.symbol).font(.system(size: 13, weight: .medium))
+                        Text(s.label).font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundStyle(on ? pal.fg : pal.muted)
+                    .padding(.horizontal, 14).frame(height: 26)
+                    .background(Capsule().fill(on ? pal.seg : .clear)
+                        .shadow(color: .black.opacity(on ? 0.15 : 0), radius: 1.5, y: 1))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(pal.pill))
+        .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+        .offset(x: 84, y: 1)
+    }
+
+    // MARK: Ring
+
+    private func ringCanvas(_ g: RingGeo) -> some View {
+        let model = self.model, pal = self.pal, hover = self.hover, hotApp = self.hotApp
+        let focusTs = currentFrame?.timestamp
+        let nowAng: Double? = isToday ? ang(Date()) : nil
+        let ang = self.ang
+        return Canvas { ctx, _ in
+            let k = g.k
+            ctx.stroke(RingPaths.arc(g, g.r, 0, 360), with: .color(pal.track), lineWidth: g.band)
+            ctx.stroke(RingPaths.arc(g, g.ra, 0, 360), with: .color(pal.track), lineWidth: 5 * k)
+            for h in 0..<24 {
+                let a = Double(h) * 15, major = h % 3 == 0
+                let p = g.pt(426 * k, a), rr = (major ? 2.6 : 1.6) * k
+                ctx.fill(Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2)),
+                         with: .color(pal.tick.opacity(major ? 1 : 0.6)))
+                if major {
+                    ctx.draw(Text(String(format: "%02d", h))
+                                .font(.system(size: 14 * g.fk, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(pal.muted),
+                             at: g.pt(449 * k, a))
+                }
+            }
+            for gp in model.gaps {
+                ctx.stroke(RingPaths.arc(g, g.r, ang(gp.start), ang(gp.end)), with: .color(pal.faint),
+                           style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0, 7]))
+            }
+            let gapDeg = 2.4 / Double(g.r) * 180 / .pi
+            var hotBlock = -1
+            if case .block(let i) = hover { hotBlock = i }
+            let dimming = hotBlock >= 0 || hotApp != nil
+            for (i, b) in model.blocks.enumerated() {
+                let hot = i == hotBlock || b.app == hotApp
+                let a0 = ang(b.start) + gapDeg / 2
+                let a1 = max(a0 + 0.25, ang(b.end) - gapDeg / 2)
+                let grow = hot ? 4 * k : 0
+                let path = RingPaths.roundSeg(g, g.r1 - grow, g.r2 + grow, a0, a1, g.band / 2 + grow)
+                ctx.fill(path, with: .color(TimelineBarColor.barColor(for: b.app)
+                    .opacity(dimming && !hot ? 0.35 : 1)))
+            }
+            var hotAudio = -1
+            if case .audio(let i) = hover { hotAudio = i }
+            for (i, s) in model.audio.enumerated() {
+                let a0 = ang(s.start) + 0.6
+                ctx.stroke(RingPaths.arc(g, g.ra, a0, max(a0 + 0.1, ang(s.end) - 0.6)),
+                           with: .color(pal.audio),
+                           style: StrokeStyle(lineWidth: (i == hotAudio ? 8 : 5) * k, lineCap: .round))
+            }
+            if let an = nowAng {
+                var line = Path()
+                line.move(to: g.pt(g.r1 - 5 * k, an)); line.addLine(to: g.pt(g.r2 + 5 * k, an))
+                ctx.stroke(line, with: .color(pal.fg), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                let inTicks = abs(an.truncatingRemainder(dividingBy: 360) - 180) < 80
+                ctx.draw(Text("now").font(.system(size: 14 * g.fk, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(pal.fg),
+                         at: g.pt(inTicks ? 470 * k : g.r1 - 26 * k, an))
+            }
+            if let ts = focusTs {
+                let a = ang(ts)
+                // 焦点帧:外圈上一个白点 + 圈内一个小三角
+                func local(_ dx: CGFloat, _ rad: CGFloat) -> CGPoint {
+                    let t = a * .pi / 180
+                    return CGPoint(x: g.c.x + rad * CGFloat(sin(t)) + dx * CGFloat(cos(t)),
+                                   y: g.c.y - rad * CGFloat(cos(t)) + dx * CGFloat(sin(t)))
+                }
+                var tri = Path()
+                tri.move(to: local(-7 * k, g.r1 - 15 * k))
+                tri.addLine(to: local(7 * k, g.r1 - 15 * k))
+                tri.addLine(to: local(0, g.r1 - 6 * k))
+                tri.closeSubpath()
+                ctx.fill(tri, with: .color(pal.fg))
+                ctx.stroke(tri, with: .color(pal.fg), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+                let p = g.pt(g.r, a), rr = 5.5 * k
+                let dot = Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2))
+                ctx.drawLayer { l in
+                    l.addFilter(.shadow(color: pal.curglow, radius: 4))
+                    l.fill(dot, with: .color(.white))
+                }
+                ctx.stroke(dot, with: .color(.black.opacity(0.35)), lineWidth: 1)
+            }
+        }
+        .frame(width: g.size.width, height: g.size.height)
+        .allowsHitTesting(false)
+    }
+
+    /// 外圈 + 声音细圈的命中区:hover 出 tooltip,点 / 拖跳到那个角度最近的帧。
+    private func ringHitArea(_ g: RingGeo) -> some View {
+        Color.clear
+            .frame(width: g.size.width, height: g.size.height)
+            .contentShape(Annulus(center: g.c, inner: g.r1 - 6 * g.k, outer: g.ra + 10 * g.k), eoFill: true)
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let p):
+                    ui.hoverPoint = p
+                    let h = drag == nil ? hitTest(p, g) : nil
+                    if h != hover { hover = h }
+                case .ended:
+                    if hover != nil { hover = nil }
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { v in
+                        guard !state.frames.isEmpty else { return }
+                        let a = g.angle(at: v.location)
+                        if drag == nil { drag = RingDrag(a0: a, moved: false); hover = nil }
+                        if var d = drag, !d.moved, abs(a - d.a0) > 1.5 { d.moved = true; drag = d }
+                        if drag?.moved == true { seek(time(at: a)) }
+                    }
+                    .onEnded { v in
+                        defer { drag = nil }
+                        guard let d = drag, !d.moved else { return }
+                        if case .audio(let i) = hitTest(v.location, g) {
+                            seek(model.audio[i].start)
+                        } else {
+                            seek(time(at: d.a0))
+                        }
+                    }
+            )
+    }
+
+    private func hitTest(_ p: CGPoint, _ g: RingGeo) -> RingHover? {
+        let d = g.dist(p), ts = time(at: g.angle(at: p))
+        if d > (g.r2 + g.ra) / 2 {
+            if let i = model.audio.firstIndex(where: { $0.start.addingTimeInterval(-60) <= ts && ts <= $0.end.addingTimeInterval(60) }) {
+                return .audio(i)
+            }
+            return nil
+        }
+        if let i = model.blocks.firstIndex(where: { $0.start <= ts && ts <= $0.end }) { return .block(i) }
+        if let i = model.gaps.firstIndex(where: { $0.start <= ts && ts <= $0.end }) { return .gap(i) }
+        return nil
+    }
+
+    @ViewBuilder
+    private func tooltip(_ g: RingGeo) -> some View {
+        if let h = hover, drag == nil {
+            RingTooltip(ui: ui, size: g.size, pal: pal) { tipContent(h) }
+        }
+    }
+
+    @ViewBuilder
+    private func tipContent(_ h: RingHover) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            switch h {
+            case .block(let i):
+                let b = model.blocks[i]
+                HStack(spacing: 8) {
+                    RealAppIcon(appName: b.app, size: 20)
+                    Text(b.app).font(.system(size: 15, weight: .semibold))
+                }
+                Text("\(Fmt.hm(b.start)) – \(Fmt.hm(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
+                    .font(.system(size: 13, design: .monospaced))
+                let sub = (b.url?.isEmpty == false ? b.url : nil) ?? b.title
+                if !sub.isEmpty {
+                    Text(sub).font(.system(size: 14)).foregroundStyle(pal.muted).lineLimit(1).truncationMode(.tail)
+                }
+                Text("\(b.f1 - b.f0) frames · click to jump here").font(.system(size: 12.5)).foregroundStyle(pal.faint)
+            case .gap(let i):
+                let s = model.gaps[i]
+                Text("No capture").font(.system(size: 15, weight: .semibold))
+                Text("\(Fmt.hm(s.start)) – \(Fmt.hm(s.end)) · \(Fmt.dur(s.end.timeIntervalSince(s.start)))")
+                    .font(.system(size: 13, design: .monospaced))
+                Text("Lid closed, asleep, or paused").font(.system(size: 12.5)).foregroundStyle(pal.faint)
+            case .audio(let i):
+                let s = model.audio[i]
+                Text("Audio").font(.system(size: 15, weight: .semibold))
+                Text("\(Fmt.hm(s.start)) – \(Fmt.hm(s.end)) · \(Fmt.dur(s.end.timeIntervalSince(s.start)))")
+                    .font(.system(size: 13, design: .monospaced))
+                Text("\(s.count) transcripts · click to jump here").font(.system(size: 12.5)).foregroundStyle(pal.faint)
+            }
+        }
+        .foregroundStyle(pal.fg)
+    }
+
+    // MARK: Frame ticks (bottom inner arc)
+
+    /// 选帧竖线:沿圆的下半圈排开,当前帧在正下方,往右是更晚的帧。
+    private func ticksLayer(_ g: RingGeo) -> some View {
+        let frames = state.frames
+        let f = min(max(0, state.focusIndex), frames.count - 1)
+        let lo = max(0, f - 20), hi = min(frames.count - 1, f + 20)
+        var icons = Set<Int>()
+        var lastIcon = -99
+        for i in lo...hi where (i == 0 || frames[i - 1].appName != frames[i].appName)
+            && abs(i - f) <= 14 && i - lastIcon >= 3 {
+            icons.insert(i); lastIcon = i
+        }
+        let k = g.k
+        return ZStack(alignment: .topLeading) {
+            ForEach(Array(lo...hi), id: \.self) { i in
+                let d = abs(i - f), cur = i == f
+                let a = 180 - Double(i - f) * Self.tickStep
+                let len = (cur ? 64 : 36) * k
+                let fade = max(0, 1 - Double(max(0, d - 14)) / 6)
+                ZStack(alignment: .top) {
+                    Capsule()
+                        .fill(TimelineBarColor.barColor(for: frames[i].appName))
+                        .frame(width: 11 * k, height: len + 11 * k)
+                        .shadow(color: cur ? pal.curglow : .clear, radius: 6 * k)
+                }
+                .frame(width: 18 * k, height: 76 * k, alignment: .top)
+                .contentShape(Rectangle())
+                .rotationEffect(.degrees(a))
+                .position(g.pt(330 * k, a))
+                .opacity(fade)
+                .onTapGesture { setFocus(i) }
+                if icons.contains(i) {
+                    RealAppIcon(appName: frames[i].appName, size: 26 * k)
+                        .position(g.pt(276 * k, a))
+                        .opacity(fade)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+        .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        .rotationEffect(.degrees(tickShift),
+                        anchor: UnitPoint(x: g.c.x / max(1, g.size.width), y: g.c.y / max(1, g.size.height)))
+    }
+
+    // MARK: Inside the circle
+
+    private var dayBinding: Binding<Date> {
+        Binding(get: { state.selectedDay }, set: { state.selectedDay = $0 })
+    }
+
+    private func shiftDay(_ n: Int) {
+        guard let d = Calendar.current.date(byAdding: .day, value: n, to: state.selectedDay),
+              d <= Date() else { return }
+        state.selectedDay = d
+    }
+
+    private func datePill(_ g: RingGeo) -> some View {
+        let fk = g.fk
+        let canNext = (Calendar.current.date(byAdding: .day, value: 1, to: day0) ?? .distantFuture) <= Date()
+        let db = services?.db
+        return HStack(spacing: 0) {
+            Button { shiftDay(-1) } label: {
+                Image(systemName: "chevron.left").font(.system(size: 14 * fk, weight: .medium))
+                    .padding(.horizontal, 10).frame(maxHeight: .infinity).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(pal.muted)
+            Button { ui.calendarOpen.toggle() } label: {
+                HStack(spacing: 7) {
+                    Text((isToday ? "Today · " : "") + Fmt.dayLabel(state.selectedDay))
+                        .font(.system(size: 15 * fk, weight: .semibold))
+                    Image(systemName: "calendar").font(.system(size: 13 * fk)).opacity(0.55)
+                }
+                .foregroundStyle(pal.fg)
+                .padding(.horizontal, 10).padding(.vertical, 3)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $ui.calendarOpen, arrowEdge: .bottom) {
+                CalendarPopover(selected: dayBinding, isPresented: $ui.calendarOpen,
+                                availability: db.map { db in { days in await TimelineFeed.daysWithFrames(days, db: db) } })
+            }
+            Button { shiftDay(1) } label: {
+                Image(systemName: "chevron.right").font(.system(size: 14 * fk, weight: .medium))
+                    .padding(.horizontal, 10).frame(maxHeight: .infinity).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(pal.muted).opacity(canNext ? 1 : 0.25).disabled(!canNext)
+        }
+        .frame(height: 34 * g.k)
+        .padding(.horizontal, 2)
+        .background(Capsule().fill(pal.pill))
+        .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+        .onTapGesture { }   // 药丸空白处不落到下面的拖窗手势
+        .position(x: g.c.x, y: g.c.y - 293 * g.k)
+    }
+
+    @ViewBuilder
+    private func innerLayer(_ g: RingGeo) -> some View {
+        if let f = currentFrame {
+            let k = g.k, fk = g.fk
+            let shotW = 544 * k, shotH = 340 * k
+            if let url = f.browserUrl, !url.isEmpty {
+                let secure = url.hasPrefix("https://")
+                HStack(spacing: 8) {
+                    Image(systemName: secure ? "lock.fill" : "lock.open.fill")
+                        .font(.system(size: 11 * fk))
+                        .foregroundStyle(secure ? Color.green.opacity(0.85) : Color.orange.opacity(0.85))
+                    Text(Fmt.displayURL(url))
+                        .font(.system(size: 13.5 * fk, design: .monospaced))
+                        .foregroundStyle(pal.muted)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 32 * k)
+                .frame(maxWidth: 460 * k)
+                .background(Capsule().fill(pal.pill))
+                .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: 460 * k)
+                .position(x: g.c.x, y: g.c.y - 246 * k)
+            }
+            FrameShot(frame: f, contentMode: .fill)
+                .frame(width: shotW, height: shotH)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
+                .contentShape(Rectangle())
+                .onTapGesture { ui.zoomed = true }
+                .position(x: g.c.x, y: g.c.y - 220 * k + shotH / 2)
+            HStack(spacing: 9) {
+                RealAppIcon(appName: f.appName, size: 22 * fk)
+                Text(f.appName.isEmpty ? "(unknown app)" : f.appName)
+                    .font(.system(size: 15 * fk, weight: .bold, design: .monospaced))
+                    .foregroundStyle(pal.fg)
+                    .lineLimit(1).layoutPriority(1)
+                Text("·").font(.system(size: 15 * fk)).foregroundStyle(pal.fg.opacity(0.3))
+                Text(f.windowName)
+                    .font(.system(size: 15 * fk, design: .monospaced))
+                    .foregroundStyle(pal.muted)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 6)
+                Text(Fmt.hms(f.timestamp))
+                    .font(.system(size: 15 * fk, design: .monospaced))
+                    .foregroundStyle(pal.muted)
+                    .layoutPriority(1)
+            }
+            .frame(width: shotW - 16)
+            .position(x: g.c.x, y: g.c.y + 132 * k + 11 * fk)
+        }
+    }
+
+    private func zoomOverlay(_ f: TimelineFrame, _ g: RingGeo) -> some View {
+        ZStack {
+            Color.black.opacity(0.55)
+            FrameShot(frame: f, contentMode: .fit)
+                .frame(width: g.size.width * 0.875, height: g.size.height * 0.9)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: .black.opacity(0.5), radius: 30, y: 20)
+        }
+        .frame(width: g.size.width, height: g.size.height)
+        .contentShape(Rectangle())
+        .onTapGesture { ui.zoomed = false }
+    }
+
+    // MARK: Corners
+
+    private func corners(_ g: RingGeo) -> some View {
+        let focus = currentFrame?.timestamp ?? Date()
+        let title = isToday ? "TODAY" : Fmt.monthDay(state.selectedDay).uppercased()
+        return TimelineCorners(
+            g: g, pal: pal, model: model, focusIndex: state.focusIndex, focusTime: focus,
+            dayTitle: title, apps: activeApps, audio: transcripts, audioMoments: audioMoments,
+            hotApp: $hotApp,
+            jumpToFrame: { setFocus($0) },
+            jumpToTime: { seek($0) })
+    }
+}
+
+/// 只给滚轮监听 / Esc 用的引用型状态 —— NSEvent 闭包里要读写它。
+@Observable
+final class TimelineUI {
+    var zoomed = false
+    var calendarOpen = false
+    /// 指针位置只由 RingTooltip 读,移动鼠标时只重画 tooltip 那一层。
+    var hoverPoint: CGPoint = .zero
+    @ObservationIgnored var wheelBlocked = false
+    @ObservationIgnored var center: CGPoint = .zero
+    @ObservationIgnored var radius: CGFloat = 0
+    @ObservationIgnored var wheelAcc: CGFloat = 0
+    @ObservationIgnored var monitor: Any?
+}
+
+/// 跟着指针走的 tooltip,靠近窗口右 / 下边时翻到指针另一侧。
+private struct RingTooltip<Content: View>: View {
+    let ui: TimelineUI
+    let size: CGSize
+    let pal: RingPalette
+    @ViewBuilder let content: () -> Content
+    @State private var tipSize: CGSize = .zero
+
+    var body: some View {
+        let p = ui.hoverPoint
+        let x = p.x + 16 + tipSize.width > size.width - 8 ? p.x - tipSize.width - 16 : p.x + 16
+        let y = p.y + 14 + tipSize.height > size.height - 8 ? p.y - tipSize.height - 14 : p.y + 14
+        content()
+            .padding(.horizontal, 13).padding(.vertical, 10)
+            .frame(minWidth: 200, maxWidth: 330, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(RoundedRectangle(cornerRadius: 14).fill(.regularMaterial))
+            .background(RoundedRectangle(cornerRadius: 14).fill(pal.tip))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(pal.tipb, lineWidth: 1))
+            .shadow(color: .black.opacity(0.22), radius: 15, y: 10)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { tipSize = $0 }
+            .offset(x: x, y: y)
+            .allowsHitTesting(false)
+    }
+}
+
+private enum RingHover: Equatable {
+    case block(Int), gap(Int), audio(Int)
+}
+
+private struct RingDrag {
+    var a0: Double
+    var moved: Bool
 }
 
 // =============================================================================
@@ -309,13 +828,19 @@ struct TimelineControlsBar: View {
 struct CalendarPopover: View {
     @Binding var selected: Date
     @Binding var isPresented: Bool
+    /// 传了就按月查哪些天有采集:没采集的天灰掉、不可点(Timeline 用);
+    /// nil 时所有过去的天都可点(Input 图谱用)。
+    var availability: (([Date]) async -> Set<Date>)? = nil
     @State private var anchor: Date = Date()
+    @State private var captured: Set<Date>? = nil
     @Environment(\.colorScheme) private var colorScheme
     private let cal = Calendar(identifier: .gregorian)
 
-    init(selected: Binding<Date>, isPresented: Binding<Bool>) {
+    init(selected: Binding<Date>, isPresented: Binding<Bool>,
+         availability: (([Date]) async -> Set<Date>)? = nil) {
         self._selected = selected
         self._isPresented = isPresented
+        self.availability = availability
         self._anchor = State(initialValue: selected.wrappedValue)
     }
 
@@ -357,8 +882,10 @@ struct CalendarPopover: View {
                                 let inMonth = cal.isDate(date, equalTo: anchor, toGranularity: .month)
                                 let isSel = cal.isDate(date, inSameDayAs: selected)
                                 let isFuture = date > Date()
-                                DayCell(date: date, inMonth: inMonth, isSelected: isSel, isFuture: isFuture) {
-                                    if !isFuture {
+                                let noCapture = captured.map { !$0.contains(cal.startOfDay(for: date)) } ?? false
+                                DayCell(date: date, inMonth: inMonth, isSelected: isSel, isFuture: isFuture,
+                                        noCapture: noCapture) {
+                                    if !isFuture && !noCapture {
                                         selected = date
                                         isPresented = false
                                     }
@@ -373,6 +900,11 @@ struct CalendarPopover: View {
         .padding(14)
         .frame(width: 280)
         .background(Color(NSColor.windowBackgroundColor).opacity(0.98))
+        .task(id: monthTitle(anchor)) {
+            guard let availability else { return }
+            let days = monthGrid(anchor).compactMap { $0 }.map { cal.startOfDay(for: $0) }
+            captured = await availability(days)
+        }
     }
 
     private func shiftMonth(_ delta: Int) {
@@ -406,6 +938,7 @@ struct DayCell: View {
     let inMonth: Bool
     let isSelected: Bool
     let isFuture: Bool
+    var noCapture: Bool = false
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     var body: some View {
@@ -424,6 +957,7 @@ struct DayCell: View {
                 .foregroundStyle(
                     isFuture     ? Theme.textPrimary.opacity(0.20)
                     : isSelected ? selectedFg
+                    : noCapture  ? Theme.textPrimary.opacity(0.25)
                     : inMonth    ? Theme.textPrimary.opacity(0.88)
                     :              Theme.textPrimary.opacity(0.32)
                 )
@@ -435,12 +969,12 @@ struct DayCell: View {
                 .contentShape(Rectangle())   // 整格可点,不只数字字形
         }
         .buttonStyle(.bouncyIcon)
-        .disabled(isFuture)
+        .disabled(isFuture || noCapture)
     }
 }
 
 // =============================================================================
-// MARK: - FramePreview
+// MARK: - No-media placeholder
 // =============================================================================
 
 /// Shown when a TimelineFrame has neither a loadable JPG snapshot nor an
@@ -464,80 +998,6 @@ private struct NoMediaPlaceholder: View {
                     .foregroundStyle(Theme.textPrimary.opacity(0.45))
             }
         }
-    }
-}
-
-private struct FramePreview: View {
-    let frame: TimelineFrame
-    var body: some View {
-        // spacing 10 = 截图底边到信息行的距离;信息行 .padding(.bottom, 10)
-        // = 信息行到时间轴(彩色条区)的距离 —— 两个间距相等(07-21 update)。
-        // 截图在槽内**贴底**(.overlay(alignment: .bottom)):scaledToFit 居中
-        // 的话槽位有富余时死空间对半分到上下,"截图到信息行"的距离会随窗口
-        // 比例浮动,贴底后这个距离恒等于 spacing,上面的富余全归日期栏下方。
-        VStack(spacing: 10) {
-            ZStack {
-                if !frame.hasViewableMedia {
-                    // Recorded but no on-disk pixels (capture didn't write
-                    // a JPG and the MP4 chunk is missing). Skip the
-                    // loaders entirely so we don't churn on failure retry.
-                    NoMediaPlaceholder()
-                } else if let path = frame.snapshotPath {
-                    // Color.clear 严格取槽位尺寸,图 overlay 上去再裁 ——
-                    // 直接放 scaledToFill 的图会**上报超过槽位的布局高度**
-                    // (clipped 只裁画面不裁布局),把整列顶出面板。
-                    // ⚠️ 不裁圆角、不加描边:截图必须逐像素完整,圆角裁切会
-                    // 把四角真实像素物理切掉,描边 overlay 在图不满槽时会悬空。
-                    Color.clear
-                        // contentMode .fit:组件默认 .fill 会把比例差的那几个
-                        // px 溢出交给外层 clipped 裁掉(左右各截几像素)。
-                        .overlay(alignment: .bottom) {
-                            AsyncDiskThumbnail(path: path, targetPixelSize: 1800,
-                                               contentMode: .fit)
-                        }
-                } else if let vpath = frame.videoPath {
-                    // 99%+ of frames live here — compacted into an MP4 chunk
-                    // 同上:不裁圆角、不描边,像素完整。
-                    Color.clear
-                        .overlay(alignment: .bottom) {
-                            AsyncMP4FrameThumbnail(
-                                videoPath: vpath,
-                                offsetMs: frame.videoOffsetMs,
-                                fps: frame.videoFps,
-                                targetPixelSize: 1800,
-                                contentMode: .fit    // 同上,像素完整不裁
-                            )
-                        }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // (07-21 update)横向留白收窄,scaledToFit 的图被宽度卡住,留白变窄后
-            // 图在宽高两个方向一起等比放大。
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-
-            // ── Frame info row — 1.5× original size ──
-            HStack(spacing: 10) {
-                RealAppIcon(appName: frame.appName, size: 21)
-                Text(frame.appName.isEmpty ? "(unknown app)" : frame.appName)
-                    .font(.system(size: 17, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.9))
-                Text("·").font(.system(size: 17)).foregroundStyle(Theme.textPrimary.opacity(0.3))
-                Text(frame.windowName)
-                    .font(.system(size: 15, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
-                    .lineLimit(1)
-                Spacer()
-                Text(timeFmt.string(from: frame.timestamp))
-                    .font(.system(size: 15, design: .monospaced))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
-            }
-            // bottom 10 = 到时间轴的距离,跟上面 spacing 10(截图到信息行)相等。
-            .padding(.horizontal, 18).padding(.bottom, 10)
-        }
-    }
-    private var timeFmt: DateFormatter {
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }
 }
 
@@ -584,118 +1044,6 @@ struct RealAppIcon: View {
 }
 
 // =============================================================================
-// MARK: - TimelineSlider — original code lives in My-Orphies
-// =============================================================================
-//
-// Source: My-Orphies/apps/orphies-tauri/components/rewind/timeline/timeline.tsx
-
-private struct TimelineSlider: View {
-    @Bindable var state: TimelineState
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Bigger bars + bigger icons — matches the original Orphies scale.
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    // LazyHStack:一天的帧全量加载(实测 3000~9000 帧/天),只渲染
-                    // 可见的几十列。列宽固定(FrameColumn 锁 12pt)使 lazy 能正确
-                    // 算出 content 宽度;ScrollViewReader.scrollTo 对未渲染 id
-                    // 仍可定位。
-                    //
-                    // spacing 0 + 每列左右 padding 3(视觉柱宽 12、缝 6 不变):
-                    // contentShape 把 18pt 整列(含透明的图标槽/Spacer 区)都变成
-                    // 可点区,列与列间无点击死区。
-                    LazyHStack(alignment: .bottom, spacing: 0) {
-                        ForEach(state.frames.indices, id: \.self) { idx in
-                            FrameColumn(
-                                frame: state.frames[idx],
-                                isCurrent: idx == state.focusIndex,
-                                isAppStart: idx == 0 || state.frames[idx].appName != state.frames[idx - 1].appName
-                            )
-                            .padding(.horizontal, 3)      // 吃掉原 spacing 6 的左右各半
-                            .contentShape(Rectangle())    // 整列矩形可点,不只柱子字形
-                            .id(state.frames[idx].id)
-                            .onTapGesture { state.focusIndex = idx }
-                        }
-                    }
-                    .padding(.horizontal, 400)
-                    .frame(height: 140, alignment: .bottom)
-                }
-                // 140 = 跟内容同高,柱子底边即滚动区底边 —— 全出血布局里
-                // 滚动区贴面板底,柱子就直接从窗口底边长出来。
-                .frame(height: 140)
-                .background(
-                    LinearGradient(
-                        colors: [Theme.hover, Color.clear],   // 动态:light 黑 5% / dark 白 6%
-                        startPoint: .bottom, endPoint: .top
-                    )
-                )
-                .onAppear {
-                    guard state.frames.indices.contains(state.focusIndex) else { return }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                        proxy.scrollTo(state.frames[state.focusIndex].id, anchor: .center)
-                    }
-                }
-                .onChange(of: state.focusIndex) {
-                    guard state.frames.indices.contains(state.focusIndex) else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(state.frames[state.focusIndex].id, anchor: .center)
-                    }
-                }
-                .onChange(of: state.frames.count) {
-                    guard state.frames.indices.contains(state.focusIndex) else { return }
-                    DispatchQueue.main.async {
-                        proxy.scrollTo(state.frames[state.focusIndex].id, anchor: .center)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// One frame's full column: app icon on top (only at app-block boundary),
-/// colored bar on the bottom. Column locks to 130pt tall so all bars share
-/// a baseline and all icons share a top line.
-private struct FrameColumn: View {
-    let frame: TimelineFrame
-    let isCurrent: Bool
-    let isAppStart: Bool
-
-    var body: some View {
-        // Bigger column matching the original Orphies scale:
-        //   - bar width: 12pt
-        //   - icon size: 32pt (overflows 12pt column ±10pt on each side)
-        //   - bar heights: 100 / 56
-        let barH: CGFloat = isCurrent ? 100 : 56
-        VStack(spacing: 2) {
-            // ── icon area (32pt) ──
-            if isAppStart {
-                RealAppIcon(appName: frame.appName, size: 32)
-                    .frame(width: 32, height: 32)
-            } else {
-                Color.clear.frame(width: 12, height: 32)
-            }
-
-            Spacer(minLength: 0)
-
-            // ── bar ──
-            UnevenRoundedRectangle(
-                topLeadingRadius: 5, bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0, topTrailingRadius: 5
-            )
-            .fill(TimelineBarColor.barColor(for: frame.appName))
-            .frame(width: 12, height: barH)
-            .scaleEffect(isCurrent ? 1.12 : 1.0, anchor: .bottom)
-            // 当前刻度的辉光。Color.primary 会反转(light 黑 / dark 白)——
-            // dark 下是白色光晕,light 下变成深色投影,两边都能把当前柱衬出来。
-            .shadow(color: isCurrent ? Color.primary.opacity(0.6) : .clear, radius: 5)
-            .animation(.easeOut(duration: 0.15), value: isCurrent)
-        }
-        .frame(width: 12, height: 140)   // a bit taller to fit 32pt icon
-    }
-}
-
-// =============================================================================
 // MARK: - Color helper (port of Orphies' appNameToBarColor)
 // =============================================================================
 
@@ -710,74 +1058,6 @@ enum TimelineBarColor {
         for ch in appName.unicodeScalars { hash = (hash &* 33) &+ UInt64(ch.value) }
         let hue = Double(hash % 360) / 360.0
         return Color(hue: hue, saturation: 0.6, brightness: 0.88)
-    }
-}
-
-// =============================================================================
-// MARK: - Browser URL bar — Safari-style address bar above the screenshot
-// =============================================================================
-//
-// Visual contract (mirrors Orphies' URL bar):
-//   ┌──────────────────────────────────────────────────────────┐
-//   │  🔒  developer.apple.com/design/…/designing-for-macos  ↗  │
-//   └──────────────────────────────────────────────────────────┘
-//   - dark rounded background, subtle white-opacity border
-//   - lock glyph on the left (green tint when https)
-//   - URL truncated middle, monospaced, selectable
-//   - external link icon on the right opens in default browser
-
-private struct BrowserURLBar: View {
-    let url: String
-
-    private var isSecure: Bool { url.hasPrefix("https://") }
-
-    private var displayURL: String {
-        // Strip scheme for a cleaner address-bar look
-        if let r = url.range(of: "://") {
-            return String(url[r.upperBound...])
-        }
-        return url
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: isSecure ? "lock.fill" : "lock.open.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(isSecure ? Color.green.opacity(0.8) : Color.orange.opacity(0.8))
-
-            Text(displayURL)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-
-            Spacer(minLength: 6)
-
-            Button {
-                if let target = URL(string: url) {
-                    NSWorkspace.shared.open(target)
-                }
-            } label: {
-                Image(systemName: "arrow.up.right.square")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textPrimary.opacity(0.65))
-            }
-            .buttonStyle(.bouncyIcon)
-            .help("Open in browser")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                // textBackgroundColor 是"输入框底"语义色,正好是地址栏该有的:
-                // dark 近黑(跟原来 black 0.6 观感一致)、light 白。
-                .fill(Color(nsColor: .textBackgroundColor).opacity(0.6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(Theme.stroke, lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -801,8 +1081,774 @@ private struct EmptyState: View {
             } else {
                 Image(systemName: "moon.zzz").font(.system(size: 32))
                     .foregroundStyle(Theme.textPrimary.opacity(0.3))
-                Text("No frames on this day").font(.system(size: 12)).foregroundStyle(Theme.textPrimary.opacity(0.5))
+                Text("No capture this day").font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Your Mac was off or capture was paused.").font(.system(size: 15))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.55))
             }
         }
+    }
+}
+
+// =============================================================================
+// MARK: - Ring geometry / palette / paths
+// =============================================================================
+
+/// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 250pt 侧栏 +
+/// 14pt 间隙,上下给标题栏留 44pt;时刻标签外沿在 459/392·R。
+struct RingGeo {
+    static let edge: CGFloat = 20
+    let size: CGSize
+    let c: CGPoint
+    let r: CGFloat
+    let k: CGFloat
+    let sideW: CGFloat
+
+    init(size: CGSize) {
+        self.size = size
+        let ext: CGFloat = 459.0 / 392.0
+        let rw = (size.width / 2 - Self.edge - 250 - 14) / ext
+        let rh = (size.height / 2 - 44) / ext
+        let r = max(160, min(392, rw, rh))
+        self.r = r
+        k = r / 392
+        c = CGPoint(x: size.width / 2, y: size.height / 2)
+        sideW = max(250, min(300, size.width / 2 - Self.edge - 14 - r * ext))
+    }
+
+    var band: CGFloat { 18 * k }
+    var r1: CGFloat { r - band / 2 }
+    var r2: CGFloat { r + band / 2 }
+    var ra: CGFloat { 412 * k }
+    /// 圆里的字号跟着缩,但不小于稿子的 78%,否则看不清。
+    var fk: CGFloat { max(0.78, k) }
+
+    func pt(_ rad: CGFloat, _ deg: Double) -> CGPoint {
+        let t = deg * .pi / 180
+        return CGPoint(x: c.x + rad * CGFloat(sin(t)), y: c.y - rad * CGFloat(cos(t)))
+    }
+    func angle(at p: CGPoint) -> Double {
+        let a = atan2(Double(p.x - c.x), Double(c.y - p.y)) * 180 / .pi
+        return a < 0 ? a + 360 : a
+    }
+    func dist(_ p: CGPoint) -> CGFloat { hypot(p.x - c.x, p.y - c.y) }
+}
+
+struct RingPalette {
+    let dark: Bool
+    private var base: Color { dark ? .white : .black }
+    var fg: Color { Theme.textPrimary }
+    var muted: Color { base.opacity(dark ? 0.58 : 0.55) }
+    var faint: Color { base.opacity(dark ? 0.36 : 0.34) }
+    var track: Color { base.opacity(dark ? 0.055 : 0.06) }
+    var tick: Color { base.opacity(dark ? 0.30 : 0.28) }
+    var pill: Color { base.opacity(dark ? 0.06 : 0.045) }
+    var pillb: Color { base.opacity(dark ? 0.10 : 0.08) }
+    var row: Color { base.opacity(dark ? 0.045 : 0.035) }
+    var rowb: Color { base.opacity(dark ? 0.06 : 0.05) }
+    var tip: Color { dark ? Color(red: 0.125, green: 0.125, blue: 0.14).opacity(0.85) : Color.white.opacity(0.85) }
+    var tipb: Color { base.opacity(0.1) }
+    var seg: Color { dark ? Color.white.opacity(0.14) : .white }
+    var curglow: Color { dark ? Color.white.opacity(0.65) : Color.black.opacity(0.45) }
+    var accent: Color { Theme.accent }
+    var accentbg: Color { Theme.accent.opacity(dark ? 0.15 : 0.12) }
+    var accentb: Color { Theme.accent.opacity(dark ? 0.32 : 0.30) }
+    var audio: Color { dark ? Color(red: 0.66, green: 0.62, blue: 1) : Color(red: 0.55, green: 0.48, blue: 1) }
+    var glow: Color {
+        dark ? Color(red: 0.43, green: 0.37, blue: 1).opacity(0.16)
+             : Color(red: 0.71, green: 0.63, blue: 0.94).opacity(0.42)
+    }
+}
+
+enum RingPaths {
+    private static func sw(_ a: Double) -> Angle { .degrees(a - 90) }
+
+    static func arc(_ g: RingGeo, _ r: CGFloat, _ a0: Double, _ a1: Double) -> Path {
+        var p = Path()
+        p.addArc(center: g.c, radius: r, startAngle: sw(a0), endAngle: sw(a1), clockwise: false)
+        return p
+    }
+
+    /// 圆角环形段:四个角用二次曲线收圆;rc = 段厚一半时两头是半圆。
+    static func roundSeg(_ g: RingGeo, _ r1: CGFloat, _ r2: CGFloat,
+                         _ a0: Double, _ a1: Double, _ rcIn: CGFloat) -> Path {
+        let span = CGFloat((a1 - a0) * .pi / 180)
+        let rc = max(0, min(rcIn, (r2 - r1) / 2, span * r1 / 2))
+        let d2 = Double(rc / r2) * 180 / .pi, d1 = Double(rc / r1) * 180 / .pi
+        var p = Path()
+        p.move(to: g.pt(r2, a0 + d2))
+        p.addArc(center: g.c, radius: r2, startAngle: sw(a0 + d2), endAngle: sw(a1 - d2), clockwise: false)
+        p.addQuadCurve(to: g.pt(r2 - rc, a1), control: g.pt(r2, a1))
+        p.addLine(to: g.pt(r1 + rc, a1))
+        p.addQuadCurve(to: g.pt(r1, a1 - d1), control: g.pt(r1, a1))
+        p.addArc(center: g.c, radius: r1, startAngle: sw(a1 - d1), endAngle: sw(a0 + d1), clockwise: true)
+        p.addQuadCurve(to: g.pt(r1 + rc, a0), control: g.pt(r1, a0))
+        p.addLine(to: g.pt(r2 - rc, a0))
+        p.addQuadCurve(to: g.pt(r2, a0 + d2), control: g.pt(r2, a0))
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct Annulus: Shape {
+    let center: CGPoint
+    let inner: CGFloat
+    let outer: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.addEllipse(in: CGRect(x: center.x - outer, y: center.y - outer, width: outer * 2, height: outer * 2))
+        p.addEllipse(in: CGRect(x: center.x - inner, y: center.y - inner, width: inner * 2, height: inner * 2))
+        return p
+    }
+}
+
+private struct Triangle: Shape {
+    let up: Bool
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        if up {
+            p.move(to: CGPoint(x: r.midX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY)); p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+        } else {
+            p.move(to: CGPoint(x: r.minX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+        }
+        p.closeSubpath()
+        return p
+    }
+}
+
+// =============================================================================
+// MARK: - Day model (app blocks / gaps / totals / audio spans)
+// =============================================================================
+
+struct RingBlock {
+    let app: String
+    let start: Date
+    var end: Date
+    let f0: Int
+    var f1: Int
+    let title: String
+    let url: String?
+}
+
+struct RingSpan {
+    let start: Date
+    let end: Date
+    var count: Int = 0
+}
+
+struct AppTotal {
+    let app: String
+    var secs: TimeInterval
+    var longest: Int   // index into blocks
+}
+
+/// 一段 = 同一 app 连续、相邻帧间隔 ≤ 3 分钟;段尾 = 下一帧时间,间隔 > 3 分钟
+/// 时只延 10 秒。EventSession 的 session 也按这个切。
+struct DayModel {
+    var blocks: [RingBlock] = []
+    var gaps: [RingSpan] = []
+    var totals: [AppTotal] = []
+    var audio: [RingSpan] = []
+    var captured: TimeInterval = 0
+
+    init() {}
+
+    init(frames: [TimelineFrame], moments: [Date]) {
+        for (i, f) in frames.enumerated() {
+            let gapPrev = i > 0 ? f.timestamp.timeIntervalSince(frames[i - 1].timestamp) : .infinity
+            if blocks.isEmpty || f.appName != blocks[blocks.count - 1].app || gapPrev > 180 {
+                blocks.append(RingBlock(app: f.appName, start: f.timestamp, end: f.timestamp,
+                                        f0: i, f1: i + 1, title: f.windowName, url: f.browserUrl))
+            }
+            var end = f.timestamp.addingTimeInterval(10)
+            if i + 1 < frames.count, frames[i + 1].timestamp.timeIntervalSince(f.timestamp) <= 180 {
+                end = frames[i + 1].timestamp
+            }
+            blocks[blocks.count - 1].end = end
+            blocks[blocks.count - 1].f1 = i + 1
+        }
+        for i in blocks.indices.dropFirst() where blocks[i].start.timeIntervalSince(blocks[i - 1].end) > 180 {
+            gaps.append(RingSpan(start: blocks[i - 1].end, end: blocks[i].start))
+        }
+        var byApp: [String: AppTotal] = [:]
+        for (i, b) in blocks.enumerated() {
+            let d = b.end.timeIntervalSince(b.start)
+            captured += d
+            var t = byApp[b.app] ?? AppTotal(app: b.app, secs: 0, longest: i)
+            t.secs += d
+            let cur = blocks[t.longest]
+            if d > cur.end.timeIntervalSince(cur.start) { t.longest = i }
+            byApp[b.app] = t
+        }
+        totals = byApp.values.sorted { $0.secs > $1.secs }
+        // 声音细圈:相邻转录 ≤ 90 秒并成一段,段尾 = 最后一条 + 30 秒
+        var first: Date? = nil, last: Date? = nil, n = 0
+        for m in moments.sorted() {
+            if let l = last, m.timeIntervalSince(l) <= 90 { last = m; n += 1; continue }
+            if let f0 = first, let l = last { audio.append(RingSpan(start: f0, end: l.addingTimeInterval(30), count: n)) }
+            first = m; last = m; n = 1
+        }
+        if let f0 = first, let l = last { audio.append(RingSpan(start: f0, end: l.addingTimeInterval(30), count: n)) }
+    }
+
+    /// 帧 i 所在的 block(blocks 按 f0 升序)。
+    func blockIndex(ofFrame i: Int) -> Int? {
+        var lo = 0, hi = blocks.count - 1
+        while lo <= hi {
+            let mid = (lo + hi) / 2
+            if i < blocks[mid].f0 { hi = mid - 1 } else if i >= blocks[mid].f1 { lo = mid + 1 } else { return mid }
+        }
+        return nil
+    }
+}
+
+enum Fmt {
+    private static func make(_ f: String) -> DateFormatter {
+        let d = DateFormatter(); d.locale = Locale(identifier: "en_US_POSIX"); d.dateFormat = f; return d
+    }
+    private static let hmF = make("HH:mm"), hmsF = make("HH:mm:ss")
+    private static let dayF = make("EEE, MMM d"), mdF = make("MMM d")
+    static func hm(_ d: Date) -> String { hmF.string(from: d) }
+    static func hms(_ d: Date) -> String { hmsF.string(from: d) }
+    static func dayLabel(_ d: Date) -> String { dayF.string(from: d) }
+    static func monthDay(_ d: Date) -> String { mdF.string(from: d) }
+    /// 不到一分钟写秒数(session 常常不到一分钟)。
+    static func dur(_ s: TimeInterval) -> String {
+        if s < 60 { return "\(max(1, Int(s.rounded())))s" }
+        let m = Int((s / 60).rounded())
+        return m < 60 ? "\(m)m" : "\(m / 60)h \(String(format: "%02d", m % 60))m"
+    }
+    static func displayURL(_ url: String) -> String {
+        if let r = url.range(of: "://") { return String(url[r.upperBound...]) }
+        return url
+    }
+}
+
+/// 一帧的截图:JPG / MP4 抽帧 / 没有像素时的占位。
+private struct FrameShot: View {
+    let frame: TimelineFrame
+    let contentMode: ContentMode
+    var body: some View {
+        // Color.clear 严格取槽位尺寸,图 overlay 上去 —— 直接放 fill 的图会上报
+        // 超过槽位的布局尺寸。
+        Color.clear.overlay {
+            if !frame.hasViewableMedia {
+                NoMediaPlaceholder()
+            } else if let path = frame.snapshotPath {
+                AsyncDiskThumbnail(path: path, targetPixelSize: 1800, contentMode: contentMode)
+            } else if let vpath = frame.videoPath {
+                AsyncMP4FrameThumbnail(videoPath: vpath, offsetMs: frame.videoOffsetMs,
+                                       fps: frame.videoFps, targetPixelSize: 1800,
+                                       contentMode: contentMode)
+            }
+        }
+        .clipped()
+    }
+}
+
+// =============================================================================
+// MARK: - Corners around the circle
+// =============================================================================
+
+/// 圆四周四个角。位置钉死:上排两个标题在一条线上,下排两个标题在圆心水平线
+/// 下方 24pt;左列左对齐、右列右对齐。折叠状态只随用户操作变,换帧不动。
+private struct TimelineCorners: View {
+    let g: RingGeo
+    let pal: RingPalette
+    let model: DayModel
+    let focusIndex: Int
+    let focusTime: Date
+    let dayTitle: String
+    let apps: [ActiveAppEntry]
+    let audio: [AudioTranscriptEntry]
+    let audioMoments: [Date]
+    @Binding var hotApp: String?
+    let jumpToFrame: (Int) -> Void
+    let jumpToTime: (Date) -> Void
+
+    @State private var appsOpen = false
+    @State private var todayOpen = false
+    @State private var appHeights: [String: CGFloat] = [:]
+    @State private var esCardH: CGFloat = 96
+    @State private var audioContentH: CGFloat = 0
+    @State private var audioScrollToken = 0
+    @State private var audioScrollAnimated = false
+
+    private let top: CGFloat = 60, hd: CGFloat = 24, foldH: CGFloat = 34, gap: CGFloat = 8
+    private let todayRowH: CGFloat = 26
+    private var H: CGFloat { g.size.height }
+    private var leftX: CGFloat { RingGeo.edge }
+    private var rightX: CGFloat { g.size.width - RingGeo.edge - g.sideW }
+    private var bottomRow: CGFloat { g.c.y + 24 }
+    private let anim = Animation.easeInOut(duration: 0.3)
+
+    private struct Fold {
+        var listH: CGFloat
+        var label: String?
+        var scroll: Bool
+        var bottom: CGFloat
+    }
+
+    private func stack(_ hs: [CGFloat]) -> CGFloat {
+        hs.isEmpty ? 0 : hs.reduce(0, +) + gap * CGFloat(hs.count - 1)
+    }
+
+    /// Active Apps:收起时不越过圆心水平线,放不下的最后一行写 “+N more”;
+    /// 展开时给下面的 Audio 至少留 170pt,自己再超出就组内滚。
+    private var appsFold: Fold {
+        let listTop = top + hd
+        let hs = apps.map { appHeights[$0.id] ?? 56 }
+        if appsOpen {
+            let lh = max(0, min(stack(hs), H - 20 - 170 - listTop - gap - foldH))
+            return Fold(listH: lh, label: "Show less", scroll: true, bottom: listTop + lh + gap + foldH)
+        }
+        let limit = g.c.y - 8
+        if listTop + stack(hs) <= limit {
+            return Fold(listH: stack(hs), label: nil, scroll: false, bottom: listTop + stack(hs))
+        }
+        var n = hs.count
+        while n > 0, listTop + stack(Array(hs.prefix(n))) + gap + foldH > limit { n -= 1 }
+        let lh = stack(Array(hs.prefix(n)))
+        return Fold(listH: lh, label: "+\(hs.count - n) more", scroll: false, bottom: listTop + lh + gap + foldH)
+    }
+
+    /// Today:默认跟在 EventSession 下面,放得下几行显示几行;展开时往上长,
+    /// 最多长到 EventSession 卡片下面,再放不下就在框里滚。
+    private var todayLayout: (top: CGFloat, fold: Fold) {
+        let n = model.totals.count
+        func st(_ k: Int) -> CGFloat { k == 0 ? 0 : CGFloat(k) * todayRowH + gap * CGFloat(k - 1) }
+        let esBottom = top + hd + 2 + esCardH
+        var tTop = max(bottomRow, esBottom + 24)
+        if todayOpen {
+            let need = hd + st(n) + gap + foldH
+            tTop = min(tTop, max(esBottom + 24, H - 20 - need))
+            let listTop = tTop + hd
+            let lh = max(0, min(st(n), H - 20 - foldH - gap - listTop))
+            return (tTop, Fold(listH: lh, label: "Show less", scroll: true, bottom: listTop + lh + gap + foldH))
+        }
+        let listTop = tTop + hd
+        if listTop + st(n) <= H - 20 {
+            return (tTop, Fold(listH: st(n), label: nil, scroll: false, bottom: listTop + st(n)))
+        }
+        var k = n
+        while k > 0, listTop + st(k) + gap + foldH > H - 20 { k -= 1 }
+        return (tTop, Fold(listH: st(k), label: "+\(n - k) more apps", scroll: false,
+                           bottom: listTop + st(k) + gap + foldH))
+    }
+
+    /// 当前那条转录:离焦点 8 秒内的(高亮);没有就取时间上最近的。
+    private var nearAudioID: String? {
+        audio.filter { abs($0.timestamp.timeIntervalSince(focusTime)) < 8 }
+            .min { abs($0.timestamp.timeIntervalSince(focusTime)) < abs($1.timestamp.timeIntervalSince(focusTime)) }?.id
+    }
+    private var currentAudioID: String? {
+        nearAudioID ?? audio.min {
+            abs($0.timestamp.timeIntervalSince(focusTime)) < abs($1.timestamp.timeIntervalSince(focusTime))
+        }?.id
+    }
+
+    var body: some View {
+        let af = appsFold
+        let audioTop = max(bottomRow, af.bottom + 24)
+        let audioAvail = max(40, H - 20 - (audioTop + hd))
+        let audioH = audioContentH > 0 ? min(audioContentH, audioAvail) : audioAvail
+        let tl = todayLayout
+        let w = g.sideW
+        ZStack(alignment: .topLeading) {
+            // ── Active Apps ──
+            SectionTitle(pal: pal, title: "ACTIVE APPS", count: "\(apps.count)", action: reset)
+                .place(leftX, top, w)
+            SideScroll(height: af.listH, enabled: af.scroll, pal: pal) {
+                ForEach(apps) { a in
+                    appRow(a)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { appHeights[a.id] = $0 }
+                }
+            }
+            .place(leftX, top + hd, w)
+            if let l = af.label {
+                FoldRow(pal: pal, label: l, open: appsOpen) {
+                    withAnimation(anim) { appsOpen.toggle() }
+                    scrollAudio(animated: true, after: 0.32)
+                }
+                .place(leftX, top + hd + af.listH + gap, w)
+            }
+
+            // ── Audio ──
+            SectionTitle(pal: pal, title: "AUDIO", count: "\(audio.count)", action: reset)
+                .place(leftX, audioTop, w)
+            SideScroll(height: audioH, enabled: true, pal: pal, contentHeight: $audioContentH,
+                       target: currentAudioID, token: audioScrollToken, animated: audioScrollAnimated) {
+                if audio.isEmpty {
+                    audioPlaceholder
+                } else {
+                    ForEach(audio) { e in audioRow(e, near: e.id == nearAudioID).id(e.id) }
+                }
+            }
+            .place(leftX, audioTop + hd, w)
+
+            // ── Event Session ──
+            eventSession.place(rightX, top, w)
+
+            // ── Today ──
+            SectionTitle(pal: pal, title: dayTitle, count: "\(Fmt.dur(model.captured)) captured", action: reset)
+                .place(rightX, tl.top, w)
+            SideScroll(height: tl.fold.listH, enabled: tl.fold.scroll, pal: pal) {
+                ForEach(Array(model.totals.enumerated()), id: \.element.app) { _, t in todayRow(t) }
+            }
+            .place(rightX, tl.top + hd, w)
+            if let l = tl.fold.label {
+                FoldRow(pal: pal, label: l, open: todayOpen) { withAnimation(anim) { todayOpen.toggle() } }
+                    .place(rightX, tl.top + hd + tl.fold.listH + gap, w)
+            }
+        }
+        .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
+        .onChange(of: audio) { scrollAudio(animated: false, after: 0) }
+        .onAppear { scrollAudio(animated: false, after: 0.05) }
+    }
+
+    private func scrollAudio(animated: Bool, after: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + after) {
+            audioScrollAnimated = animated
+            audioScrollToken &+= 1
+        }
+    }
+
+    /// 点四个角任意一个标题:所有展开收回,Audio 平滑转回当前这条。
+    private func reset() {
+        withAnimation(anim) { appsOpen = false; todayOpen = false }
+        scrollAudio(animated: true, after: 0.05)
+    }
+
+    // MARK: Rows
+
+    private func appRow(_ a: ActiveAppEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RealAppIcon(appName: a.appName, size: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(a.appName.isEmpty ? "(unknown app)" : a.appName)
+                    .font(.system(size: 14.5, weight: .semibold)).foregroundStyle(pal.fg)
+                if !a.windowName.isEmpty {
+                    Text(a.windowName).font(.system(size: 13)).foregroundStyle(pal.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                if let u = a.browserUrl, !u.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "link").font(.system(size: 10))
+                        Text(Fmt.displayURL(u)).font(.system(size: 12, design: .monospaced))
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    .foregroundStyle(pal.faint)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 11).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(pal.row))
+    }
+
+    private func speaker(_ e: AudioTranscriptEntry) -> String {
+        if let n = e.speakerName, !n.isEmpty { return n }
+        if let id = e.speakerId { return "Speaker \(id)" }
+        return e.device.isEmpty ? "Audio" : e.device
+    }
+
+    private func audioRow(_ e: AudioTranscriptEntry, near: Bool) -> some View {
+        AudioRowView(pal: pal, time: Fmt.hms(e.timestamp), speaker: speaker(e),
+                     isInput: e.isInput, text: e.text, near: near) {
+            // 点一条转录:跳到那个时刻;Active Apps 展开着就先收回(动画走完再跳)
+            if appsOpen {
+                withAnimation(anim) { appsOpen = false }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) { jumpToTime(e.timestamp) }
+            } else {
+                jumpToTime(e.timestamp)
+            }
+        }
+    }
+
+    private var audioPlaceholder: some View {
+        let prev = audioMoments.last { $0 < focusTime }
+        let next = audioMoments.first { $0 > focusTime }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("No audio around this moment.")
+            if let p = prev { jumpLink("Previous: ", p) }
+            if let n = next { jumpLink("Next: ", n) }
+        }
+        .font(.system(size: 14))
+        .foregroundStyle(pal.faint)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(pal.row))
+    }
+
+    private func jumpLink(_ label: String, _ t: Date) -> some View {
+        HStack(spacing: 0) {
+            Text(label)
+            Button(Fmt.hm(t)) { jumpToTime(t) }.buttonStyle(.plain).foregroundStyle(pal.accent)
+        }
+    }
+
+    private var eventSession: some View {
+        let n = model.blocks.count
+        let si = model.blockIndex(ofFrame: focusIndex) ?? 0
+        return VStack(alignment: .leading, spacing: 2) {
+            SectionTitle(pal: pal, title: "EVENT SESSION", count: nil, action: reset) {
+                HStack(spacing: 2) {
+                    navButton("chevron.left", enabled: si > 0) { jumpToFrame(model.blocks[si - 1].f0) }
+                    Text("\(n == 0 ? 0 : si + 1) / \(n)").font(.system(size: 12, design: .monospaced))
+                    navButton("chevron.right", enabled: si + 1 < n) { jumpToFrame(model.blocks[si + 1].f0) }
+                }
+            }
+            if model.blocks.indices.contains(si) {
+                let b = model.blocks[si]
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 10) {
+                        RealAppIcon(appName: b.app, size: 30)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(b.app.isEmpty ? "(unknown app)" : b.app)
+                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(pal.fg)
+                                .lineLimit(1)
+                            Text("\(Fmt.hms(b.start)) – \(Fmt.hms(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
+                                .font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.faint)
+                                .lineLimit(1)
+                        }
+                    }
+                    Text("Not summarized yet.")
+                        .font(.system(size: 14)).foregroundStyle(pal.muted)
+                        .padding(.top, 10)
+                }
+                .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(pal.row))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(pal.rowb, lineWidth: 1))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { esCardH = $0 }
+            }
+        }
+    }
+
+    private func navButton(_ symbol: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2).contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(pal.muted)
+        .opacity(enabled ? 1 : 0.25)
+        .disabled(!enabled)
+    }
+
+    private func todayRow(_ t: AppTotal) -> some View {
+        let color = TimelineBarColor.barColor(for: t.app)
+        let frac = CGFloat(t.secs / max(1, model.totals.first?.secs ?? 1))
+        return HStack(spacing: 9) {
+            Circle().fill(color).frame(width: 10, height: 10)
+            Text(t.app.isEmpty ? "(unknown app)" : t.app).font(.system(size: 14)).foregroundStyle(pal.fg)
+                .lineLimit(1).frame(width: 108, alignment: .leading)
+            Capsule().fill(pal.track).frame(height: 6)
+                .overlay(alignment: .leading) {
+                    GeometryReader { p in Capsule().fill(color).frame(width: p.size.width * frac) }
+                }
+            Text(Fmt.dur(t.secs)).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.muted)
+                .frame(width: 62, alignment: .trailing)
+        }
+        .padding(.horizontal, 4)
+        .frame(height: todayRowH)
+        .background(Capsule().fill(hotApp == t.app ? pal.pill : .clear))
+        .contentShape(Capsule())
+        .onHover { on in
+            if on { hotApp = t.app } else if hotApp == t.app { hotApp = nil }
+        }
+        .onTapGesture { jumpToFrame(model.blocks[t.longest].f0) }
+    }
+}
+
+private extension View {
+    func place(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat) -> some View {
+        frame(width: w, alignment: .topLeading).offset(x: x, y: y)
+    }
+}
+
+/// 角上的标题:不跟列表一起滚;点一下四个角都恢复原样。
+private struct SectionTitle<Trailing: View>: View {
+    let pal: RingPalette
+    let title: String
+    let count: String?
+    let action: () -> Void
+    @ViewBuilder var trailing: () -> Trailing
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Text(title).font(.system(size: 12, weight: .semibold)).kerning(0.96)
+            if let count { Text(count).font(.system(size: 12, design: .monospaced)) }
+            Spacer(minLength: 0)
+            trailing()
+        }
+        .foregroundStyle(hovering ? pal.fg : pal.faint)
+        .padding(.horizontal, 4)
+        .frame(height: 20)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: action)
+        .animation(.easeOut(duration: 0.15), value: hovering)
+    }
+}
+
+extension SectionTitle where Trailing == EmptyView {
+    init(pal: RingPalette, title: String, count: String?, action: @escaping () -> Void) {
+        self.init(pal: pal, title: title, count: count, action: action) { EmptyView() }
+    }
+}
+
+/// “+N more / Show less” 那一行:单独一层,固定在列表下面,不跟着滚、不被渐隐压暗。
+private struct FoldRow: View {
+    let pal: RingPalette
+    let label: String
+    let open: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 14, weight: open ? .semibold : .regular))
+            .foregroundStyle(open ? pal.accent : (hovering ? pal.fg : pal.muted))
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 34, maxHeight: 34, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(open || hovering ? pal.accentbg : pal.row))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(open || hovering ? pal.accentb : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture(perform: action)
+    }
+}
+
+private struct AudioRowView: View {
+    let pal: RingPalette
+    let time: String
+    let speaker: String
+    let isInput: Bool
+    let text: String
+    let near: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Text(time).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
+                Text(speaker).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(pal.muted)
+                Image(systemName: isInput ? "mic.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 9)).foregroundStyle(pal.faint)
+            }
+            Text(text)
+                .font(.system(size: 14)).lineSpacing(3)
+                .foregroundStyle(near ? pal.fg : pal.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(near || hovering ? pal.accentbg : pal.row))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(near || hovering ? pal.accentb : .clear, lineWidth: 1))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: action)
+    }
+}
+
+/// 角上的滚动列表:没有滚动条;上/下还有内容时露出 ▲/▼(点一下翻约 70%),
+/// 并只在那个方向加渐隐。
+private struct SideScroll<Content: View>: View {
+    let height: CGFloat
+    let enabled: Bool
+    let pal: RingPalette
+    var contentHeight: Binding<CGFloat>? = nil
+    var target: String? = nil
+    var token: Int = 0
+    var animated: Bool = false
+    @ViewBuilder let content: () -> Content
+
+    @State private var pos = ScrollPosition(edge: .top)
+    @State private var metrics = Metrics()
+
+    private struct Metrics: Equatable {
+        var offset: CGFloat = 0
+        var content: CGFloat = 0
+        var container: CGFloat = 0
+    }
+
+    private var canUp: Bool { enabled && metrics.offset > 2 }
+    private var canDn: Bool { enabled && metrics.offset + metrics.container < metrics.content - 2 }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 8) { content() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.never)
+            .scrollDisabled(!enabled)
+            .scrollPosition($pos)
+            .onScrollGeometryChange(for: Metrics.self) { s in
+                Metrics(offset: s.contentOffset.y, content: s.contentSize.height, container: s.containerSize.height)
+            } action: { _, m in
+                metrics = m
+                if let b = contentHeight, abs(b.wrappedValue - m.content) > 0.5 { b.wrappedValue = m.content }
+            }
+            .frame(height: max(0, height))
+            .mask(fadeMask)
+            .overlay(alignment: .top) { arrow(up: true).opacity(canUp ? 1 : 0).offset(y: -2) }
+            .overlay(alignment: .bottom) { arrow(up: false).opacity(canDn ? 1 : 0).offset(y: 2) }
+            .onChange(of: token) {
+                guard let target else { return }
+                if animated {
+                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(target, anchor: .center) }
+                } else {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+            }
+            .onChange(of: enabled) { if !enabled { pos.scrollTo(edge: .top) } }
+        }
+    }
+
+    private var fadeMask: LinearGradient {
+        let h = max(1, height)
+        var stops: [Gradient.Stop] = canUp
+            ? [.init(color: .clear, location: 0), .init(color: .black, location: min(0.4, 16 / h))]
+            : [.init(color: .black, location: 0)]
+        stops += canDn
+            ? [.init(color: .black, location: 0.88), .init(color: .clear, location: 1)]
+            : [.init(color: .black, location: 1)]
+        return LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
+    }
+
+    private func arrow(up: Bool) -> some View {
+        ArrowButton(pal: pal, up: up) {
+            let step = metrics.container * 0.7
+            let y = up ? max(0, metrics.offset - step)
+                       : min(max(0, metrics.content - metrics.container), metrics.offset + step)
+            withAnimation(.easeInOut(duration: 0.3)) { pos.scrollTo(y: y) }
+        }
+        .allowsHitTesting(up ? canUp : canDn)
+    }
+}
+
+private struct ArrowButton: View {
+    let pal: RingPalette
+    let up: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Triangle(up: up)
+            .fill(hovering ? pal.fg : pal.muted)
+            .frame(width: 12, height: 7)
+            .frame(width: 24, height: 14)
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 }
+            .onTapGesture(perform: action)
     }
 }
