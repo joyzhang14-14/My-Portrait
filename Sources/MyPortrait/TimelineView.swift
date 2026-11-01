@@ -336,7 +336,7 @@ struct TimelineView: View {
         .padding(3)
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
-        .offset(x: 84, y: 1)
+        .offset(x: 88, y: 10)
     }
 
     // MARK: Ring
@@ -614,7 +614,7 @@ struct TimelineView: View {
     private func innerLayer(_ g: RingGeo) -> some View {
         if let f = currentFrame {
             let k = g.k, fk = g.fk
-            let shotW = 544 * k, shotH = 340 * k
+            let shotW = 600 * k, shotH = 375 * k
             if let url = f.browserUrl, !url.isEmpty {
                 let secure = url.hasPrefix("https://")
                 HStack(spacing: 8) {
@@ -641,7 +641,7 @@ struct TimelineView: View {
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
                 .contentShape(Rectangle())
                 .onTapGesture { ui.zoomed = true }
-                .position(x: g.c.x, y: g.c.y - 220 * k + shotH / 2)
+                .position(x: g.c.x, y: g.c.y - 226 * k + shotH / 2)
             HStack(spacing: 9) {
                 RealAppIcon(appName: f.appName, size: 22 * fk)
                 Text(f.appName.isEmpty ? "(unknown app)" : f.appName)
@@ -660,7 +660,7 @@ struct TimelineView: View {
                     .layoutPriority(1)
             }
             .frame(width: shotW - 16)
-            .position(x: g.c.x, y: g.c.y + 132 * k + 11 * fk)
+            .position(x: g.c.x, y: g.c.y + 160 * k + 11 * fk)
         }
     }
 
@@ -1094,8 +1094,8 @@ private struct EmptyState: View {
 // MARK: - Ring geometry / palette / paths
 // =============================================================================
 
-/// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 250pt 侧栏 +
-/// 14pt 间隙,上下给标题栏留 44pt;时刻标签外沿在 459/392·R。
+/// 圆的几何。半径取窗口能放下的最大值:左右各留 20pt 边 + 至少 220pt 侧栏 +
+/// 10pt 间隙,上下给标题栏留 44pt;时刻标签外沿在 459/392·R。
 struct RingGeo {
     static let edge: CGFloat = 20
     let size: CGSize
@@ -1107,13 +1107,13 @@ struct RingGeo {
     init(size: CGSize) {
         self.size = size
         let ext: CGFloat = 459.0 / 392.0
-        let rw = (size.width / 2 - Self.edge - 250 - 14) / ext
+        let rw = (size.width / 2 - Self.edge - 220 - 10) / ext
         let rh = (size.height / 2 - 44) / ext
         let r = max(160, min(392, rw, rh))
         self.r = r
         k = r / 392
         c = CGPoint(x: size.width / 2, y: size.height / 2)
-        sideW = max(250, min(300, size.width / 2 - Self.edge - 14 - r * ext))
+        sideW = max(220, min(300, size.width / 2 - Self.edge - 10 - r * ext))
     }
 
     var band: CGFloat { 18 * k }
