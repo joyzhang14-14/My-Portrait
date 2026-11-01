@@ -317,6 +317,27 @@ actor FocusProbe {
         return panel
     }
 
+    /// 诊断用:同一时刻系统几个口径各自说的前台 app(bundle id)。
+    /// ax_focused = 系统级 AX 焦点 app;menu_bar = 菜单栏所属 app;frontmost = 激活 app。
+    @MainActor
+    static func focusWitnesses() -> [String: String] {
+        let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
+        var ref: CFTypeRef?
+        var pid: pid_t = 0
+        var ax = "unreadable"
+        if AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &ref) == .success,
+           let ref, CFGetTypeID(ref) == AXUIElementGetTypeID(),
+           // swiftlint:disable:next force_cast
+           AXUIElementGetPid(ref as! AXUIElement, &pid) == .success {
+            ax = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "pid \(pid)"
+        }
+        let ws = NSWorkspace.shared
+        return ["ax_focused": ax,
+                "menu_bar": ws.menuBarOwningApplication?.bundleIdentifier ?? "nil",
+                "frontmost": ws.frontmostApplication?.bundleIdentifier ?? "nil"]
+    }
+
     /// `focusedPanelApp` 上一次读成功的结果、当时的激活 app 和时间。
     @MainActor private static var lastPanelRead: (panel: NSRunningApplication?, frontPid: pid_t?, at: Date)?
 

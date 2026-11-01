@@ -337,6 +337,15 @@ actor CaptureCoordinator {
         if focusState == .switching, !fromSettle {
             scheduleSettleCapture(trigger: .switchSettle, restart: false)
         }
+        // 诊断(10-31 update):前台报 Finder 且没有窗口时,有时菜单栏和画面都是别的 app。
+        // 记下系统其它口径(AX 焦点 app / 菜单栏所属 app)怎么说,看能不能拿来纠正标签。
+        if focusState == .noWindow, front.activeBundleId == "com.apple.finder" {
+            var ctx: [String: Any] = await FocusProbe.focusWitnesses()
+            ctx["ts_ms"] = Int64(now.timeIntervalSince1970 * 1000)
+            ctx["visible"] = front.visibleName ?? "nil"
+            ctx["trigger"] = trigger.rawValue
+            DiagLog.event("focus.finder_no_window", ctx: ctx)
+        }
 
         // 5. 去重。
         if !force, !comparer.shouldKeep(image, now: now) {
