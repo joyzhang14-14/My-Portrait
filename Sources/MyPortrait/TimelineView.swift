@@ -164,7 +164,8 @@ struct TimelineView: View {
         .onChange(of: state.focusIndex) { old, new in
             animateTicks(new - old)
         }
-        .task(id: state.selectedDay) { ui.calendarOpen = false; reload() }
+        // 换天时回到圆盘:专注视图只对当前这一天的帧有意义
+        .task(id: state.selectedDay) { ui.calendarOpen = false; ui.focused = false; reload() }
         // 焦点停稳 180ms 才做旁路活:预取前后各 5 帧 + 四周列表取数。拨帧时每步
         // 都会取消上一个任务,连拨过程中这些都不跑;迟到的结果按取消丢弃。
         .task(id: currentFrame?.id) {
