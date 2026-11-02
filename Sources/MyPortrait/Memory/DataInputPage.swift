@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Data 页的 Input(圆形版):中间是当天 0–24 点的圆,外圈是打字的 app 段,
 /// 圆里是每分钟击键的面积图(按 app 分色堆叠),圆心是当天总击键。
-///   左下  各 app 击键 + 当天统计   右上  搜索 + 一段的全文   右下  切好段的输入
+///   左下  当天统计(击键 / 点击 / 打字时长 / 峰值)   右上  搜索 + 一段的全文
+///   右下  当天各 app 击键
 /// 左上的导航由 DataPage 画。
 struct DataInputPage: View {
     let size: CGSize
@@ -46,15 +47,15 @@ struct DataInputPage: View {
             // 换天的药丸和 Timeline 一样放在圆里靠上
             datePill.position(x: c.x, y: c.y - R + 62)
 
-            dayStats
-                .frame(width: sideW, height: max(160, H - 22 - listTop))
-                .offset(x: leftX, y: listTop)
+            statTiles
+                .frame(width: sideW, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - 160)
             rightTop
                 .frame(width: sideW, height: H * 0.5 - rightTopY)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
-            segmentList
-                .frame(width: sideW, height: H * 0.5 - 34)
-                .offset(x: W - rightPad - sideW, y: H * 0.5 + 12)
+            appBars
+                .frame(width: sideW, height: 250)
+                .offset(x: W - rightPad - sideW, y: H - 22 - 250)
         }
         .frame(width: W, height: H, alignment: .topLeading)
         .task(id: day) { await reload() }
@@ -197,40 +198,6 @@ struct DataInputPage: View {
         .foregroundStyle(pal.faint).padding(.horizontal, 4).padding(.bottom, 7)
     }
 
-    private var segmentList: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            title("INPUT", "\(shown.count)")
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(shown) { s in
-                        let on = s.id == selectedId
-                        Button { selectedId = s.id } label: {
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 7) {
-                                    Text(Self.hm(s.startMs)).font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
-                                    Circle().fill(color(s.app)).frame(width: 8, height: 8)
-                                    Text(InputCaptureView.appLabel(s.app)).font(.system(size: fs(12.5), weight: .semibold))
-                                        .foregroundStyle(pal.muted).lineLimit(1)
-                                }
-                                Text(s.text.split(separator: "\n").first.map(String.init) ?? "")
-                                    .font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(RoundedRectangle(cornerRadius: 14).fill(on ? pal.accentbg : pal.row))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(on ? pal.accentb : .clear, lineWidth: 1))
-                            .contentShape(RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-            .mask(LinearGradient(stops: [.init(color: .black, location: 0.88), .init(color: .clear, location: 1)],
-                                 startPoint: .top, endPoint: .bottom))
-        }
-    }
-
     private var rightTop: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
@@ -241,7 +208,29 @@ struct DataInputPage: View {
             .background(Capsule().fill(pal.pill))
             .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {
-                if let s = current {
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // 搜索:列出含这段文字的输入,点一条看全文
+                    Text("\(shown.count) result\(shown.count == 1 ? "" : "s")")
+                        .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(shown) { s in
+                                Button { selectedId = s.id; query = "" } label: {
+                                    HStack(spacing: 8) {
+                                        Text(Self.hm(s.startMs)).font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
+                                        Circle().fill(color(s.app)).frame(width: 8, height: 8)
+                                        Text(s.text.split(separator: "\n").first.map(String.init) ?? "")
+                                            .font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.vertical, 6).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.never)
+                } else if let s = current {
                     Text(selectedId == nil ? "LATEST" : "SEGMENT")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(pal.faint)
                     HStack(spacing: 9) {
@@ -266,13 +255,27 @@ struct DataInputPage: View {
         }
     }
 
-    private var dayStats: some View {
+    /// 左下:当天统计四格。
+    private var statTiles: some View {
+        let typing = segments.reduce(0) { $0 + max(1, Int(($1.endMs - $1.startMs) / 60_000)) }
+        let peak = buckets.rawTotals.max() ?? 0
+        return VStack(alignment: .leading, spacing: 0) {
+            title("STATS")
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                tile(totalKeys.formatted(), "keystrokes")
+                tile(clicks.formatted(), "clicks")
+                tile("\(typing / 60)h \(typing % 60)m", "typing time")
+                tile("\(peak)", "peak keys / min")
+            }
+        }
+    }
+
+    /// 右下:当天各 app 击键。
+    private var appBars: some View {
         var byApp: [String: Int] = [:]
         for s in segments { byApp[s.app, default: 0] += s.keys }
         let rows = byApp.sorted { $0.value > $1.value }
         let mx = max(1, rows.first?.value ?? 1)
-        let typing = segments.reduce(0) { $0 + max(1, Int(($1.endMs - $1.startMs) / 60_000)) }
-        let peak = buckets.rawTotals.max() ?? 0
         return VStack(alignment: .leading, spacing: 0) {
             title(Calendar.current.isDateInToday(day) ? "TODAY" : Self.dayFmt.string(from: day).uppercased())
             ScrollView {
@@ -298,13 +301,6 @@ struct DataInputPage: View {
                 }
             }
             .scrollIndicators(.never)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                tile(totalKeys.formatted(), "keystrokes")
-                tile(clicks.formatted(), "clicks")
-                tile("\(typing / 60)h \(typing % 60)m", "typing time")
-                tile("\(peak)", "peak keys / min")
-            }
-            .padding(.top, 8)
         }
     }
 
