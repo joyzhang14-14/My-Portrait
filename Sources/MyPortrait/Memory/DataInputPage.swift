@@ -61,27 +61,30 @@ struct DataInputPage: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? segments : segments.filter { $0.text.localizedCaseInsensitiveContains(q) }
     }
-    /// 选中的是外圈的一整块:同一个 app 连续打字(间隔 < 3 分钟)的所有段合在一起,
-    /// 文字按时间接起来、击键加总 —— 和外圈画出来的块一一对应。
+    /// 选中的是一整段连续打字:不分 app,前后停顿不到 3 分钟的段都算一段时间,
+    /// 卡片里把这段时间所有 app 的输入逐段列出来。
     private var current: InputSegment? {
         let groups = segmentGroups
         let g = groups.first { $0.contains { $0.id == selectedId } } ?? groups.last
         guard let g, let first = g.first, let last = g.last else { return nil }
         if g.count == 1 { return first }
-        return InputSegment(id: first.id, app: first.app, startMs: first.startMs, endMs: last.endMs,
+        return InputSegment(id: first.id, app: first.app, startMs: first.startMs,
+                            endMs: g.map(\.endMs).max() ?? last.endMs,
                             text: g.map(\.text).joined(separator: "\n"),
                             keys: g.reduce(0) { $0 + $1.keys })
     }
 
-    /// 段按块分组(同 blocks 的合并规则)。
+    /// 段按连续打字分组(跨 app;离这组最晚结束时刻不到 3 分钟就并进来)。
     private var segmentGroups: [[InputSegment]] {
         var out: [[InputSegment]] = []
-        for s in segments {
-            if let last = out.last?.last, last.app == s.app,
-               Double(s.startMs - last.endMs) / 60_000 - 0.5 < 3 {
+        var groupEnd: Int64 = .min
+        for s in segments.sorted(by: { $0.startMs < $1.startMs }) {
+            if !out.isEmpty, s.startMs - groupEnd < 180_000 {
                 out[out.count - 1].append(s)
+                groupEnd = max(groupEnd, s.endMs)
             } else {
                 out.append([s])
+                groupEnd = s.endMs
             }
         }
         return out
@@ -188,7 +191,6 @@ struct DataInputPage: View {
             let ms = Int64(day.timeIntervalSince1970 * 1000) + Int64(a / (2 * .pi) * 86_400_000)
             let hit = segments.min { dist($0, ms) < dist($1, ms) }
             selectedId = hit?.id
-            selectedApp = hit?.app
         }
     }
 
