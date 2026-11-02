@@ -23,6 +23,8 @@ struct DataInputPage: View {
     @State private var loading = false
     @State private var clicks = 0
     @State private var calendarOpen = false
+    /// 选中的 app(右下 TODAY 点一行 / 点外圈一段):外圈和面积图里只亮它。
+    @State private var selectedApp: String? = nil
 
     private var W: CGFloat { size.width }
     private var H: CGFloat { size.height }
@@ -48,8 +50,8 @@ struct DataInputPage: View {
             datePill.position(x: c.x, y: c.y - R + 62)
 
             statTiles
-                .frame(width: sideW, alignment: .topLeading)
-                .offset(x: leftX, y: H - 22 - 160)
+                .frame(width: sideW, height: 250, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - 250)
             rightTop
                 .frame(width: sideW, height: H * 0.5 - rightTopY)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
@@ -71,7 +73,9 @@ struct DataInputPage: View {
     private func color(_ bundle: String) -> Color { AppColor.color(for: InputCaptureView.appLabel(bundle)) }
 
     private var ring: some View {
-        let b = buckets, segs = segments, cur = current, selected = selectedId != nil
+        let b = buckets, cur = current, selected = selectedId != nil
+        let blocks = self.blocks, hotApp = selectedApp
+        let g = RingGeo(size: size)
         return Canvas { ctx, _ in
             // 底圈 + 整点小圆点
             ctx.stroke(Path { p in p.addArc(center: c, radius: R, startAngle: .zero, endAngle: .degrees(360), clockwise: false) },
@@ -86,14 +90,17 @@ struct DataInputPage: View {
                                 .foregroundStyle(pal.muted), at: pt(R + 42, Double(h * 60)))
                 }
             }
-            // 外圈:每段打字一节,圆头
+            // 外圈:同 Timeline 的 app 圈 —— 连续同一个 app 并成一段圆角环形块,
+            // 块间留 2.4pt 缝;选中 app 的块变粗,其余变淡
             let day0 = Int64(day.timeIntervalSince1970 * 1000)
-            for s in segs {
-                let m0 = Double(s.startMs - day0) / 60_000, m1 = max(m0 + 1.5, Double(s.endMs - day0) / 60_000)
-                let path = Path { p in
-                    p.addArc(center: c, radius: R, startAngle: .degrees(m0 / 4 - 90), endAngle: .degrees(m1 / 4 - 90), clockwise: false)
-                }
-                ctx.stroke(path, with: .color(color(s.app)), style: StrokeStyle(lineWidth: 18, lineCap: .round))
+            let gapDeg = 2.4 / Double(R) * 180 / .pi
+            for bl in blocks {
+                let hot = bl.app == hotApp
+                let a0 = bl.m0 / 4 + gapDeg / 2
+                let a1 = max(a0 + 0.25, bl.m1 / 4 - gapDeg / 2)
+                let grow: CGFloat = hot ? 4 : 0
+                let path = RingPaths.roundSeg(g, R - 9 - grow, R + 9 + grow, a0, a1, 9 + grow)
+                ctx.fill(path, with: .color(color(bl.app).opacity(hotApp != nil && !hot ? 0.3 : 1)))
             }
             // 面积图:按 app 堆叠
             ctx.stroke(Path(ellipseIn: CGRect(x: c.x - r0, y: c.y - r0, width: r0 * 2, height: r0 * 2)),
@@ -112,7 +119,8 @@ struct DataInputPage: View {
                         p.addLine(to: pt(r0 + CGFloat(base[m] / b.maxTotal) * (r1 - r0), Double(m)))
                     }
                     p.closeSubpath()
-                    ctx.fill(p, with: .color(color(b.apps[ai]).opacity(0.8)))
+                    let dim = hotApp != nil && b.apps[ai] != hotApp
+                    ctx.fill(p, with: .color(color(b.apps[ai]).opacity(dim ? 0.15 : 0.8)))
                     base = top
                 }
             }
@@ -132,8 +140,25 @@ struct DataInputPage: View {
             var a = atan2(Double(p.x - c.x), Double(c.y - p.y))
             if a < 0 { a += 2 * .pi }
             let ms = Int64(day.timeIntervalSince1970 * 1000) + Int64(a / (2 * .pi) * 86_400_000)
-            selectedId = segments.min { dist($0, ms) < dist($1, ms) }?.id
+            let hit = segments.min { dist($0, ms) < dist($1, ms) }
+            selectedId = hit?.id
+            selectedApp = hit?.app
         }
+    }
+
+    /// 外圈的块:连续(间隔 < 3 分钟)同一个 app 的段并成一块,单位分钟。
+    private var blocks: [(app: String, m0: Double, m1: Double)] {
+        let day0 = Int64(day.timeIntervalSince1970 * 1000)
+        var out: [(app: String, m0: Double, m1: Double)] = []
+        for s in segments {
+            let m0 = Double(s.startMs - day0) / 60_000, m1 = Double(s.endMs - day0) / 60_000 + 0.5
+            if let last = out.last, last.app == s.app, m0 - last.m1 < 3 {
+                out[out.count - 1].m1 = max(last.m1, m1)
+            } else {
+                out.append((s.app, m0, m1))
+            }
+        }
+        return out
     }
 
     private func dist(_ s: InputSegment, _ ms: Int64) -> Int64 {
@@ -184,7 +209,7 @@ struct DataInputPage: View {
     }
 
     private func step(_ d: Int) {
-        if let n = Calendar.current.date(byAdding: .day, value: d, to: day) { day = n; selectedId = nil }
+        if let n = Calendar.current.date(byAdding: .day, value: d, to: day) { day = n; selectedId = nil; selectedApp = nil }
     }
 
     // MARK: 角落
@@ -255,19 +280,36 @@ struct DataInputPage: View {
         }
     }
 
-    /// 左下:当天统计四格。
+    /// 左下:当天统计,2×2 大数字,细线分隔(标题和右下 TODAY 齐平)。
     private var statTiles: some View {
         let typing = segments.reduce(0) { $0 + max(1, Int(($1.endMs - $1.startMs) / 60_000)) }
         let peak = buckets.rawTotals.max() ?? 0
         return VStack(alignment: .leading, spacing: 0) {
             title("STATS")
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                tile(totalKeys.formatted(), "keystrokes")
-                tile(clicks.formatted(), "clicks")
-                tile("\(typing / 60)h \(typing % 60)m", "typing time")
-                tile("\(peak)", "peak keys / min")
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    stat(totalKeys.formatted(), "keystrokes")
+                    Rectangle().fill(pal.rowb).frame(width: 1)
+                    stat(clicks.formatted(), "clicks")
+                }
+                Rectangle().fill(pal.rowb).frame(height: 1)
+                HStack(spacing: 0) {
+                    stat("\(typing / 60)h \(typing % 60)m", "typing time")
+                    Rectangle().fill(pal.rowb).frame(width: 1)
+                    stat("\(peak)", "peak keys / min")
+                }
             }
         }
+    }
+
+    private func stat(_ v: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(v).font(.system(size: 30, weight: .bold)).foregroundStyle(pal.fg)
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(label).font(.system(size: fs(13))).foregroundStyle(pal.muted)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
     }
 
     /// 右下:当天各 app 击键。
@@ -281,6 +323,7 @@ struct DataInputPage: View {
             ScrollView {
                 VStack(spacing: 4) {
                     ForEach(rows, id: \.key) { app, n in
+                        let on = app == selectedApp
                         HStack(spacing: 9) {
                             Circle().fill(color(app)).frame(width: 10, height: 10)
                             Text(InputCaptureView.appLabel(app)).font(.system(size: fs(14))).foregroundStyle(pal.fg)
@@ -297,21 +340,17 @@ struct DataInputPage: View {
                                 .frame(width: 44, alignment: .trailing)
                         }
                         .frame(height: 24)
+                        .padding(.horizontal, 6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(on ? pal.accentbg : .clear))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? pal.accentb : .clear, lineWidth: 1))
+                        .opacity(selectedApp != nil && !on ? 0.5 : 1)
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedApp = on ? nil : app }
                     }
                 }
             }
             .scrollIndicators(.never)
         }
-    }
-
-    private func tile(_ v: String, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(v).font(.system(size: fs(17), weight: .bold)).foregroundStyle(pal.fg).lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(.system(size: fs(11.5))).foregroundStyle(pal.muted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 12).fill(pal.row))
     }
 
     // MARK: 数据
