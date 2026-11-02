@@ -14,6 +14,11 @@ struct SettingsCirclePage: View {
     @State private var config = ConfigStore.shared
     @ObservedObject private var health = HealthMonitor.shared
 
+    /// Audio Capture 那行的小红点:还有没命名的声音簇。
+    @State private var speakerBadge = UnidentifiedSpeakerBadge.shared
+    /// 导航内容实际高度:放得下就不滚动。
+    @State private var navContentH: CGFloat = 0
+
     @State private var rings = TodayRings()
     @State private var attention = 0
     @State private var usedBytes: Int64?
@@ -53,7 +58,7 @@ struct SettingsCirclePage: View {
                                          startPoint: .top, endPoint: .bottom))
                     .offset(x: contentX, y: contentTop)
 
-                statusColumn
+                statusColumn(H: H)
                     .frame(width: sideW, alignment: .topLeading)
                     .offset(x: W - rightPad - sideW, y: statusTop)
             }
@@ -61,7 +66,10 @@ struct SettingsCirclePage: View {
         }
         // 和 Timeline / Data 一样铺满整窗(含标题栏那一条),坐标从窗口左上角算
         .ignoresSafeArea()
-        .task { await refresh() }
+        .task {
+            speakerBadge.refresh()
+            await refresh()
+        }
     }
 
     private func backdrop(W: CGFloat, H: CGFloat, cx: CGFloat) -> some View {
@@ -81,7 +89,8 @@ struct SettingsCirclePage: View {
     private func navList(H: CGFloat) -> some View {
         let avail = H - navTop - 22
         let rowH = max(30, min(42, (avail - 4 * 26 - 30) / 15))
-        return SideScroll(height: avail, enabled: true, pal: pal) {
+        return SideScroll(height: avail, enabled: navContentH > avail + 1, pal: pal,
+                          contentHeight: $navContentH) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(SettingsSubsection.Group.allCases, id: \.self) { grp in
                     sectionTitle(grp.rawValue)
@@ -102,8 +111,14 @@ struct SettingsCirclePage: View {
                     .font(.system(size: 15 * panelScale))
                     .foregroundStyle(on ? pal.accent : pal.muted)
                     .frame(width: 20)
-                Text(s.label).font(.system(size: 15.5 * panelScale)).foregroundStyle(pal.fg)
+                Text(s.label).font(.system(size: 16.5 * panelScale)).foregroundStyle(pal.fg)
                     .lineLimit(1).truncationMode(.tail)
+                    // 红点贴在文字右上角,不占布局
+                    .overlay(alignment: .topTrailing) {
+                        if s == .capture(.audio) && speakerBadge.count > 0 {
+                            Circle().fill(Color.red).frame(width: 6, height: 6).offset(x: 8, y: -1)
+                        }
+                    }
                 Spacer(minLength: 4)
                 if let lamp = lamp(for: s) { Lamp(state: lamp, pal: pal) }
             }
@@ -135,11 +150,13 @@ struct SettingsCirclePage: View {
 
     // MARK: - 右边状态列
 
-    private var statusColumn: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    /// 状态列:行和字比左边导航再大一档;圆的大小按窗口高度收,保证整列放得下。
+    private func statusColumn(H: CGFloat) -> some View {
+        let ring = max(120, min(sideW - 28, H - statusTop - 22 - 12 - 390 - 70))
+        return VStack(alignment: .leading, spacing: 12) {
             box {
                 sectionTitle("TODAY")
-                todayRing
+                todayRing(side: ring)
                     .frame(maxWidth: .infinity)
                 HStack(spacing: 12) {
                     legend("Screen", ringColor(0))
@@ -199,13 +216,13 @@ struct SettingsCirclePage: View {
         Button { subsection = target } label: {
             HStack(spacing: 8) {
                 if let state { Lamp(state: state, pal: pal) } else { Color.clear.frame(width: 7, height: 7) }
-                Text(label).font(.system(size: 15.5 * panelScale)).foregroundStyle(pal.fg).lineLimit(1)
+                Text(label).font(.system(size: 17.5 * panelScale)).foregroundStyle(pal.fg).lineLimit(1)
                 Spacer(minLength: 6)
-                Text(value).font(.system(size: 14 * panelScale, design: .monospaced)).foregroundStyle(pal.muted)
+                Text(value).font(.system(size: 16 * panelScale, design: .monospaced)).foregroundStyle(pal.muted)
                     .lineLimit(1).truncationMode(.middle)
             }
             .padding(.horizontal, 4)
-            .frame(height: 32)
+            .frame(height: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -214,7 +231,7 @@ struct SettingsCirclePage: View {
     private func legend(_ t: String, _ c: Color) -> some View {
         HStack(spacing: 5) {
             Circle().fill(c).frame(width: 7, height: 7)
-            Text(t).font(.system(size: 13 * panelScale)).foregroundStyle(pal.muted)
+            Text(t).font(.system(size: 14.5 * panelScale)).foregroundStyle(pal.muted)
         }
     }
 
@@ -228,8 +245,7 @@ struct SettingsCirclePage: View {
         }
     }
 
-    private var todayRing: some View {
-        let side = sideW - 28
+    private func todayRing(side: CGFloat) -> some View {
         let rings = self.rings
         return ZStack {
             Canvas { ctx, size in
@@ -249,10 +265,10 @@ struct SettingsCirclePage: View {
                 }
             }
             VStack(spacing: 2) {
-                Text(rings.frames.formatted()).font(.system(size: fs(28), weight: .bold)).foregroundStyle(pal.fg)
-                Text("frames captured").font(.system(size: fs(12.5))).foregroundStyle(pal.muted)
+                Text(rings.frames.formatted()).font(.system(size: fs(36), weight: .bold)).foregroundStyle(pal.fg)
+                Text("frames captured").font(.system(size: fs(15))).foregroundStyle(pal.muted)
                 if let span = rings.activeSpan {
-                    Text(span).font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
+                    Text(span).font(.system(size: fs(13.5), design: .monospaced)).foregroundStyle(pal.faint)
                 }
             }
         }

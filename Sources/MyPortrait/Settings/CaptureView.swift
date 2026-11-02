@@ -225,7 +225,7 @@ struct AudioCaptureSettingsView: View {
     var body: some View {
         // dev mode:capture / privacy 属于后台 section,永远读真实 config,
         // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
-        SettingsPage("Audio Capture & Transcript",
+        SettingsPage("Audio Capture",
                      onResetCurrentPage: { config.mutate { $0.capture.audio = .init() } }) {
             audioSection
         }
@@ -648,7 +648,7 @@ struct ScreenCaptureSettingsView: View {
     var body: some View {
         // dev mode:capture / privacy 属于后台 section,永远读真实 config,
         // 这里整页只读(ConfigStore.mutate 也会兜底丢弃改动)。
-        SettingsPage("Screen Capture & Timeline",
+        SettingsPage("Screen Capture",
                      onResetCurrentPage: {
                          config.mutate {
                              $0.capture.screen = .init()
