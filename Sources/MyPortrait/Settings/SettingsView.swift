@@ -11,7 +11,7 @@ struct SettingsPane: View {
             case .app(.display):       DisplaySettingsView()
             case .app(.general):       GeneralSettingsView()
             case .app(.downloads):     AIModelsSettingsView()
-            case .app(.connections):   ConnectionsView()
+            case .app(.connections):   ConnectionsView(showsBackground: false)
             case .app(.notifications): NotificationsSettingsView()
             case .capture(.screen):    ScreenCaptureSettingsView()
             case .capture(.audio):     AudioCaptureSettingsView()
@@ -26,7 +26,6 @@ struct SettingsPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SidebarBackdrop().ignoresSafeArea())
     }
 }
 
@@ -116,7 +115,7 @@ struct SettingsScene: View {
         case .app(.connections):
             // Unreachable from this window's rail (filtered out above);
             // the case only exists to keep the switch exhaustive.
-            Text("Open Connections from the main window.")
+            Text("Open Provider from the main window.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

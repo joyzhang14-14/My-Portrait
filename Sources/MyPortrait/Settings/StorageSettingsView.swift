@@ -254,6 +254,9 @@ private struct StorageSizes {
     var logs: Int64 = 0
 }
 
+/// 数据目录占用(字节),Settings 页右边状态列用;和本页 Storage usage 同一套算法。
+func dataDirectorySize(_ url: URL) -> Int64 { StorageStats.directorySize(url) }
+
 private struct StorageStats {
     var dataBytes: Int64 = 0
     /// ⚠️ `scan()` 填不了这个 —— 判定孤儿附件要读对话的 session 文件(异步 +
@@ -380,7 +383,7 @@ private struct StorageStats {
         return total
     }
 
-    nonisolated private static func directorySize(_ url: URL) -> Int64 {
+    nonisolated static func directorySize(_ url: URL) -> Int64 {
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path),
               let it = fm.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey],

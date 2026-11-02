@@ -111,6 +111,10 @@ struct ContentView: View {
         .onChange(of: dataViewMode) { _, _ in HealthMonitor.shared.currentPage = pageName }
         // 图谱浮窗 wr chip → 切到 Neural Graph 模式的 Input(打字活动面积图)
         // 并定位该 record。
+        // 菜单栏的 Settings… → 切到 Settings 页
+        .onReceive(NotificationCenter.default.publisher(for: .openSettingsPage)) { _ in
+            selection = .settings
+        }
         .onReceive(NotificationCenter.default.publisher(for: .memoryJumpToInputRecord)) { notif in
             guard let id = notif.object as? Int64 else { return }
             selection = .data
@@ -246,8 +250,7 @@ struct ContentView: View {
         }
     }
 
-    /// Timeline / Data 整窗显示(没有侧栏,页面切换在左上角的药丸里);
-    /// Settings 照旧是侧栏 + 右侧内容。
+    /// 三个页面都整窗显示(没有侧栏):页面切换在左上角的药丸里,Settings 是右上角的齿轮。
     private var mainSplit: some View {
         GeometryReader { geo in
             pageContent
@@ -279,51 +282,8 @@ struct ContentView: View {
             DataPage(selection: $selection, scope: $dataScope, inputJump: $memoryInputJump)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .settings:
-            sidebarSplit
-        }
-    }
-
-    private var sidebarSplit: some View {
-        HStack(spacing: 0) {
-            TimelineSidebar(state: timeline,
-                            selection: $selection,
-                            dataScope: $dataScope,
-                            dataViewMode: $dataViewMode,
-                            settingsSubsection: $settingsSubsection)
-                .frame(width: 300)
-                .frame(maxHeight: .infinity)
-
-            // Hairline separator. A plain `Divider()` stops at the title-bar
-            // safe-area inset, leaving a 1px gap there through which the
-            // window's black background shows — so use a Rectangle that
-            // ignores the safe area and runs the full window height.
-            Rectangle()
-                .fill(Theme.stroke)
-                .frame(width: 1)
-                .ignoresSafeArea()
-
-            mainPane
+            SettingsCirclePage(subsection: $settingsSubsection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // 右侧画布拖窗。底图(SidebarBackdrop / AmbientBackground)上
-                // 那份手势只在没有 ScrollView 压着时才收得到事件 —— 设置类
-                // 页面整页都是 ScrollView,画布空白因此拖不动。挂在 pane 这
-                // 一层就绕过了:SwiftUI 里**子视图的手势优先于父视图**,所以
-                // 按钮 / 开关 / 输入框 / 列表行 / 图谱照样自己吃掉拖拽,只有
-                // 没人认领的空白才落到这条手势上。
-                .gesture(WindowDragGesture())
-        }
-        // 最小尺寸约束在外层 mainContent 上(dev 提示条也算进去)。否则首启 /
-        // Replay onboarding finish 时 NSHostingView 第一帧 layout 报 pane 自身
-        // intrinsic(Home / Settings 等较小),触发 window 缩小一瞬。
-    }
-
-    @ViewBuilder
-    private var mainPane: some View {
-        switch selection ?? .timeline {
-        case .timeline:      TimelineView(state: timeline, selection: $selection)
-        case .data:
-            DataPage(selection: $selection, scope: $dataScope, inputJump: $memoryInputJump)
-        case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
     }
 }
@@ -397,4 +357,9 @@ extension EnvironmentValues {
         get { self[PanelScaleKey.self] }
         set { self[PanelScaleKey.self] = newValue }
     }
+}
+
+extension Notification.Name {
+    /// 菜单栏 Settings… → 主窗口切到 Settings 页。
+    static let openSettingsPage = Notification.Name("MyPortrait.OpenSettingsPage")
 }

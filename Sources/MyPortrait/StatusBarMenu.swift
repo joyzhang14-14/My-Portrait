@@ -252,6 +252,9 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         )
         openWindow.target = self
         menu.addItem(openWindow)
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
         menu.addItem(.separator())
 
         menu.addItem(statusHeader)
@@ -412,6 +415,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
     @objc private func openMainWindow() {
         AppDelegate.current?.showMainWindow()
+    }
+
+    /// 打开主窗口并停在 Settings 页:窗口没建时靠 lastPage 落到 Settings,
+    /// 已经开着时靠通知切页。
+    @objc private func openSettings() {
+        ConfigStore.shared.mutate { $0.display.lastPage = SidebarSection.settings.rawValue }
+        AppDelegate.current?.showMainWindow()
+        NotificationCenter.default.post(name: .openSettingsPage, object: nil)
     }
 
     @objc private func quit() {
