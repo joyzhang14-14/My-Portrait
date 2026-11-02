@@ -54,7 +54,8 @@ struct DataPage: View {
 
     // 版式:两侧列宽固定、字号整体缩一档;图谱铺满整窗、只在中间的圆里显示,
     // 四个角贴着窗口的四个角放,左右中段留空给圆
-    private let sideW: CGFloat = 288
+    @Environment(\.panelScale) private var panelScale
+    private var sideW: CGFloat { 288 * panelScale }
     private let leftX: CGFloat = 22
     private let rightPad: CGFloat = 22
     /// 左上导航的顶边(页面切换条下面)。
@@ -62,7 +63,7 @@ struct DataPage: View {
     /// 右上搜索那一行的顶边(Reload 按钮下面)。
     private let rightTopY: CGFloat = 72
     /// 四角面板字号缩放(让出空间给中间的图谱)。
-    private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 }
+    private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 * panelScale }
 
     var body: some View {
         GeometryReader { geo in

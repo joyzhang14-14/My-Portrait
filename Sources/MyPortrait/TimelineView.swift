@@ -1546,10 +1546,13 @@ private struct FrameShot: View {
 
 /// 圆四周四个角。位置钉死:上排两个标题在一条线上,下排两个标题在圆心水平线
 /// 下方 24pt;左列左对齐、右列右对齐。折叠状态只随用户操作变,换帧不动。
-/// 四个角面板的字号系数:面板收窄给圆让位,字跟着小一号。
-private let panelFont: CGFloat = 0.88
+/// 四个角面板的字号系数:面板收窄给圆让位,字跟着小一号;窗口小于
+/// 1600×960 时再乘 panelScale(见 PanelScale)。
+private let panelFontBase: CGFloat = 0.88
 
 private struct TimelineCorners: View {
+    @Environment(\.panelScale) private var panelScale
+    private var panelFont: CGFloat { panelFontBase * panelScale }
     let g: RingGeo
     let pal: RingPalette
     let model: DayModel
@@ -1887,6 +1890,8 @@ private extension View {
 
 /// 角上的标题:不跟列表一起滚;点一下四个角都恢复原样。
 private struct SectionTitle<Trailing: View>: View {
+    @Environment(\.panelScale) private var panelScale
+    private var panelFont: CGFloat { panelFontBase * panelScale }
     let pal: RingPalette
     let title: String
     let count: String?
@@ -1919,6 +1924,8 @@ extension SectionTitle where Trailing == EmptyView {
 
 /// “+N more / Show less” 那一行:单独一层,固定在列表下面,不跟着滚、不被渐隐压暗。
 private struct FoldRow: View {
+    @Environment(\.panelScale) private var panelScale
+    private var panelFont: CGFloat { panelFontBase * panelScale }
     let pal: RingPalette
     let label: String
     let open: Bool
@@ -1942,6 +1949,8 @@ private struct FoldRow: View {
 }
 
 private struct AudioRowView: View {
+    @Environment(\.panelScale) private var panelScale
+    private var panelFont: CGFloat { panelFontBase * panelScale }
     let pal: RingPalette
     let time: String
     let speaker: String

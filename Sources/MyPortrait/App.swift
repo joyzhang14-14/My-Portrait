@@ -578,7 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(ConfigStore.shared.display.showDockIcon ? .regular : .accessory)
 
         window = ChromelessWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1600, height: 960),
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 768),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: true   // 第一次显示才建窗口后备缓冲;后台启动用不上
@@ -608,7 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.standardWindowButton(.zoomButton)?.isHidden = false
         // 关掉 NSWindow 默认的 state restoration —— 用户上次手动 resize
         // 后,macOS 会偷偷把那个尺寸记下,下次启动 contentRect 被覆盖,
-        // 看上去"初始窗口变大了"。关掉后每次启动都老老实实 1600×960。
+        // 看上去"初始窗口变大了"。关掉后每次启动都老老实实用默认尺寸。
         window.isRestorable = false
         window.setContentSize(Self.defaultContentSize())
 
@@ -871,10 +871,10 @@ extension Notification.Name {
 
 
 extension AppDelegate {
-    /// 主窗口默认尺寸 1600×960(Timeline 圆盘按这个尺寸设计);屏幕放不下时缩到
+    /// 主窗口默认尺寸 1280×768;屏幕放不下时缩到
     /// 菜单栏和程序坞之外的可用区域里,四周留一点边。
     static func defaultContentSize() -> NSSize {
-        let vis = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1600, height: 960)
-        return NSSize(width: min(1600, vis.width - 40), height: min(960, vis.height - 20))
+        let vis = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1280, height: 768)
+        return NSSize(width: min(1280, vis.width - 40), height: min(768, vis.height - 20))
     }
 }

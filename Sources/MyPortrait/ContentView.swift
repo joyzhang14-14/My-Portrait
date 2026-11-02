@@ -221,7 +221,7 @@ struct ContentView: View {
                     DevModeTitlebarBanner(live: paneTouchesRealData)
                 }
             }
-            .frame(minWidth: 1200, minHeight: 835)
+            .frame(minWidth: 1100, minHeight: 700)
     }
 
     /// 当前这一屏**能不能动到真实数据** —— dev mode 顶条据此变红。
@@ -249,7 +249,10 @@ struct ContentView: View {
     /// Timeline / Data 整窗显示(没有侧栏,页面切换在左上角的药丸里);
     /// Settings 照旧是侧栏 + 右侧内容。
     private var mainSplit: some View {
-        pageContent
+        GeometryReader { geo in
+            pageContent
+                .environment(\.panelScale, PanelScale.of(geo.size))
+        }
             // 三个页面共用同一个切换条,钉在窗口左上角(红绿灯右边),切页不跳
             .overlay(alignment: .topLeading) {
                 PageSwitcher(selection: $selection)
@@ -345,5 +348,24 @@ struct PageSwitcher: View {
         .padding(3)
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+    }
+}
+
+/// 四角面板的字号 / 列宽系数:默认窗口 1280×768 时 0.85,窗口拉到 1600×960
+/// 及以上时 1,中间线性。窗口小了先缩面板,把位置留给中间的圆。
+enum PanelScale {
+    static func of(_ size: CGSize) -> CGFloat {
+        max(0.85, min(1, size.width / 1600, size.height / 960))
+    }
+}
+
+private struct PanelScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    var panelScale: CGFloat {
+        get { self[PanelScaleKey.self] }
+        set { self[PanelScaleKey.self] = newValue }
     }
 }
