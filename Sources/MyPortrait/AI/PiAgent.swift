@@ -51,7 +51,7 @@ final class PiAgent: @unchecked Sendable, ChatAgent {
             case .missingBun:        return "Bun runtime is not installed."
             case .missingPi:         return "Pi agent is not installed."
             case .missingToken(let p, let reason):
-                let base = "\(p) credential missing — set it up in Connections."
+                let base = "\(p) credential missing — set it up in Settings → Provider."
                 guard let reason, !reason.isEmpty else { return base }
                 return "\(base) (\(reason))"
             case .launchFailed(let m): return "Failed to start Pi: \(m)"

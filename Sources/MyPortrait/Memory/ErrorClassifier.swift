@@ -81,7 +81,7 @@ enum LLMFailureKind: Sendable, Codable, Equatable {
         case .unknownTransient(let r):    return "Transient error (\(r))"
         case .appInterruptionRestarted:   return "App was closed mid-run — pipeline will restart from scratch on next tick"
         case .quotaExhausted(let p, _):   return "Provider quota exhausted — top up \(p) and click Problem solved"
-        case .authRevoked(let p, _):      return "Auth failed — reconnect \(p) in Settings → Connections"
+        case .authRevoked(let p, _):      return "Auth failed — reconnect \(p) in Settings → Provider"
         case .modelDeprecated(let m, _):  return "Model \(m) unavailable — pick another in Settings → AI models"
         case .dbCorrupt:                  return "Local DB looks corrupt — click Problem solved to quarantine + rebuild"
         case .agentSpawnFailed(let r):    return "AI runtime didn't start (\(r)) — re-install from Settings → AI"

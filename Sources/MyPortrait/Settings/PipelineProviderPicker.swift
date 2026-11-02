@@ -48,7 +48,7 @@ struct PipelineProviderPicker: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             if availableProviders.isEmpty {
-                Text("No AI providers connected. Open Settings → Connections to add ChatGPT, Anthropic, Gemini, Ollama, etc.")
+                Text("No AI providers connected. Open Settings → Provider to add ChatGPT, Anthropic, Gemini, Ollama, etc.")
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)

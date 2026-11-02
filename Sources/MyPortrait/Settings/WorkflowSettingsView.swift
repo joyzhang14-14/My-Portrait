@@ -1575,7 +1575,7 @@ struct WorkflowSettingsView: View {
     ) -> some View {
         section(
             title: "AI provider",
-            info: "Which AI powers this pipeline. The list comes from Settings → Connections — connect a service there to use it here. Changes take effect on the next run."
+            info: "Which AI powers this pipeline. The list comes from Settings → Provider — connect a service there to use it here. Changes take effect on the next run."
         ) {
             PipelineProviderPicker(pipeline: kp, usesLightModel: usesLightModel)
         }

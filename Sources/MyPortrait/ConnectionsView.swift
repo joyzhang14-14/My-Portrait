@@ -76,7 +76,7 @@ struct ConnectionsView: View {
                     // Display/AI models…)保持字号/spacing 完全一致。
                     // onboarding 嵌入时 showsHeader=false,不影响。
                     SettingsPageTitle(
-                        title: "Connections",
+                        title: "Provider",
                         subtitle: "Connect to an AI that can process your data into events and portrait"
                     )
                     .padding(.bottom, 4)

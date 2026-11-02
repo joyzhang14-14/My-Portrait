@@ -586,7 +586,7 @@ private struct ConnectAIStep: View {
             VStack(alignment: .leading, spacing: 6) {
                 StepHeader(
                     title: "Connect an AI",
-                    info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Connections, and you can finish setup without connecting anything."
+                    info: "Pick a provider you already have access to. You bring your own credentials — My Portrait never resells AI usage. You can connect more later in Settings → Provider, and you can finish setup without connecting anything."
                 )
                 Text(Markdown.inline("Complex tasks still need a **stronger cloud AI**. The goal is to eventually run **everything locally and privately**."))
                     .font(.system(size: 13))
@@ -616,7 +616,7 @@ private struct ConnectAIStep: View {
                     .foregroundStyle(connectedCount > 0 ? .green : .secondary)
                 Text(connectedCount > 0
                      ? "Connected \(connectedCount) provider\(connectedCount == 1 ? "" : "s") — you're good to go."
-                     : "Nothing connected yet. You can skip this and connect later from Settings → Connections.")
+                     : "Nothing connected yet. You can skip this and connect later from Settings → Provider.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
