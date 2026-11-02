@@ -21,6 +21,7 @@ struct DataInputPage: View {
     @State private var query = ""
     @State private var loading = false
     @State private var clicks = 0
+    @State private var calendarOpen = false
 
     private var W: CGFloat { size.width }
     private var H: CGFloat { size.height }
@@ -160,8 +161,19 @@ struct DataInputPage: View {
         let isToday = Calendar.current.isDateInToday(day)
         return HStack(spacing: 4) {
             Button { step(-1) } label: { Image(systemName: "chevron.left") }
-            Text(Self.dayFmt.string(from: day)).font(.system(size: 15, weight: .semibold))
+            // 点日期弹出和 Timeline 同一个日历,直接选某天
+            Button { calendarOpen.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar").font(.system(size: 13))
+                    Text(Self.dayFmt.string(from: day)).font(.system(size: 15, weight: .semibold))
+                }
                 .foregroundStyle(pal.fg).padding(.horizontal, 8)
+            }
+            .popover(isPresented: $calendarOpen, arrowEdge: .bottom) {
+                CalendarPopover(selected: Binding(get: { day }, set: { d in
+                    day = Calendar.current.startOfDay(for: d); selectedId = nil
+                }), isPresented: $calendarOpen)
+            }
             Button { step(1) } label: { Image(systemName: "chevron.right") }.disabled(isToday).opacity(isToday ? 0.3 : 1)
         }
         .buttonStyle(.plain).foregroundStyle(pal.muted)
