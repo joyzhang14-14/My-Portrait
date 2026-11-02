@@ -60,7 +60,7 @@ struct DataPage: View {
     private let rightPad: CGFloat = 22
     /// 左上导航的顶边(页面切换条下面)。
     private let topY: CGFloat = 54
-    /// 右上搜索那一行的顶边(Reload 按钮下面)。
+    /// 右上搜索那一行的顶边(窗口右上角 Settings 齿轮下面)。
     private let rightTopY: CGFloat = 72
     /// 四角面板字号缩放(让出空间给中间的图谱)。
     private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 * panelScale }
@@ -86,10 +86,6 @@ struct DataPage: View {
                         .opacity(reader ? 0.07 : 1)
                         .allowsHitTesting(!reader)
                         .animation(.easeOut(duration: 0.3), value: reader)
-                }
-
-                if zone != .input {
-                    reloadButton.offset(x: W - rightPad - 40, y: 12)
                 }
 
                 // 左上:切换 + Settings
@@ -185,13 +181,6 @@ struct DataPage: View {
                 .allowsHitTesting(false)
         }
         .frame(width: W, height: H)
-    }
-
-    private var reloadButton: some View {
-        roundButton("arrow.clockwise", on: false, size: 40, help: "Reload from disk") {
-            reloadToken += 1
-            reloadCounts()
-        }
     }
 
     private func roundButton(_ symbol: String, on: Bool, size: CGFloat = 34, help: String,
@@ -442,6 +431,10 @@ struct DataPage: View {
                                 help: "Timeline — watch the graph change day by day") {
                         timelineOn.toggle()
                     }
+                }
+                roundButton("arrow.clockwise", on: false, help: "Reload from disk") {
+                    reloadToken += 1
+                    reloadCounts()
                 }
             }
             Group {

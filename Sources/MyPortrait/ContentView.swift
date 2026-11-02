@@ -260,6 +260,13 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .ignoresSafeArea()
             }
+            // Settings 不在切换条里,是窗口右上角的齿轮(每页同一个位置)
+            .overlay(alignment: .topTrailing) {
+                SettingsGearButton(selection: $selection)
+                    .padding(.trailing, 22).padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .ignoresSafeArea()
+            }
     }
 
     @ViewBuilder
@@ -329,7 +336,7 @@ struct PageSwitcher: View {
     var body: some View {
         let pal = RingPalette(dark: scheme == .dark)
         HStack(spacing: 0) {
-            ForEach(SidebarSection.allCases) { s in
+            ForEach([SidebarSection.timeline, .data]) { s in
                 let on = (selection ?? .timeline) == s
                 Button { selection = s } label: {
                     HStack(spacing: 7) {
@@ -348,6 +355,28 @@ struct PageSwitcher: View {
         .padding(3)
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+    }
+}
+
+/// 窗口右上角的 Settings 齿轮;在 Settings 页时亮起。
+struct SettingsGearButton: View {
+    @Binding var selection: SidebarSection?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let pal = RingPalette(dark: scheme == .dark)
+        let on = selection == .settings
+        Button { selection = .settings } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(on ? pal.accent : pal.muted)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(on ? pal.accentbg : pal.pill))
+                .overlay(Circle().stroke(on ? pal.accentb : pal.pillb, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Settings")
     }
 }
 
