@@ -186,6 +186,8 @@ struct GraphRendererView: View {
     /// false = 画布整体不可交互(08-31 用户:时间线播放期间)。命中/hover 全停 ——
     /// 光标位置也不再记,否则球自己动到停在原处的光标下还会闪。
     let interactive: Bool
+    /// 搜索命中(nil = 没在搜):非 nil 时其余的球、线、组名一起压暗,只点亮这些。
+    let highlight: Set<Int>?
     @Binding var camera: GraphCamera
     @Binding var hoveredId: Int?
     /// 右键菜单当前作用的 folder / portrait 分区球。非 nil 时画蓝色选中圈。
@@ -252,6 +254,7 @@ struct GraphRendererView: View {
          pulseFlashSec: Double = GraphConstants.pulseArriveFlashSec,
          hideLinks: Bool = false,
          interactive: Bool = true,
+         highlight: Set<Int>? = nil,
          camera: Binding<GraphCamera>, hoveredId: Binding<Int?>,
          contextNodeId: Int? = nil,
          cardNodeId: Int? = nil,
@@ -272,6 +275,7 @@ struct GraphRendererView: View {
         self.pulseFlashSec = pulseFlashSec
         self.hideLinks = hideLinks
         self.interactive = interactive
+        self.highlight = highlight
         self._camera = camera
         self._hoveredId = hoveredId
         self.contextNodeId = contextNodeId
@@ -447,10 +451,23 @@ struct GraphRendererView: View {
                 let live = hitTest(screen: hs, snap: snap, viewSize: size)
                 if live != hoveredId { DispatchQueue.main.async { hoveredId = live } }
             }
-            drawEdges(ctx, snap: snap, size: size)
-            drawPulses(ctx, snap: snap, size: size, date: date)
-            drawBalls(ctx, snap: snap, size: size, date: date)
-            drawLabels(ctx, snap: snap, size: size)
+            // 搜索中:整张图压暗,再把命中的球按原色补画一遍
+            var dctx = ctx
+            if highlight != nil { dctx.opacity = 0.12 }
+            drawEdges(dctx, snap: snap, size: size)
+            drawPulses(dctx, snap: snap, size: size, date: date)
+            drawBalls(dctx, snap: snap, size: size, date: date)
+            drawLabels(dctx, snap: snap, size: size)
+            if let hl = highlight {
+                let zoom = camera.zoom
+                for i in hl where i < snap.count {
+                    let node = scene.nodes[i]
+                    let c = camera.worldToScreen(snap[i], viewSize: size)
+                    let r = node.radius * zoom
+                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                             with: .color(node.color))
+                }
+            }
         } symbols: {
             ForEach(hubNodes) { node in
                 Text(node.title)
@@ -663,7 +680,7 @@ struct GraphRendererView: View {
         let reveal = engine.beltRevealAlpha
         if reveal > 0.005 {
             var bctx = ctx
-            bctx.opacity = Double(reveal)
+            bctx.opacity = ctx.opacity * Double(reveal)
             for group in beltGroups {
                 var path = Path()
                 for oi in group.nodes {
@@ -739,7 +756,7 @@ struct GraphRendererView: View {
                            0), 1)
         if fade > 0.01 {
             var lctx = ctx
-            lctx.opacity = fade
+            lctx.opacity = ctx.opacity * fade
             // hub 常驻标题(symbols 预光栅化)
             for node in hubNodes {
                 if let sym = lctx.resolveSymbol(id: node.id) {

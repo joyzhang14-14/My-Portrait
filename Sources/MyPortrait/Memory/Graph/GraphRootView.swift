@@ -50,12 +50,37 @@ private struct WindowDragBlocker: NSViewRepresentable {
     func updateNSView(_ nsView: BlockerView, context: Context) {}
 }
 
+/// 图谱当前选中的球(Data 页右上卡片据此显示组 / 全文)。值是 scene 节点下标。
+enum GraphSelection: Equatable {
+    case none, hub(Int), leaf(Int)
+}
+
+/// Data 页让图谱去某处:等同点了某颗球 / 点空白回总览 / 跳到某条 event。
+struct GraphFocusRequest: Equatable {
+    enum Target: Equatable { case node(Int), overview, eventRel(String) }
+    let target: Target
+    let id = UUID()
+}
+
 /// 图谱模式的根视图:按 scope 决定画布(Events → event 图,portrait → portrait
-/// 图),负责数据加载、物理引擎生命周期、浮窗与神经脉冲、HUD。
-/// 渲染在主窗口右侧内容区(与 DataView 同位置),不开新窗口。
-/// 非图谱 scope(personalInfo/input)不会路由进来 —— ContentView 保证。
+/// 图),负责数据加载、物理引擎生命周期、神经脉冲与时间线。
+/// 嵌在 Data 圆形页中间;选中、搜索、时间线开关、重载都由页面驱动,
+/// 详情卡片和统计在页面四角显示。
 struct GraphRootView: View {
     @Binding var scope: DataScope
+    @Binding var timelineOn: Bool
+    @Binding var selection: GraphSelection
+    @Binding var focusRequest: GraphFocusRequest?
+    /// 搜索词:非空时只点亮标题含它的球。
+    var searchQuery: String = ""
+    /// 变一次 = 从磁盘重载一次(右上角 Reload)。
+    var reloadToken: Int = 0
+    /// 场景换了(重载 / 时间线换日)→ 页面重算最近、统计、节点数。
+    var onSceneChange: (GraphScene) -> Void = { _ in }
+
+    /// 总览取景时隐形环直径占视口短边的比例(圆形页里图谱要撑满中间的圆)。
+    private static let ringFill: Double = 0.8
+    @State private var searchHits: Set<Int>? = nil
 
     @State private var scene: GraphScene = .empty
     @State private var engine: GraphPhysicsEngine? = nil
@@ -89,15 +114,9 @@ struct GraphRootView: View {
         let kind: Kind
     }
 
-    // 浮窗(末端球点击)
+    // 选中的末端球(页面右上卡片显示它的全文;渲染端让它持续闪)
     @State private var floatNodeId: Int? = nil
-    /// 浮窗渐显(07-10 update):开卡片先隐,等相机取景收官(cameraTracking
-    /// 落 false)再 0.22s 淡入;取景等物理沉降太久时 1.5s 兜底先显示。⚠️ 在
-    /// **设置 floatNodeId 的入口**同步置 false(onChange 在渲染后才跑,只靠
-    /// 它换球时会闪一帧上个状态)。
-    @State private var floatRevealed = false
-    @State private var floatRevealTask: Task<Void, Never>? = nil
-    /// 跨画布跳转目标:portrait 浮窗点 event chip → 切 events 画布后按 relPath
+    /// 跨画布跳转目标:portrait 笔记点 event chip → 切 events 画布后按 relPath
     /// 定位到该球(reload 末尾消费)。
     @State private var pendingFloatEventRel: String? = nil
 
@@ -166,6 +185,40 @@ struct GraphRootView: View {
     }
 
     var body: some View {
+        pageSync(core)
+    }
+
+    /// Data 页驱动的同步:选中、时间线开关、聚焦请求、搜索、重载。
+    /// (拆出来是为了让 body 的修饰链短到编译器能推断类型)
+    private func pageSync<V: View>(_ v: V) -> some View {
+        v
+            // 选中的末端球 → 页面卡片显示它;取消选中 → 卡片回 Profile。
+            .onChange(of: floatNodeId) { _, v in
+                if let v { selection = .leaf(v) }
+                else if case .leaf = selection { selection = .none }
+            }
+            // 页面的时钟按钮开关时间线;图谱自己退出时(点 folder / 换画布)同步回去。
+            .onChange(of: timelineOn) { _, on in
+                if on, timelineIndex == nil { Task { await enterTimeline() } }
+                else if !on, timelineIndex != nil { exitTimelineWithFade(thenFocus: nil) }
+            }
+            .onChange(of: timelineIndex == nil) { _, isNil in
+                if isNil, timelineOn { timelineOn = false }
+            }
+            .onChange(of: focusRequest) { _, req in
+                guard let req else { return }
+                focusRequest = nil
+                switch req.target {
+                case .node(let i):         handleTap(i)
+                case .overview:            handleTap(nil)
+                case .eventRel(let rel):   jumpToEvent(rel)
+                }
+            }
+            .onChange(of: searchQuery, initial: true) { refreshSearchHits() }
+            .onChange(of: reloadToken) { Task { await reload() } }
+    }
+
+    private var core: some View {
         GeometryReader { geo in
             ZStack(alignment: .topTrailing) {
                 if let engine {
@@ -177,6 +230,7 @@ struct GraphRootView: View {
                                     pulseFlashSec: pulseFlashSec,
                                     hideLinks: config.current.display.graphHideLinks,
                                     interactive: !timelinePlaying,
+                                    highlight: searchHits,
                                     camera: $camera,
                                     hoveredId: $hoveredId,
                                     contextNodeId: contextNodeId,
@@ -197,24 +251,6 @@ struct GraphRootView: View {
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
                         // 08-31 用户:播放期间整块画布不可点击、不可 hover。
                         .allowsHitTesting(!timelinePlaying)
-
-                    // 浮窗:锚在球旁,物理在动时跟着球走(同一时钟)。
-                    if let fid = floatNodeId, fid < scene.nodes.count {
-                        SwiftUI.TimelineView(.animation(minimumInterval: nil,
-                                                        paused: renderPaused)) { _ in
-                            GraphFloatWindow(
-                                node: scene.nodes[fid],
-                                loadWhenVisible: zone != .portrait || floatRevealed,
-                                onClose: { floatNodeId = nil },
-                                onJumpToEvent: jumpToEvent)
-                            .id(zone == .portrait ? fid : -1)
-                            // 渐显:取景收官前隐着(也不接事件),之后 0.22s 淡入。
-                            .opacity(floatRevealed ? 1 : 0)
-                            .allowsHitTesting(floatRevealed)
-                            .position(floatPosition(for: fid, engine: engine,
-                                                    viewSize: geo.size))
-                        }
-                    }
                 } else {
                     Color.clear
                 }
@@ -242,12 +278,10 @@ struct GraphRootView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                hud
             }
             // 内容区尺寸(取景算缩放要用);initial 捕获首帧,之后随窗变。
             .onChange(of: geo.size, initial: true) { _, s in viewSize = s }
         }
-        .background(SidebarBackdrop().ignoresSafeArea())
         // 主窗口是 chromeless + isMovableByWindowBackground=true(全局设计),
         // 但图谱里拖拽 = 平移/拖球,绝不能带动整个窗口(07-01 update)。
         // 垫一个 mouseDownCanMoveWindow=false 的 NSView 局部关掉背景拖窗。
@@ -310,20 +344,6 @@ struct GraphRootView: View {
             floatNodeId = nil
             pulses = []
         }
-        // 浮窗渐显调度:开卡片后轮询取景状态,收官即淡入(见 floatRevealed 注释)。
-        .onChange(of: floatNodeId) { _, v in
-            floatRevealTask?.cancel()
-            guard v != nil else { floatRevealed = false; return }
-            floatRevealTask = Task { @MainActor in
-                for _ in 0..<94 {   // ~1.5s 兜底:取景等物理沉降太久就先显示
-                    if Task.isCancelled { return }
-                    if !cameraTracking { break }
-                    try? await Task.sleep(for: .milliseconds(16))
-                }
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.22)) { floatRevealed = true }
-            }
-        }
         .onDisappear {
             GraphSession.shared.entries[zone]?.camera = camera
             cancelCameraTracking()
@@ -376,7 +396,7 @@ struct GraphRootView: View {
     ///   相机中心再下移 inset/(2·zoom)(世界 y 与屏幕 y 同向)→ 画面整体上抬,
     ///   边缘陨石不会被条盖住(07-11 用户)。
     private func frameFor(_ vs: CGSize, center: SIMD2<Float>, radius: Float,
-                          fill: Double = GraphConstants.cameraFrameFill,
+                          fill: Double = GraphRootView.ringFill,
                           bottomInset: CGFloat = 0)
         -> GraphCamera? {
         guard radius > 1, vs.width > 1, vs.height > 1 else { return nil }
@@ -391,9 +411,9 @@ struct GraphRootView: View {
         return cam
     }
 
-    /// 时间线条占掉的底部高度(条高 ~80 + 底边距 18,留点余量)。
+    /// 时间线条占掉的底部高度(一行条高 ~48 + 底边距 18,留点余量)。
     /// 只影响**总览**取景;folder / 小球视角不动(用户要求)。
-    private var timelineBarInset: CGFloat { timelineIndex != nil ? 104 : 0 }
+    private var timelineBarInset: CGFloat { timelineIndex != nil ? 76 : 0 }
 
     /// 开局取景目标:**优先预加载环**(界面显示前算好,即时可用,免等引擎
     /// ~50ms 钉环,且切回时不读旧环 → 不闪);portrait 无预加载时回退引擎
@@ -715,6 +735,7 @@ struct GraphRootView: View {
     private func handleTap(_ id: Int?) {
         guard let id, id < scene.nodes.count else {
             floatNodeId = nil
+            selection = .none
             // 点空白 → 平滑移回开场总览(当前隐形环/全节点包围圆);07-09 update。
             // 与 folder 聚焦同一套平滑动画(直线到中心+几何缩放),消拉回。
             if let tgt = overviewCamera(viewSize) {
@@ -724,6 +745,8 @@ struct GraphRootView: View {
         }
         if scene.nodes[id].kind.isHub {
             floatNodeId = nil
+            // 点主球 = 看 Profile;点 folder / 分区球 = 看这组的全部条目。
+            selection = scene.nodes[id].kind == .main ? .none : .hub(id)
             // 07-11 update:点 folder/分区球先转视角,**取景转完再发脉冲**。
             // 主球没有取景变换 → 立即发。取景中途被新交互打断 → onDone 不
             // 回调,那一发作废。
@@ -739,10 +762,6 @@ struct GraphRootView: View {
                 triggerPulse(from: id)
             }
         } else {
-            // 渐显:先隐,取景收官后淡入(同帧生效)。⚠️ 只在**换球**时置隐:
-            // 重复点同一球 floatNodeId 值不变 → onChange 不触发 → 没人再把
-            // 它淡回来,会永久隐身。
-            if floatNodeId != id { floatRevealed = false }
             floatNodeId = id
             // 点小球 → 与信息面板绑定的取景(07-10,event/portrait 两区
             // 同款):相机聚焦该球,zoom = 所在家气泡占视口 cameraFolderFill
@@ -836,7 +855,6 @@ struct GraphRootView: View {
             if case .eventLeaf(let r) = $0.kind { return r == rel }
             return false
         }) else { return }
-        if floatNodeId != idx { floatRevealed = false }   // 渐显(同上,换球才置隐)
         floatNodeId = idx
         frameCameraToEventBall(idx)
     }
@@ -896,64 +914,13 @@ struct GraphRootView: View {
         animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
     }
 
-    /// 浮窗中心位置:球右侧偏移,clamp 进视口。
-    private func floatPosition(for id: Int, engine: GraphPhysicsEngine,
-                               viewSize: CGSize) -> CGPoint {
-        let snap = engine.readSnapshot()
-        guard id < snap.count, id < scene.nodes.count else {
-            return CGPoint(x: viewSize.width / 2, y: viewSize.height / 2)
-        }
-        let ball = camera.worldToScreen(snap[id], viewSize: viewSize)
-        let r = scene.nodes[id].radius * camera.zoom
-        let halfW = 190.0, halfH = 230.0
-        // 优先放球右侧;放不下换左侧。
-        var x = ball.x + r + 20 + halfW
-        if x + halfW > viewSize.width { x = ball.x - r - 20 - halfW }
-        var y = ball.y
-        x = min(max(x, halfW + 8), viewSize.width - halfW - 8)
-        y = min(max(y, halfH + 8), viewSize.height - halfH - 8)
-        return CGPoint(x: x, y: y)
-    }
-
-    // MARK: - HUD
-
-    private var hud: some View {
-        HStack(spacing: 10) {
-            if loading {
-                ProgressView().controlSize(.small)
-            }
-            // 前端文案一律英文(2026-07-01 update)。
-            Text("\(scene.nodes.count) nodes · \(scene.edges.count) links")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Button {
-                Task { await reload() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.bouncyIcon)
-            .help("Reload from disk")
-            // 时间线入口:只有 events 画布有历史可看(portrait 无 event 日期轴)。
-            if zone == .events {
-                Button {
-                    // ④ 再点一次 = 关闭(与叉掉等价)
-                    if timelineIndex != nil { exitTimelineWithFade(thenFocus: nil) }
-                    else { Task { await enterTimeline() } }
-                } label: {
-                    Image(systemName: timelineLoading ? "clock.badge.questionmark"
-                          : (timelineIndex != nil ? "clock.fill" : "clock.arrow.circlepath"))
-                }
-                .buttonStyle(.bouncyIcon)
-                .disabled(timelineLoading)
-                .help(timelineIndex != nil ? "Close timeline"
-                      : "Timeline — watch the graph change day by day")
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassCard()
-        .padding(.top, 44)
-        .padding(.trailing, 16)
+    /// 搜索命中:标题含搜索词的末端球(组球、主球不算)。场景或搜索词变了才重算。
+    private func refreshSearchHits() {
+        let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { searchHits = nil; return }
+        searchHits = Set(scene.nodes.indices.filter {
+            !scene.nodes[$0].kind.isHub && scene.nodes[$0].title.localizedCaseInsensitiveContains(q)
+        })
     }
 
     // MARK: - 加载 / 引擎生命周期
@@ -974,13 +941,16 @@ struct GraphRootView: View {
     /// 进时间线模式:解析一次索引(后台),停在最新一天。
     @MainActor
     private func enterTimeline() async {
-        guard timelineIndex == nil, !timelineLoading, zone == .events else { return }
+        guard timelineIndex == nil, !timelineLoading, zone == .events else {
+            if timelineIndex == nil, !timelineLoading { timelineOn = false }
+            return
+        }
         timelineLoading = true
         defer { timelineLoading = false }
         let idx = await Task.detached(priority: .userInitiated) {
             EventTimeline.load()
         }.value
-        guard let idx else { return }
+        guard let idx else { timelineOn = false; return }
         floatNodeId = nil
         pulses = []
         cancelCameraTracking()
@@ -1084,6 +1054,8 @@ struct GraphRootView: View {
         engine.updateSceneRemapping(newScene, carryOver: carry)
         floatNodeId = nil
         hoveredId = nil
+        refreshSearchHits()
+        onSceneChange(newScene)
     }
 
     /// 换到某一天:重建场景 + 按身份把位置迁移过去(存活的球不重排)。
@@ -1171,6 +1143,8 @@ struct GraphRootView: View {
         hoveredId = nil
         if floatNodeId.map({ $0 >= scene.nodes.count }) == true { floatNodeId = nil }
         loading = false
+        refreshSearchHits()
+        onSceneChange(scene)
         // 跨画布跳转会自设 camera 对准目标球,此时不抢镜(须在 resolve
         // 前捕获 —— resolve 内部会清空 pending)。
         let hadJump = pendingFloatEventRel != nil

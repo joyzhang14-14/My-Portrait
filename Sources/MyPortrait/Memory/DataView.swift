@@ -19,6 +19,13 @@ struct DataView: View {
     /// 图谱浮窗 wr chip 跳转注入(ContentView 传):非 nil → Input 定位该 record。
     /// nil = 无外部跳转,走内部 pendingInputRecordId(writing-style chip 路径)。
     var externalInputJump: Binding<Int64?>? = nil
+    /// 只列这个 folder 的 event(Data 页阅读视图左栏选了组)。nil = 全部按 folder 分组。
+    /// 未分组的 event 用 `GraphSceneBuilder.unclassifiedSlug`。
+    var folderFilter: String? = nil
+    /// 搜索词由外面给(Data 页顶上的搜索框);非 nil 时自己不显示搜索框。
+    var searchOverride: String? = nil
+    /// 列表头和详情顶部的留白(独立窗格要让开标题栏,嵌在卡片里时不用)。
+    var topInset: CGFloat = 44
 
     /// Text settings 的 Memory sort order 改动要即时反映到列表 —— 持有 store 让
     /// @Observable 依赖追踪生效(body 里读 memorySortOrder 建立观察)。
@@ -158,9 +165,20 @@ struct DataView: View {
 
     /// 搜索过滤:空串走全量,否则按 title case-insensitive contains。
     private var visibleEntries: [Entry] {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
+        let q = query
         guard !q.isEmpty else { return entries }
         return entries.filter { $0.title.localizedCaseInsensitiveContains(q) }
+    }
+
+    private var query: String {
+        (searchOverride ?? searchText).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 选了某个组时只列它的 event;没选组就是全部。
+    private var filteredFolderEntries: [Entry]? {
+        guard let f = folderFilter, case .events = scope else { return nil }
+        if f == GraphSceneBuilder.unclassifiedSlug { return ungroupedEntries }
+        return folderGroups.first(where: { $0.slug == f })?.entries ?? []
     }
 
     private var listColumn: some View {
@@ -168,7 +186,7 @@ struct DataView: View {
             HStack(spacing: 10) {
                 Text(scope.displayName)
                     .font(.system(size: 16, weight: .semibold))
-                Text("\(visibleEntries.count)\(searchText.isEmpty ? "" : " / \(entries.count)")")
+                Text("\(filteredFolderEntries?.count ?? visibleEntries.count)\(query.isEmpty ? "" : " / \(entries.count)")")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -183,6 +201,14 @@ struct DataView: View {
                         creatingFolderSheet = true
                     }
                 }
+                // 排序(原 Data 设置页的 Memory sort order)
+                Picker("", selection: config.binding(\.display.memorySortOrder)) {
+                    ForEach(MemorySortOrder.allCases) { o in Text(o.label).tag(o.rawValue) }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .help("Sort order")
                 IconHoverButton(systemImage: "arrow.clockwise",
                                   tooltip: "Refresh",
                                   systemHelp: "Reload from disk") {
@@ -190,12 +216,14 @@ struct DataView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 44)
+            .padding(.top, topInset)
             .padding(.bottom, 8)
 
-            SearchBar(text: $searchText, placeholder: "Search titles")
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+            if searchOverride == nil {
+                SearchBar(text: $searchText, placeholder: "Search titles")
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
 
             if !actionStatus.isEmpty {
                 Text(actionStatus)
@@ -213,7 +241,7 @@ struct DataView: View {
                 EmptyHint(scope: scope)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if visibleEntries.isEmpty {
-                Text("No titles match “\(searchText)”.")
+                Text("No titles match “\(query)”.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .padding(.top, 40)
@@ -221,8 +249,15 @@ struct DataView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if case .events = scope,
-                           searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                        if let only = filteredFolderEntries, query.isEmpty {
+                            ForEach(only) { entry in
+                                EntryRow(entry: entry, selected: selected == entry.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { handleSelect(entry: entry) }
+                                    .contextHighlight { eventContextMenu(entry) }
+                                Divider().background(Color.primary.opacity(0.08))
+                            }
+                        } else if case .events = scope, query.isEmpty {
                             // events 视图 + 没搜索 → 按 folder 分组(可展开)。
                             // 搜索激活时仍走 flat 列表 —— 搜索本来就是要看跨 folder
                             // 匹配,折叠成 group 会反直觉。
@@ -474,7 +509,7 @@ struct DataView: View {
                         .buttonStyle(.bouncyIcon)
                         .help("Delete this event")
                     }
-                    .padding(.top, 44)
+                    .padding(.top, topInset)
                     metadataBlock(entry.file, category: entry.category, scope: entry.scope)
                     Divider().background(Color.primary.opacity(0.10))
                     // markdown 渲染:body 里 `**bold**` / `> quote` 这种标记
@@ -911,7 +946,7 @@ struct DataView: View {
                     .keyboardShortcut("s", modifiers: .command)
                     .buttonStyle(.borderedProminent)
             }
-            .padding(.top, 44)
+            .padding(.top, topInset)
             editField("tags") {
                 TagCapsuleEditor(items: $draftTags)
             }

@@ -116,7 +116,7 @@ struct NeuralGraphSettingsView: View {
 }
 
 /// 主球照片上传槽(仿 Display 的 App customize icon slot,圆形预览)。
-private struct MainBallPhotoSlot: View {
+struct MainBallPhotoSlot: View {
     @State private var preview: NSImage? = nil
     /// 非 nil = 正在裁剪弹窗里框选这张源图(.sheet(item:) 驱动)。
     @State private var cropTarget: CropTarget? = nil

@@ -25,35 +25,24 @@ struct GraphTimelineBar: View {
     }
     private var maxBirths: Int { max(1, index.birthsPerDay.values.max() ?? 1) }
 
+    /// 一行、无外框:▶ | 日期 + 当天新增 | 柱状图 | 回到今天 | ✕。
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            header
-            scrubber
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .glassCard()
-        .frame(maxWidth: 720)
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .bottom, spacing: 10) {
             Button { playing.toggle() } label: {
                 Image(systemName: playing ? "pause.fill" : "play.fill")
             }
             .buttonStyle(.bouncyIcon)
             .help(playing ? "Pause" : "Play through time")
 
-            Text(Self.dayFmt.string(from: day))
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                .frame(width: 108, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(Self.dayFmt.string(from: day))
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.92))
+                dayStats
+            }
+            .frame(width: 100, alignment: .leading)
 
-            // 当天的**变化**(总数右上角 HUD 已有,这里不重复):
-            // 新增 = 那天诞生的 event;合并 = 那天并进已有 event 的重复发生。
-            dayStats
-
-            Spacer()
+            scrubber
 
             Button { day = index.range.upperBound } label: {
                 Image(systemName: "forward.end.fill")
@@ -65,6 +54,7 @@ struct GraphTimelineBar: View {
                 .buttonStyle(.bouncyIcon)
                 .help("Exit timeline")
         }
+        .frame(maxWidth: 760)
     }
 
     /// 柱状图 + 擦洗。柱 = 当天新诞生的 event 数;竖线 = 当前位置。
@@ -115,28 +105,14 @@ struct GraphTimelineBar: View {
             }
             .frame(width: w, height: h)
         }
-        .frame(height: 34)
+        .frame(height: 36)
     }
 
-    /// 当天变化:+新增 · 合并 · folder 数(带增减)。
+    /// 当天新增几条 event(0 时压成次要灰)。
     @ViewBuilder private var dayStats: some View {
-        // 三组之间拉开间距 —— 挤在一起容易看成一句话(08-31 用户)。
-        // 值为 0 时压成次要灰:0 不是"变化",不该跟真有变化的数字一样抢眼。
-        HStack(spacing: 18) {
-            Text("+\(stats.born)")
-                .foregroundStyle(stats.born > 0 ? Color.green : Color.secondary)
-            Text("\(stats.merged) merged")
-                .foregroundStyle(stats.merged > 0 ? Color.yellow : Color.secondary)
-            HStack(spacing: 4) {
-                Text("\(stats.folders) folders").foregroundStyle(.secondary)
-                if stats.folderDelta != 0 {
-                    Text(stats.folderDelta > 0 ? "(+\(stats.folderDelta))"
-                                               : "(\(stats.folderDelta))")
-                        .foregroundStyle(stats.folderDelta > 0 ? Color.green : Color.red)
-                }
-            }
-        }
-        .font(.system(size: 10, design: .monospaced))
+        Text("+\(stats.born) new")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(stats.born > 0 ? Theme.textPrimary.opacity(0.7) : Color.secondary)
     }
 
     private func seek(toX x: CGFloat, width: CGFloat) {

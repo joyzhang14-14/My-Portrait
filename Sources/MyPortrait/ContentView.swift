@@ -246,14 +246,18 @@ struct ContentView: View {
         }
     }
 
-    /// Timeline 整窗显示(没有侧栏,页面切换在左上角的药丸里);Data / Settings
-    /// 照旧是侧栏 + 右侧内容。
+    /// Timeline / Data 整窗显示(没有侧栏,页面切换在左上角的药丸里);
+    /// Settings 照旧是侧栏 + 右侧内容。
     @ViewBuilder
     private var mainSplit: some View {
-        if (selection ?? .timeline) == .timeline {
+        switch selection ?? .timeline {
+        case .timeline:
             TimelineView(state: timeline, selection: $selection)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
+        case .data:
+            DataPage(selection: $selection, scope: $dataScope, inputJump: $memoryInputJump)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .settings:
             sidebarSplit
         }
     }
@@ -297,24 +301,7 @@ struct ContentView: View {
         switch selection ?? .timeline {
         case .timeline:      TimelineView(state: timeline, selection: $selection)
         case .data:
-            // Neural Graph 模式覆盖 events/portrait/input;personalInfo 走专属表单。
-            if dataViewMode == .text, dataScope == .textSettings {
-                DataTextSettingsView()
-            } else if dataViewMode == .neuralGraph, dataScope == .neuralGraphSettings {
-                // Neural Graph 侧栏 GRAPH 下的设置入口(主球照片等)。
-                NeuralGraphSettingsView()
-            } else if dataViewMode == .neuralGraph,
-                      DataViewMode.supportsNeuralGraph(dataScope) {
-                // input 的图谱形态是打字活动面积图,不走力导向 GraphRootView。
-                if dataScope == .input {
-                    InputActivityChartView(jumpToRecordId: $memoryInputJump)
-                } else {
-                    GraphRootView(scope: $dataScope)
-                }
-            } else {
-                DataView(scope: $dataScope,
-                             externalInputJump: $memoryInputJump)
-            }
+            DataPage(selection: $selection, scope: $dataScope, inputJump: $memoryInputJump)
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
     }
