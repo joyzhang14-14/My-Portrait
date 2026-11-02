@@ -251,6 +251,9 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
     private var beltRevealGo = false
     /// 布防时刻(tick 计,超时兜底基准)。
     private var beltRevealArm: UInt64 = 0
+    /// 布防的墙钟时刻(uptime 纳秒):隐身最多 beltRevealMaxHiddenSec,
+    /// tick 跑得慢或被动画速度压到很少时也照样按时出现。
+    private var beltRevealArmNs: UInt64 = DispatchTime.now().uptimeNanoseconds
     /// 渲染侧副本(snapLock 保护,publishSnapshot 同步;渲染每帧读它,
     /// 不碰 simLock —— Debug 一个 tick 7ms,读 simLock 会卡渲染)。
     private var beltRevealSnap: Float = 1
@@ -341,6 +344,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltRevealSnap = beltReveal
         beltRevealGo = false
         beltRevealArm = 0
+        beltRevealArmNs = DispatchTime.now().uptimeNanoseconds
         revealFFAccum = 0
 
         var continuation: AsyncStream<Bool>.Continuation?
@@ -478,6 +482,7 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
         beltReveal = beltIdx.isEmpty ? 1 : 0
         beltRevealGo = false
         beltRevealArm = tickCount
+        beltRevealArmNs = DispatchTime.now().uptimeNanoseconds
         revealFFAccum = 0
         publishSnapshot()
         simLock.unlock()
@@ -828,6 +833,11 @@ public final class GraphPhysicsEngine: @unchecked Sendable {
             // 分数余量进累加器,慢档可少于 1 tick/帧。
             // 门只开在**淡入开始前**(!beltRevealGo):淡入段由 beltRevealStep 单独
             // 缩放,不叠这里,避免双重计。无陨石图(beltReveal 恒 1)/影子/拖拽不进。
+            if !isShadow, beltReveal < 1, !beltRevealGo,
+               DispatchTime.now().uptimeNanoseconds &- beltRevealArmNs
+                   > UInt64(GraphConstants.beltRevealMaxHiddenSec * 1e9) {
+                beltRevealGo = true
+            }
             let revealFF = !dragging && !isShadow && beltReveal < 1 && !beltRevealGo
             var runTicks = baseTicks
             if revealFF {

@@ -183,6 +183,8 @@ public enum GraphConstants {
     /// 兜底超时(tick 计):armed 后超过此数无条件开始淡入 —— 影子卡死/
     /// 到位判定失效也**绝不永久隐身**。⚠️ 全局 gate 若无兜底会导致永久空白+无交互
     public static let beltRevealTimeoutTicks: UInt64 = 600
+    /// 开局陨石最多隐身多久(秒,墙钟):到点不管沉降没沉降都开始淡入。
+    public static let beltRevealMaxHiddenSec: Double = 2
 
     // MARK: 视角取景(07-09 update:开局/松手视角跟隐形环走,占比适中)
 
