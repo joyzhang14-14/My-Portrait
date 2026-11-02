@@ -302,20 +302,40 @@ struct DataInputPage: View {
                     }
                     .scrollIndicators(.never)
                 } else if let s = current {
-                    Text(selectedId == nil ? "LATEST" : "SEGMENT")
+                    // 选中那块的时间区间里**所有 app** 的输入,一段一张小卡,按时间排
+                    let inRange = segments.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
+                    Text(selectedId == nil ? "LATEST" : "SELECTED")
                         .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(pal.faint)
-                    HStack(spacing: 9) {
-                        Circle().fill(color(s.app)).frame(width: 12, height: 12)
-                        Text(InputCaptureView.appLabel(s.app)).font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
-                    }
-                    Text("\(Self.hm(s.startMs)) – \(Self.hm(s.endMs))   \(s.keys) keys")
+                    Text("\(Self.hm(s.startMs)) – \(Self.hm(s.endMs))")
+                        .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
+                    Text("\(inRange.count) segment\(inRange.count == 1 ? "" : "s") · \(inRange.reduce(0) { $0 + $1.keys }) keys")
                         .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
                     ScrollView {
-                        Text(s.text).font(.system(size: fs(14.5))).foregroundStyle(pal.fg)
-                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: InputTextHeightKey.self, value: g.size.height)
-                            })
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(inRange) { seg in
+                                HStack(alignment: .top, spacing: 10) {
+                                    RoundedRectangle(cornerRadius: 2).fill(color(seg.app)).frame(width: 3)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(InputCaptureView.appLabel(seg.app)).font(.system(size: fs(12.5), weight: .semibold))
+                                                .foregroundStyle(pal.muted)
+                                            Text("\(Self.hm(seg.startMs)) · \(seg.keys) keys")
+                                                .font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
+                                        }
+                                        Text(seg.text).font(.system(size: fs(14))).foregroundStyle(pal.fg)
+                                            .textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 6).padding(.horizontal, 8)
+                                .background(RoundedRectangle(cornerRadius: 10).fill(pal.pill))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: InputTextHeightKey.self, value: g.size.height)
+                        })
                     }
                     .scrollIndicators(.never)
                     .onPreferenceChange(InputTextHeightKey.self) { textH = $0 }
