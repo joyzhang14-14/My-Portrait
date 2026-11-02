@@ -26,6 +26,29 @@ struct DataInputPage: View {
     /// 选中的 app(右下 TODAY 点一行 / 点外圈一段):外圈和面积图里只亮它。
     @State private var selectedApp: String? = nil
 
+    /// 选中那段全文的实际高度(右上卡片按它伸缩,不留大片空白)。
+    @State private var textH: CGFloat = 0
+
+    // 动态高度:底部两块(STATS / TODAY)按 app 行数往上长,最多长到给右上卡片留 140;
+    // 右上卡片按内容长,最多长到底部两块的上沿
+    private var appCount: Int { Set(segments.map(\.app)).count }
+    private var bottomH: CGFloat {
+        let maxH = H - 22 - (rightTopY + 44 + 140 + 16)
+        return max(200, min(maxH, 34 + CGFloat(appCount) * 28))
+    }
+    private var cardH: CGFloat {
+        let avail = H - 22 - bottomH - 16 - (rightTopY + 44)
+        let need: CGFloat
+        if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            need = 32 + 34 + CGFloat(shown.count) * 30
+        } else if current != nil {
+            need = 32 + 78 + textH
+        } else {
+            need = 70
+        }
+        return max(110, min(avail, need))
+    }
+
     private var W: CGFloat { size.width }
     private var H: CGFloat { size.height }
     private var c: CGPoint { CGPoint(x: W / 2, y: H / 2) }
@@ -50,14 +73,15 @@ struct DataInputPage: View {
             datePill.position(x: c.x, y: c.y - R + 62)
 
             statTiles
-                .frame(width: sideW, height: 250, alignment: .topLeading)
-                .offset(x: leftX, y: H - 22 - 250)
+                .frame(width: sideW, height: bottomH, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - bottomH)
             rightTop
-                .frame(width: sideW, height: H * 0.5 - rightTopY)
+                .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
+                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
             appBars
-                .frame(width: sideW, height: 250)
-                .offset(x: W - rightPad - sideW, y: H - 22 - 250)
+                .frame(width: sideW, height: bottomH)
+                .offset(x: W - rightPad - sideW, y: H - 22 - bottomH)
         }
         .frame(width: W, height: H, alignment: .topLeading)
         .task(id: day) { await reload() }
@@ -267,8 +291,12 @@ struct DataInputPage: View {
                     ScrollView {
                         Text(s.text).font(.system(size: fs(14.5))).foregroundStyle(pal.fg)
                             .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: InputTextHeightKey.self, value: g.size.height)
+                            })
                     }
                     .scrollIndicators(.never)
+                    .onPreferenceChange(InputTextHeightKey.self) { textH = $0 }
                 } else {
                     Text("Nothing typed on this day.").font(.system(size: fs(14))).foregroundStyle(pal.faint)
                 }
@@ -378,4 +406,9 @@ struct DataInputPage: View {
     nonisolated(unsafe) private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM d, yyyy"; return f
     }()
+}
+
+private struct InputTextHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
