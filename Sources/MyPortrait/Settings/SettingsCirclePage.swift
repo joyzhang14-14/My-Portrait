@@ -29,7 +29,8 @@ struct SettingsCirclePage: View {
     private let statusTop: CGFloat = 60
     /// 中间设置页的顶边:切换条下沿,上面 14pt 渐隐,滚上去的内容不压切换条。
     private let contentTop: CGFloat = 46
-    private func fs(_ s: CGFloat) -> CGFloat { s * 0.86 * panelScale }
+    /// 两侧的字和中间设置页(行字 14pt)对齐到同一档,只随窗口缩放。
+    private func fs(_ s: CGFloat) -> CGFloat { s * panelScale }
 
     private var current: SettingsSubsection { subsection ?? .app(.general) }
 
@@ -101,7 +102,7 @@ struct SettingsCirclePage: View {
                     .font(.system(size: 15 * panelScale))
                     .foregroundStyle(on ? pal.accent : pal.muted)
                     .frame(width: 20)
-                Text(s.label).font(.system(size: 16 * panelScale)).foregroundStyle(pal.fg)
+                Text(s.label).font(.system(size: 16.5 * panelScale)).foregroundStyle(pal.fg)
                     .lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
                 if let lamp = lamp(for: s) { Lamp(state: lamp, pal: pal) }
@@ -198,9 +199,9 @@ struct SettingsCirclePage: View {
         Button { subsection = target } label: {
             HStack(spacing: 8) {
                 if let state { Lamp(state: state, pal: pal) } else { Color.clear.frame(width: 7, height: 7) }
-                Text(label).font(.system(size: 15 * panelScale)).foregroundStyle(pal.fg).lineLimit(1)
+                Text(label).font(.system(size: 16 * panelScale)).foregroundStyle(pal.fg).lineLimit(1)
                 Spacer(minLength: 6)
-                Text(value).font(.system(size: 13 * panelScale, design: .monospaced)).foregroundStyle(pal.muted)
+                Text(value).font(.system(size: 14 * panelScale, design: .monospaced)).foregroundStyle(pal.muted)
                     .lineLimit(1).truncationMode(.middle)
             }
             .padding(.horizontal, 4)
