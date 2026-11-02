@@ -234,7 +234,7 @@ struct DataInputPage: View {
             } else {
                 // 圆心是当天输入总量 = 击键 + 点击(两项分开的数在左下 STATS)
                 Text((totalKeys + clicks).formatted()).font(.system(size: 40, weight: .bold)).foregroundStyle(pal.fg)
-                Text("keystrokes + clicks").font(.system(size: fs(14))).foregroundStyle(pal.muted)
+                Text("total activity").font(.system(size: fs(14))).foregroundStyle(pal.muted)
                 Text("\(Self.hm(segments.first!.startMs)) – \(Self.hm(segments.last!.endMs)) active")
                     .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.faint)
             }
