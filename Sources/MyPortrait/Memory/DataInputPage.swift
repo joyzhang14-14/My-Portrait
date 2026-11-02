@@ -29,8 +29,8 @@ struct DataInputPage: View {
     /// 选中那段全文的实际高度(右上卡片按它伸缩,不留大片空白)。
     @State private var textH: CGFloat = 0
 
-    // 动态高度:底部两块(STATS / TODAY)按 app 行数往上长,最多长到给右上卡片留 140;
-    // 右上卡片按内容长,内容多时往下压底部两块(它们变矮、列表滚动),底部两块至少留 200
+    // 动态高度:TODAY 按 app 行数往上长,最多长到给右上卡片留 140;
+    // 右上卡片按内容长,内容多时往下压 TODAY(变矮、列表滚动),TODAY 至少留 200
     private var appCount: Int { Set(segments.map(\.app)).count }
     private var bottomH: CGFloat {
         let maxH = H - 22 - (rightTopY + 44 + 140 + 16)
@@ -49,7 +49,7 @@ struct DataInputPage: View {
         return max(110, min(avail, need))
     }
 
-    /// 底部两块的实际高度:被右上卡片压过之后剩下的部分。
+    /// TODAY 的实际高度:被右上卡片压过之后剩下的部分。
     private var lowH: CGFloat { min(bottomH, H - 22 - 16 - (rightTopY + 44 + cardH)) }
 
     private var W: CGFloat { size.width }
@@ -105,10 +105,10 @@ struct DataInputPage: View {
             // 换天的药丸和 Timeline 一样放在圆里靠上
             datePill.position(x: c.x, y: c.y - R + 62)
 
+            // STATS 固定高度,不随 app 行数和右上卡片变
             statTiles
-                .frame(width: sideW, height: lowH, alignment: .topLeading)
-                .offset(x: leftX, y: H - 22 - lowH)
-                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
+                .frame(width: sideW, height: 200, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - 200)
             rightTop
                 .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
@@ -358,7 +358,7 @@ struct DataInputPage: View {
         }
     }
 
-    /// 左下:当天统计,2×2 大数字,细线分隔(标题和右下 TODAY 齐平)。
+    /// 左下:当天统计,2×2 大数字,细线分隔,固定高度。
     private var statTiles: some View {
         let typing = segments.reduce(0) { $0 + max(1, Int(($1.endMs - $1.startMs) / 60_000)) }
         let peak = buckets.rawTotals.max() ?? 0
