@@ -831,7 +831,9 @@ struct DataDigest: Sendable {
             var date: Date? = nil
             if case .eventLeaf(let rel) = n.kind { date = Self.date(fromRel: rel) }
             else if let u = n.fileURL {
-                date = (try? u.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                // portrait 笔记按 frontmatter 的 last_modified(没有再 created)算;
+                // 文件修改时间会被批量迁移刷成同一天,不能用
+                date = Self.noteDate(of: u)
             }
             guard let date else { continue }
             items.append((Item(id: n.id, title: n.title, date: date, hub: hub?.title ?? "",
@@ -868,11 +870,28 @@ struct DataDigest: Sendable {
         dayFmt.date(from: String(rel.prefix(10)))
     }
 
+    /// 文件头(frontmatter 在最前面,不读整篇)。
+    private static func head(_ url: URL) -> String? {
+        guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? h.close() }
+        guard let data = try? h.read(upToCount: 8192) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// portrait 笔记的更新日:frontmatter `last_modified`,没有就 `created`。
+    static func noteDate(of url: URL) -> Date? {
+        guard let s = head(url) else { return nil }
+        var created: Date? = nil
+        for line in s.split(separator: "\n") {
+            if line.hasPrefix("last_modified:"), let d = dayFmt.date(from: String(line.dropFirst(14)).trimmingCharacters(in: .whitespaces).prefix(10).description) { return d }
+            if line.hasPrefix("created:") { created = dayFmt.date(from: String(line.dropFirst(8)).trimmingCharacters(in: .whitespaces).prefix(10).description) }
+        }
+        return created
+    }
+
     /// frontmatter 里的 `tags: [a, b]`(只读文件头,不解析整篇)。
     static func tags(of url: URL) -> [String] {
-        guard let h = try? FileHandle(forReadingFrom: url) else { return [] }
-        defer { try? h.close() }
-        guard let data = try? h.read(upToCount: 4096), let s = String(data: data, encoding: .utf8) else { return [] }
+        guard let s = head(url) else { return [] }
         for line in s.split(separator: "\n") where line.hasPrefix("tags:") {
             let body = line.dropFirst(5).trimmingCharacters(in: CharacterSet(charactersIn: " []"))
             return body.split(separator: ",").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) }
