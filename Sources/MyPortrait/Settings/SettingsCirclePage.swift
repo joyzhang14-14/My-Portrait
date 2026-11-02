@@ -157,7 +157,8 @@ struct SettingsCirclePage: View {
                 statusRow("Events", config.current.scheduler.event.frequency == .off ? .off : .on,
                           eventsSchedule, .workflow(.eventsProcessor))
                 sectionTitle("DATA").padding(.top, 8)
-                statusRow("Storage", nil, storageText, .data(.storage))
+                statusRow("Storage", nil, usedBytes.map(Self.bytes) ?? "Measuring…", .data(.storage))
+                statusRow("Free", nil, freeBytes.map(Self.bytes) ?? "—", .data(.storage))
                 statusRow("Health", health.unhealthy ? .warn : .on,
                           health.unhealthy ? "\(health.faults.count) issue\(health.faults.count == 1 ? "" : "s")" : "OK",
                           .data(.health))
@@ -170,11 +171,8 @@ struct SettingsCirclePage: View {
         return e.frequency == .off ? "Off" : "Daily \(e.timeOfDay)"
     }
 
-    private var storageText: String {
-        guard let used = usedBytes else { return "Measuring…" }
-        let f = ByteCountFormatter.string(fromByteCount: used, countStyle: .file)
-        guard let free = freeBytes else { return f }
-        return "\(f) · \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free"
+    private static func bytes(_ n: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
     }
 
     private func box<C: View>(@ViewBuilder _ content: () -> C) -> some View {
