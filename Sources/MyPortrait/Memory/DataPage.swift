@@ -24,6 +24,10 @@ struct DataPage: View {
     @State private var query = ""
     @State private var reader = false
     @State private var readerFolder: String? = nil
+    /// 阅读视图要选中的条目(图谱选了小球 / 正文里点了跨区引用),阅读视图选中后清空。
+    @State private var readerFocus: URL? = nil
+    /// 阅读视图里点了跨区引用:切区时不收起阅读视图。
+    @State private var readerJumping = false
     @State private var settingsOpen = false
     @State private var profileEditing = false
     @State private var profileDraft = PersonalInfoConfig()
@@ -56,7 +60,7 @@ struct DataPage: View {
     /// 左上导航的顶边(页面切换条下面)。
     private let topY: CGFloat = 54
     /// 右上搜索那一行的顶边(Reload 按钮下面)。
-    private let rightTopY: CGFloat = 60
+    private let rightTopY: CGFloat = 72
     /// 四角面板字号缩放(让出空间给中间的图谱)。
     private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 }
 
@@ -134,12 +138,18 @@ struct DataPage: View {
         }
         .onChange(of: graphSel) { _, s in
             if s != .none { profileEditing = false }
-            if case .hub(let i) = s, i < scene.nodes.count, case .folder(let slug) = scene.nodes[i].kind {
-                readerFolder = slug
+            if case .hub(let i) = s, i < scene.nodes.count {
+                switch scene.nodes[i].kind {
+                case .folder(let slug):     readerFolder = slug
+                case .category(let name):   readerFolder = name
+                default: break
+                }
             }
+            if case .leaf(let i) = s, i < scene.nodes.count, reader { readerFocus = scene.nodes[i].fileURL }
         }
         .onChange(of: zone) { _, _ in
-            graphSel = .none; query = ""; reader = false; readerFolder = nil; timelineOn = false
+            graphSel = .none; query = ""; readerFolder = nil; timelineOn = false
+            reader = readerJumping; readerJumping = false
         }
     }
 
@@ -422,6 +432,7 @@ struct DataPage: View {
                 roundButton("list.bullet", on: reader, help: "Reader — read and edit as a list") {
                     reader.toggle()
                     if reader { profileEditing = false }
+                    if reader, case .leaf(let i) = graphSel, i < scene.nodes.count { readerFocus = scene.nodes[i].fileURL }
                 }
                 if zone == .events {
                     roundButton("clock.arrow.circlepath", on: timelineOn,
@@ -704,69 +715,18 @@ struct DataPage: View {
     // MARK: - 阅读视图:组 | 条目 | 正文
 
     private var readerCard: some View {
-        HStack(spacing: 0) {
-            groupColumn
-                .frame(width: 210)
-            Rectangle().fill(pal.rowb).frame(width: 1)
-            DataView(scope: $scope,
-                     externalInputJump: $inputJump,
-                     folderFilter: zone == .events ? readerFolder : nil,
-                     searchOverride: query,
-                     topInset: 14)
-            .overlay(alignment: .topTrailing) {
-                Button { reader = false } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: fs(12)))
-                }
-                .buttonStyle(.bouncyIcon).help("Back to graph").padding(10)
-            }
-        }
-    }
-
-    private var groupColumn: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(zone == .events ? "GROUPS" : "CATEGORIES")
-                .font(.system(size: fs(11), weight: .semibold)).kerning(0.77).foregroundStyle(pal.faint)
-                .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
-                    if zone == .events {
-                        groupRow("All events", color: pal.faint, count: digest.leafCount,
-                                 on: readerFolder == nil) { readerFolder = nil }
-                        ForEach(digest.hubs, id: \.key) { h in
-                            groupRow(h.title, color: h.color, count: h.count, on: readerFolder == h.key) {
-                                readerFolder = h.key
-                            }
-                        }
-                    } else {
-                        ForEach(digest.hubs, id: \.key) { h in
-                            let on: Bool = { if case .portrait(let c) = scope { return c == h.key }; return false }()
-                            groupRow(h.title, color: h.color, count: h.count, on: on) {
-                                scope = .portrait(category: h.key)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal, 8)
-            }
-            .scrollIndicators(.never)
-        }
-    }
-
-    private func groupRow(_ title: String, color: Color, count: Int, on: Bool,
-                          action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Circle().fill(color).frame(width: 9, height: 9)
-                Text(title).font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
-                Spacer(minLength: 4)
-                Text("\(count)").font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 10).fill(on ? pal.accentbg : .clear))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? pal.accentb : .clear, lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        DataReaderView(isEvents: zone == .events,
+                       scope: $scope, group: $readerFolder, focus: $readerFocus, inputJump: $inputJump,
+                       query: query, reloadToken: reloadToken,
+                       hubColors: Dictionary(digest.hubs.map { ($0.key, $0.color) }, uniquingKeysWith: { a, _ in a }),
+                       hubTitles: Dictionary(digest.hubs.map { ($0.key, $0.title) }, uniquingKeysWith: { a, _ in a }),
+                       onClose: { reader = false },
+                       onChanged: { reloadToken += 1; reloadCounts() },
+                       onJump: { target, url in
+                           readerFocus = url
+                           readerJumping = true
+                           scope = target
+                       })
     }
 
     // MARK: - 数据

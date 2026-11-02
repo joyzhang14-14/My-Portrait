@@ -410,7 +410,7 @@ struct DataView: View {
     /// 自增主键,递增≈真实时间)细分当天内时序:created 用最早一帧(起始时刻)、
     /// lastOccurred 用最后一帧(最后活动)。无 frame(distill 出的 portrait)退
     /// weight,再退文件名 —— 保证严格弱序 + 刷新不抖。
-    nonisolated private static func sortedByConfig(_ entries: [Entry], order: MemorySortOrder) -> [Entry] {
+    nonisolated static func sortedByConfig(_ entries: [Entry], order: MemorySortOrder) -> [Entry] {
         switch order {
         case .weight:
             return entries.sorted {
@@ -1225,7 +1225,7 @@ struct DataView: View {
 
     /// Walks the appropriate root (events/ or portrait/<cat>/) for the
     /// current scope. Off the main actor.
-    nonisolated private static func scan(scope: DataScope, halfLifeDays: Double, order: MemorySortOrder) -> [Entry] {
+    nonisolated static func scan(scope: DataScope, halfLifeDays: Double, order: MemorySortOrder) -> [Entry] {
         let fm = FileManager.default
         let root: URL
         switch scope {
@@ -1839,7 +1839,7 @@ private struct IconHoverButton: View {
 
 /// 顶部 Create folder 按钮唤起的 sheet。Name + 9 个预设色 + Default(随机 hash)。
 /// 颜色选项跟 FolderPalette.swatches 同源 —— 改色板这里自动跟随。
-private struct NewFolderSheet: View {
+struct NewFolderSheet: View {
     @Binding var name: String
     @Binding var hex: String?
     let onCancel: () -> Void
