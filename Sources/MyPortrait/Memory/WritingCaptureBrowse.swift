@@ -68,6 +68,14 @@ enum WritingCaptureBrowse {
     }
 
     /// 活动图的原料:时间窗内的逐次击键。
+    /// 某段时间里的点击次数;演示数据没有点击,返回 0。
+    static func clicks(startMs: Int64, endMs: Int64) async -> Int {
+        guard !isDemo, let store else { return 0 }
+        return await Task.detached(priority: .userInitiated) {
+            (try? store.clickCount(startMs: startMs, endMs: endMs)) ?? 0
+        }.value
+    }
+
     static func keystrokes(startMs: Int64, endMs: Int64,
                            excludeBundleIds: Set<String>) async -> [KeystrokeEntry] {
         if isDemo {

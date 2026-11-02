@@ -18,6 +18,16 @@ struct WritingCaptureStore: Sendable {
         self.workflowPool = workflowPool
     }
 
+    /// 某段时间里的点击次数(左键 / 右键按下;抬起不算)。
+    func clickCount(startMs: Int64, endMs: Int64) throws -> Int {
+        try inputPool.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM mouse_log
+                WHERE ts_ms >= :s AND ts_ms < :e AND kind IN ('left_down', 'right_down')
+                """, arguments: ["s": startMs, "e": endMs]) ?? 0
+        }
+    }
+
     func keystrokesInRange(
         startMs: Int64, endMs: Int64, excludeBundleIds: Set<String>
     ) throws -> [KeystrokeEntry] {

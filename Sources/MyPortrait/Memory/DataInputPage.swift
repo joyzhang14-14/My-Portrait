@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Data 页的 Input(圆形版):中间是当天 0–24 点的圆,外圈是打字的 app 段,
 /// 圆里是每分钟击键的面积图(按 app 分色堆叠),圆心是当天总击键。
-///   左下  切好段的输入   右上  搜索 + 一段的全文   右下  各 app 击键 + 当天统计
+///   左下  各 app 击键 + 当天统计   右上  搜索 + 一段的全文   右下  切好段的输入
 /// 左上的导航由 DataPage 画。
 struct DataInputPage: View {
     let size: CGSize
@@ -20,6 +20,7 @@ struct DataInputPage: View {
     @State private var selectedId: Int64? = nil
     @State private var query = ""
     @State private var loading = false
+    @State private var clicks = 0
 
     private var W: CGFloat { size.width }
     private var H: CGFloat { size.height }
@@ -44,13 +45,13 @@ struct DataInputPage: View {
             // 换天的药丸和 Timeline 一样放在圆里靠上
             datePill.position(x: c.x, y: c.y - R + 62)
 
-            segmentList
+            dayStats
                 .frame(width: sideW, height: max(160, H - 22 - listTop))
                 .offset(x: leftX, y: listTop)
             rightTop
                 .frame(width: sideW, height: H * 0.5 - rightTopY)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
-            dayStats
+            segmentList
                 .frame(width: sideW, height: H * 0.5 - 34)
                 .offset(x: W - rightPad - sideW, y: H * 0.5 + 12)
         }
@@ -285,10 +286,11 @@ struct DataInputPage: View {
                 }
             }
             .scrollIndicators(.never)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 tile(totalKeys.formatted(), "keystrokes")
+                tile(clicks.formatted(), "clicks")
                 tile("\(typing / 60)h \(typing % 60)m", "typing time")
-                tile("\(peak)", "peak / min")
+                tile("\(peak)", "peak keys / min")
             }
             .padding(.top, 8)
         }
@@ -311,6 +313,7 @@ struct DataInputPage: View {
         loading = true
         let startMs = Int64(day.timeIntervalSince1970 * 1000)
         let ks = await WritingCaptureBrowse.keystrokes(startMs: startMs, endMs: startMs + 86_400_000, excludeBundleIds: [])
+        clicks = await WritingCaptureBrowse.clicks(startMs: startMs, endMs: startMs + 86_400_000)
         let (agg, segs) = await Task.detached(priority: .userInitiated) {
             (MinuteBuckets.aggregate(ks, dayStartMs: startMs), InputSegments.build(ks))
         }.value
