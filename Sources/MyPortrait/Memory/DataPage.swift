@@ -112,7 +112,8 @@ struct DataPage: View {
                     weekPanel
                         .frame(width: sideW, height: weekH)
                         .offset(x: W - rightPad - sideW, y: H - 22 - weekH)
-                        .opacity(reader ? 0 : 1)
+                        .opacity(reader || profileEditing ? 0 : 1)
+                        .animation(.easeInOut(duration: 0.25), value: profileEditing)
 
                     // 右上:搜索 + 卡片(阅读视图时往左铺开)
                     let rx = reader ? centerL + 6 : W - rightPad - sideW
@@ -121,6 +122,7 @@ struct DataPage: View {
                         .offset(x: rx, y: rightTopY)
                         .animation(.spring(duration: 0.42, bounce: 0.1), value: reader)
                         .animation(.spring(duration: 0.32, bounce: 0.1), value: profileEditing)
+                        .animation(.spring(duration: 0.32, bounce: 0.1), value: editorH)
                 }
             }
             .frame(width: W, height: H, alignment: .topLeading)
@@ -163,12 +165,12 @@ struct DataPage: View {
     /// 右上卡片的底边。
     private func cardBottom(_ H: CGFloat) -> CGFloat { H * 0.5 }
     /// 右上(搜索行 + 卡片)的高度:阅读视图拉满;编辑 Profile 时长到装下内容为止,
-    /// 最多到「本周」上沿。
+    /// 「本周」淡出让位,最多到窗口底边(再长就在卡片里滚)。
     private func rightTopH(_ H: CGFloat) -> CGFloat {
         if reader { return H - rightTopY - 22 }
         let normal = cardBottom(H) - rightTopY
         guard profileEditing, editorH > 0 else { return normal }
-        let maxH = H - 22 - weekH - 12 - rightTopY
+        let maxH = H - 22 - rightTopY
         return min(maxH, max(normal, editorH + 44))
     }
     /// 右下「本周」的高度(贴窗口底边)。

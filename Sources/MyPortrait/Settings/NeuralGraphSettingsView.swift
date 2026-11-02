@@ -126,23 +126,15 @@ struct MainBallPhotoSlot: View {
             preview64
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 0) {
-                    Text("Main ball photo")
+                    Text("Profile photo")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.textPrimary.opacity(0.92))
                     SettingsInfoBadge(text: "Upload a photo — it's cropped to a circle and shown on the center ball of the graph.")
                 }
-                HStack(spacing: 6) {
-                    Button(action: pick) {
-                        Label(preview == nil ? "Upload" : "Replace", systemImage: "arrow.up.doc")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    if preview != nil {
-                        Button(role: .destructive) {
-                            MainBallPhoto.clear(); load()
-                        } label: {
-                            Label("Remove", systemImage: "trash").font(.system(size: 11))
-                        }
-                    }
+                // 窄的地方(Data 页的 Profile 卡)放不下两个带字按钮 → 只留图标
+                ViewThatFits(in: .horizontal) {
+                    buttons(iconOnly: false)
+                    buttons(iconOnly: true)
                 }
                 .padding(.top, 2)
             }
@@ -161,6 +153,29 @@ struct MainBallPhotoSlot: View {
                 onCancel: { cropTarget = nil }
             )
         }
+    }
+
+    private func buttons(iconOnly: Bool) -> some View {
+        HStack(spacing: 6) {
+            Button(action: pick) {
+                label(preview == nil ? "Upload" : "Replace", "arrow.up.doc", iconOnly)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .help(preview == nil ? "Upload" : "Replace")
+            if preview != nil {
+                Button(role: .destructive) {
+                    MainBallPhoto.clear(); load()
+                } label: {
+                    label("Remove", "trash", iconOnly).font(.system(size: 11))
+                }
+                .help("Remove")
+            }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder private func label(_ title: String, _ icon: String, _ iconOnly: Bool) -> some View {
+        if iconOnly { Image(systemName: icon) } else { Label(title, systemImage: icon) }
     }
 
     @ViewBuilder private var preview64: some View {
