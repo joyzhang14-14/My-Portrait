@@ -156,21 +156,8 @@ struct TimelineView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { updateShotPx() }
         }
         // Listen for app-wide arrow-key notifications (posted by AppKeyboard).
-        // 长按方向键的系统重复键走同一个限速闸;单按不限。
-        .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { note in
-            guard !state.frames.isEmpty, !Self.isRepeat(note) || ui.canStep() else { return }
-            let isAlt = (note.object as? Bool) ?? false
-            state.focusIndex = isAlt
-                ? Self.previousAppBoundary(in: state.frames, from: state.focusIndex)
-                : max(0, state.focusIndex - 1)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { note in
-            guard !state.frames.isEmpty, !Self.isRepeat(note) || ui.canStep() else { return }
-            let isAlt = (note.object as? Bool) ?? false
-            state.focusIndex = isAlt
-                ? Self.nextAppBoundary(in: state.frames, from: state.focusIndex)
-                : min(state.frames.count - 1, state.focusIndex + 1)
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .leftArrowPressed)) { arrow(-1, $0) }
+        .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { arrow(1, $0) }
         // focusIndex 一变:选帧竖线做一段转动过渡。
         .onChange(of: state.focusIndex) { old, new in
             animateTicks(new - old)
@@ -210,6 +197,24 @@ struct TimelineView: View {
     private func toggleFocus() {
         hover = nil; hotApp = nil
         withAnimation(Self.focusAnim) { ui.focused.toggle() }
+    }
+
+    /// 方向键:按下走一帧;按住 0.3s 后按固定节奏连续播放,松手(keyUp)即停。
+    /// 系统重复键不用 —— 速率随系统设置、间隔不均,播起来一顿一顿。
+    private func arrow(_ dir: Int, _ note: Notification) {
+        guard !state.frames.isEmpty, !Self.isRepeat(note) else { return }
+        let alt = (note.object as? Bool) ?? false
+        let state = self.state
+        let step: @MainActor () -> Bool = {
+            let old = state.focusIndex
+            let new = dir < 0
+                ? (alt ? Self.previousAppBoundary(in: state.frames, from: old) : max(0, old - 1))
+                : (alt ? Self.nextAppBoundary(in: state.frames, from: old) : min(state.frames.count - 1, old + 1))
+            state.focusIndex = new
+            return new != old
+        }
+        _ = step()
+        ui.play(key: dir < 0 ? 123 : 124, step: step)
     }
 
     private static func isRepeat(_ note: Notification) -> Bool {
@@ -346,7 +351,11 @@ struct TimelineView: View {
     private func installMonitor() {
         guard ui.monitor == nil else { return }
         let ui = self.ui, state = self.state
-        ui.monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown]) { e in
+        ui.monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown, .keyUp]) { e in
+            if e.type == .keyUp {
+                ui.stopPlay(key: e.keyCode)
+                return e
+            }
             if e.type == .keyDown {
                 if e.keyCode == 53, ui.focused {
                     withAnimation(Self.focusAnim) { ui.focused = false }
@@ -378,6 +387,7 @@ struct TimelineView: View {
     }
 
     private func removeMonitor() {
+        ui.stopPlay(key: nil)
         if let m = ui.monitor { NSEvent.removeMonitor(m) }
         ui.monitor = nil
     }
@@ -831,12 +841,47 @@ final class TimelineUI {
     /// 拨帧限速。每换一帧 = 一张 3600px 主图解码 + 停稳后两条 SQL + 10 张预取;
     /// 触控板甩一下每个事件能有上百 pt,原来一秒能走一两百帧。现在:
     /// - 22pt 一步:鼠标滚轮一格(按行滚,×22 换算)正好一帧;
-    /// - 两步至少隔 40ms,即每秒 ≤ 25 帧,和系统长按方向键的重复速度相当;
+    /// - 两步至少隔 40ms,即每秒 ≤ 25 帧;
     /// - 连拨时先显示长边 480px 的预览(按 chunk 整批预解),主图按显示尺寸解,
     ///   没缓存时晚 30ms、有预览时晚 50ms 才解,连拨中一闪而过的帧不解清晰图;
     /// - 预取和四周列表等焦点停稳 180ms 才跑。
     static let wheelStep: CGFloat = 22
     static let minStepInterval: TimeInterval = 0.04
+
+    /// 长按方向键播放:按下 0.3s 后每 45ms 走一帧(≈22 帧/秒,刚好赶在主图
+    /// 50ms 解码延迟之前,播放中只显示预览)。到头、松手、app 失焦都停。
+    static let playDelay: TimeInterval = 0.3
+    static let playInterval: TimeInterval = 0.045
+    @ObservationIgnored private var playTimer: Timer?
+    @ObservationIgnored private var playKey: UInt16?
+
+    func play(key: UInt16, step: @escaping @MainActor () -> Bool) {
+        stopPlay(key: nil)
+        playKey = key
+        let start = Timer(timeInterval: Self.playDelay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.playKey == key else { return }
+                let t = Timer(timeInterval: Self.playInterval, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if !NSApp.isActive || !step() { self.stopPlay(key: nil) }
+                    }
+                }
+                RunLoop.main.add(t, forMode: .common)
+                self.playTimer = t
+            }
+        }
+        RunLoop.main.add(start, forMode: .common)
+        playTimer = start
+    }
+
+    /// key 为 nil = 无条件停;否则只在松开的正是在播的那个键时停。
+    func stopPlay(key: UInt16?) {
+        guard key == nil || key == playKey else { return }
+        playTimer?.invalidate()
+        playTimer = nil
+        playKey = nil
+    }
 
     func canStep() -> Bool {
         let now = ProcessInfo.processInfo.systemUptime
