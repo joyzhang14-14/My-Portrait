@@ -1987,7 +1987,7 @@ private struct AudioRowView: View {
 
 /// 角上的滚动列表:没有滚动条;上/下还有内容时露出 ▲/▼(点一下翻约 70%),
 /// 并只在那个方向加渐隐。
-private struct SideScroll<Content: View>: View {
+struct SideScroll<Content: View>: View {
     let height: CGFloat
     let enabled: Bool
     let pal: RingPalette
@@ -2062,7 +2062,7 @@ private struct SideScroll<Content: View>: View {
     }
 }
 
-private struct ArrowButton: View {
+struct ArrowButton: View {
     let pal: RingPalette
     let up: Bool
     let action: () -> Void

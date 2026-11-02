@@ -30,14 +30,14 @@ struct DataInputPage: View {
     @State private var textH: CGFloat = 0
 
     // 动态高度:底部两块(STATS / TODAY)按 app 行数往上长,最多长到给右上卡片留 140;
-    // 右上卡片按内容长,内容多时盖在 TODAY 上面往下长,最多到窗口底边
+    // 右上卡片按内容长,内容多时盖在 TODAY 上面往下长,最多盖住 TODAY 的一半
     private var appCount: Int { Set(segments.map(\.app)).count }
     private var bottomH: CGFloat {
         let maxH = H - 22 - (rightTopY + 44 + 140 + 16)
         return max(200, min(maxH, 34 + CGFloat(appCount) * 28))
     }
     private var cardH: CGFloat {
-        let avail = H - 22 - (rightTopY + 44)
+        let avail = H - 22 - bottomH * 0.5 - (rightTopY + 44)
         let need: CGFloat
         if !query.trimmingCharacters(in: .whitespaces).isEmpty {
             need = 32 + 34 + CGFloat(shown.count) * 30
@@ -291,7 +291,7 @@ struct DataInputPage: View {
                     // 搜索:列出含这段文字的输入,点一条看全文
                     Text("\(shown.count) result\(shown.count == 1 ? "" : "s")")
                         .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
-                    ScrollView {
+                    GeometryReader { g in SideScroll(height: g.size.height, enabled: true, pal: pal) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(shown) { s in
                                 Button { selectedId = s.id; query = "" } label: {
@@ -307,8 +307,7 @@ struct DataInputPage: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                    }
-                    .scrollIndicators(.never)
+                    } }
                 } else if let s = current {
                     // 选中那块的时间区间里**所有 app** 的输入,一段一张小卡,按时间排
                     let inRange = pool.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
@@ -319,7 +318,8 @@ struct DataInputPage: View {
                         .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
                     Text("\(inRange.count) segment\(inRange.count == 1 ? "" : "s") · \(inRange.reduce(0) { $0 + $1.keys }) keys")
                         .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
-                    ScrollView {
+                    GeometryReader { g in SideScroll(height: g.size.height, enabled: true, pal: pal,
+                                                     contentHeight: $textH) {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(inRange) { seg in
                                 HStack(alignment: .top, spacing: 10) {
@@ -342,12 +342,7 @@ struct DataInputPage: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(GeometryReader { g in
-                            Color.clear.preference(key: InputTextHeightKey.self, value: g.size.height)
-                        })
-                    }
-                    .scrollIndicators(.never)
-                    .onPreferenceChange(InputTextHeightKey.self) { textH = $0 }
+                    } }
                 } else {
                     Text("Nothing typed on this day.").font(.system(size: fs(14))).foregroundStyle(pal.faint)
                 }
@@ -403,7 +398,7 @@ struct DataInputPage: View {
         let mx = max(1, rows.first?.value ?? 1)
         return VStack(alignment: .leading, spacing: 0) {
             title(Calendar.current.isDateInToday(day) ? "TODAY" : Self.dayFmt.string(from: day).uppercased())
-            ScrollView {
+            GeometryReader { g in SideScroll(height: g.size.height, enabled: true, pal: pal) {
                 VStack(spacing: 4) {
                     ForEach(rows, id: \.key) { app, n in
                         let on = app == selectedApp
@@ -436,8 +431,7 @@ struct DataInputPage: View {
                         }
                     }
                 }
-            }
-            .scrollIndicators(.never)
+            } }
         }
     }
 
@@ -466,9 +460,4 @@ struct DataInputPage: View {
     nonisolated(unsafe) private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM d, yyyy"; return f
     }()
-}
-
-private struct InputTextHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
