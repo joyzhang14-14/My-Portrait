@@ -61,8 +61,30 @@ struct DataInputPage: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? segments : segments.filter { $0.text.localizedCaseInsensitiveContains(q) }
     }
+    /// 选中的是外圈的一整块:同一个 app 连续打字(间隔 < 3 分钟)的所有段合在一起,
+    /// 文字按时间接起来、击键加总 —— 和外圈画出来的块一一对应。
     private var current: InputSegment? {
-        segments.first { $0.id == selectedId } ?? segments.last
+        let groups = segmentGroups
+        let g = groups.first { $0.contains { $0.id == selectedId } } ?? groups.last
+        guard let g, let first = g.first, let last = g.last else { return nil }
+        if g.count == 1 { return first }
+        return InputSegment(id: first.id, app: first.app, startMs: first.startMs, endMs: last.endMs,
+                            text: g.map(\.text).joined(separator: "\n"),
+                            keys: g.reduce(0) { $0 + $1.keys })
+    }
+
+    /// 段按块分组(同 blocks 的合并规则)。
+    private var segmentGroups: [[InputSegment]] {
+        var out: [[InputSegment]] = []
+        for s in segments {
+            if let last = out.last?.last, last.app == s.app,
+               Double(s.startMs - last.endMs) / 60_000 - 0.5 < 3 {
+                out[out.count - 1].append(s)
+            } else {
+                out.append([s])
+            }
+        }
+        return out
     }
 
     var body: some View {
