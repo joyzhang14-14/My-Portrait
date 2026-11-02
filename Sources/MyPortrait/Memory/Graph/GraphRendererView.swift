@@ -234,6 +234,15 @@ struct GraphRendererView: View {
     /// (hoveredId 的更新已负责触发)。
     private final class HoverBox { var screen: CGPoint? = nil }
     @State private var hoverBox = HoverBox()
+    /// 连线显隐渐变(同网站版:1.2s 内透明度走到目标,再过一道 smoothstep,
+    /// 细线不会"啪"地出现)。引用盒:每帧推进,不惊动 SwiftUI。
+    private final class LinkFade {
+        var alpha: Double
+        var last: Date? = nil
+        init(alpha: Double) { self.alpha = alpha }
+    }
+    @State private var linkFade: LinkFade
+    static let linkFadeSec: Double = 1.2
     @State private var lastMagnification: CGFloat = 1
 
     /// hub 节点预筛(init 一次):symbols 闭包每帧执行,在里面对全量
@@ -274,6 +283,7 @@ struct GraphRendererView: View {
         self.pulseStart = pulseStart
         self.pulseFlashSec = pulseFlashSec
         self.hideLinks = hideLinks
+        self._linkFade = State(initialValue: LinkFade(alpha: hideLinks ? 0 : 1))
         self.interactive = interactive
         self.highlight = highlight
         self._camera = camera
@@ -454,8 +464,20 @@ struct GraphRendererView: View {
             // 搜索中:整张图压暗,再把命中的球按原色补画一遍
             var dctx = ctx
             if highlight != nil { dctx.opacity = 0.12 }
-            drawEdges(dctx, snap: snap, size: size)
-            drawPulses(dctx, snap: snap, size: size, date: date)
+            // 连线 / 脉冲白杠按渐变透明度画
+            let lf = linkFade
+            let target: Double = hideLinks ? 0 : 1
+            let dt = min(max(date.timeIntervalSince(lf.last ?? date), 0), 0.1)
+            lf.last = date
+            if lf.alpha < target { lf.alpha = min(target, lf.alpha + dt / Self.linkFadeSec) }
+            else if lf.alpha > target { lf.alpha = max(target, lf.alpha - dt / Self.linkFadeSec) }
+            let shown = lf.alpha * lf.alpha * (3 - 2 * lf.alpha)
+            if shown > 0.001 {
+                var ectx = dctx
+                ectx.opacity = dctx.opacity * shown
+                drawEdges(ectx, snap: snap, size: size)
+                drawPulses(ectx, snap: snap, size: size, date: date)
+            }
             drawBalls(dctx, snap: snap, size: size, date: date)
             drawLabels(dctx, snap: snap, size: size)
             if let hl = highlight {
@@ -482,7 +504,6 @@ struct GraphRendererView: View {
     // MARK: - 边
 
     private func drawEdges(_ ctx: GraphicsContext, snap: [SIMD2<Float>], size: CGSize) {
-        guard !hideLinks else { return }   // 极简观感:不画连接线(07-11 update)
         switch GraphConstants.edgeStyle {
         case .line:
             // 纯线模式(2026-07-01 update)。全部边合进**一条 Path 一次 stroke**:
@@ -563,9 +584,8 @@ struct GraphRendererView: View {
     /// 即使边画成细线,信号也带出神经形状)。全部杠合一条 Path 一次 stroke。
     private func drawPulses(_ ctx: GraphicsContext, snap: [SIMD2<Float>],
                             size: CGSize, date: Date) {
-        // 极简观感:不画白杠(07-11 update)。⚠️ 只跳过**这段传播动画** ——
+        // 隐藏连线时(调用方按渐变透明度跳过)只跳过这段传播动画 ——
         // pulses 数组照常填充,drawBalls 里的抵达点亮仍逐球按原时序触发。
-        guard !hideLinks else { return }
         guard !pulses.isEmpty else { return }
         let zoom = camera.zoom
         let elapsed = date.timeIntervalSince(pulseStart)

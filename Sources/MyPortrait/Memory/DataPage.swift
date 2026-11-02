@@ -31,6 +31,9 @@ struct DataPage: View {
     @State private var scene: GraphScene = .empty
     @State private var digest = DataDigest.empty
     @State private var counts = DataCounts()
+    /// 时间线停在的那天(nil = 今天):最近 / 本周都按它算。
+    @State private var refDay: Date? = nil
+    @State private var photo: NSImage? = nil
 
     private var pal: RingPalette { RingPalette(dark: scheme == .dark) }
 
@@ -43,11 +46,15 @@ struct DataPage: View {
         }
     }
 
-    // 版式:两侧列宽固定、字号整体缩一档,中间的圆随窗口伸缩、尽量大
+    // 版式:两侧列宽固定、字号整体缩一档;图谱铺满整窗、只在中间的圆里显示,
+    // 四个角贴着窗口的四个角放,左右中段留空给圆
     private let sideW: CGFloat = 288
     private let leftX: CGFloat = 22
     private let rightPad: CGFloat = 22
-    private let topY: CGFloat = 62
+    /// 左上导航的顶边(页面切换条下面)。
+    private let topY: CGFloat = 54
+    /// 右上搜索那一行的顶边(Reload 按钮下面)。
+    private let rightTopY: CGFloat = 60
     /// 四角面板字号缩放(让出空间给中间的图谱)。
     private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 }
 
@@ -55,11 +62,10 @@ struct DataPage: View {
         GeometryReader { geo in
             let W = geo.size.width, H = geo.size.height
             let centerL = leftX + sideW + 8
-            let centerR = W - rightPad - sideW - 8
             ZStack(alignment: .topLeading) {
                 backdrop(W: W, H: H)
 
-                // 中间:图谱 / 打字活动
+                // 中间:图谱(整窗,圆形遮罩)/ 打字活动
                 if zone != .input {
                     GraphRootView(scope: $scope,
                                   timelineOn: $timelineOn,
@@ -67,18 +73,16 @@ struct DataPage: View {
                                   focusRequest: $focus,
                                   searchQuery: query,
                                   reloadToken: reloadToken,
-                                  onSceneChange: { s in scene = s; recomputeDigest() })
-                        .frame(width: max(200, centerR - centerL), height: H)
-                        .clipped()
-                        .offset(x: centerL)
+                                  onSceneChange: { s in scene = s; recomputeDigest() },
+                                  onDayChange: { d in refDay = d; recomputeDigest() })
+                        .frame(width: W, height: H)
                         .opacity(reader ? 0.07 : 1)
                         .allowsHitTesting(!reader)
                         .animation(.easeOut(duration: 0.3), value: reader)
                 }
 
-                pageSwitcher.offset(x: 88, y: 10)
                 if zone != .input {
-                    reloadButton.offset(x: W - rightPad - 40, y: 16)
+                    reloadButton.offset(x: W - rightPad - 40, y: 12)
                 }
 
                 // 左上:切换 + Settings
@@ -96,24 +100,27 @@ struct DataPage: View {
                         .frame(width: sideW, height: max(160, H - 24 - recentTop(H)))
                         .offset(x: leftX, y: recentTop(H))
 
-                    // 右下:本周
+                    // 右下:本周(贴底)
                     weekPanel
-                        .frame(width: sideW, height: max(120, H - 24 - (cardBottom(H) + 12)))
-                        .offset(x: W - rightPad - sideW, y: cardBottom(H) + 12)
-                        .opacity(reader || profileEditing ? 0 : 1)
+                        .frame(width: sideW, height: weekH)
+                        .offset(x: W - rightPad - sideW, y: H - 22 - weekH)
+                        .opacity(reader ? 0 : 1)
 
                     // 右上:搜索 + 卡片(阅读视图时往左铺开)
                     let rx = reader ? centerL + 6 : W - rightPad - sideW
                     rightTop(H: H)
                         .frame(width: W - rightPad - rx,
-                               height: reader || profileEditing ? H - topY - 24 : cardBottom(H) - topY)
-                        .offset(x: rx, y: topY)
+                               height: reader ? H - rightTopY - 22 : cardBottom(H) - rightTopY)
+                        .offset(x: rx, y: rightTopY)
                         .animation(.spring(duration: 0.42, bounce: 0.1), value: reader)
-                        .animation(.spring(duration: 0.32, bounce: 0.1), value: profileEditing)
                 }
             }
             .frame(width: W, height: H, alignment: .topLeading)
         }
+        // 和 Timeline 一样铺满整窗(含标题栏那一条),坐标从窗口左上角算
+        .ignoresSafeArea()
+        .task { loadPhoto() }
+        .onReceive(NotificationCenter.default.publisher(for: .mainBallPhotoChanged)) { _ in loadPhoto() }
         .onAppear {
             // 侧栏时代存下的 scope 可能是 Personal Info / 设置页 → 回到 Events
             switch scope {
@@ -135,12 +142,14 @@ struct DataPage: View {
 
     // MARK: - 版式辅助
 
-    /// 左下「最近」的顶边:左上导航不展开设置时是 0.48H,展开时被往下推。
+    /// 左下「最近」的顶边:贴下半边;左上展开设置时再往下让。
     private func recentTop(_ H: CGFloat) -> CGFloat {
-        settingsOpen ? max(H * 0.48, topY + 470) : H * 0.48
+        settingsOpen ? max(H * 0.56, topY + 430) : H * 0.56
     }
-    /// 右上卡片的底边(下面接本周统计)。
-    private func cardBottom(_ H: CGFloat) -> CGFloat { H * 0.51 }
+    /// 右上卡片的底边。
+    private func cardBottom(_ H: CGFloat) -> CGFloat { H * 0.5 }
+    /// 右下「本周」的高度(贴窗口底边)。
+    private let weekH: CGFloat = 250
 
     private func backdrop(W: CGFloat, H: CGFloat) -> some View {
         ZStack {
@@ -151,29 +160,6 @@ struct DataPage: View {
                 .allowsHitTesting(false)
         }
         .frame(width: W, height: H)
-    }
-
-    private var pageSwitcher: some View {
-        HStack(spacing: 0) {
-            ForEach(SidebarSection.allCases) { s in
-                let on = (selection ?? .timeline) == s
-                Button { selection = s } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: s.symbol).font(.system(size: 13, weight: .medium))
-                        Text(s.label).font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundStyle(on ? pal.fg : pal.muted)
-                    .padding(.horizontal, 14).frame(height: 26)
-                    .background(Capsule().fill(on ? pal.seg : .clear)
-                        .shadow(color: .black.opacity(on ? 0.15 : 0), radius: 1.5, y: 1))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(pal.pill))
-        .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
     }
 
     private var reloadButton: some View {
@@ -308,7 +294,8 @@ struct DataPage: View {
 
     private var recentPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle(zone == .events ? "RECENT" : "RECENTLY UPDATED")
+            sectionTitle(zone == .events ? "RECENT" : "RECENTLY UPDATED",
+                         trailing: refDay.map { "until \(DataDigest.md($0))" })
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(digest.recent) { it in
@@ -352,7 +339,7 @@ struct DataPage: View {
 
     private var weekPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle("THIS WEEK")
+            sectionTitle(refDay.map { "WEEK OF \(DataDigest.md($0).uppercased())" } ?? "THIS WEEK")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("+\(digest.week)").font(.system(size: fs(30), weight: .bold))
                     .foregroundStyle(pal.fg)
@@ -390,9 +377,10 @@ struct DataPage: View {
             }
             .frame(height: 46, alignment: .bottom)
             HStack {
-                Text(DataDigest.md(Date().addingTimeInterval(-13 * 86400)))
+                let ref = refDay ?? Date()
+                Text(DataDigest.md(ref.addingTimeInterval(-13 * 86400)))
                 Spacer()
-                Text(DataDigest.md(Date()))
+                Text(DataDigest.md(ref))
             }
             .font(.system(size: fs(11), design: .monospaced)).foregroundStyle(pal.faint)
         }
@@ -474,7 +462,8 @@ struct DataPage: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(hits.prefix(200)) { n in
-                        listRow(id: n.id, title: n.title, color: hubColor(n), trailing: dateText(n))
+                        listRow(id: n.id, title: n.title, color: hubColor(n), trailing: dateText(n),
+                                clearsSearch: true)
                     }
                 }
             }
@@ -517,8 +506,13 @@ struct DataPage: View {
         .padding(16)
     }
 
-    private func listRow(id: Int, title: String, color: Color, trailing: String) -> some View {
-        Button { focus = GraphFocusRequest(target: .node(id)) } label: {
+    private func listRow(id: Int, title: String, color: Color, trailing: String,
+                         clearsSearch: Bool = false) -> some View {
+        Button {
+            // 点搜索结果:收起搜索,卡片直接显示这一条
+            if clearsSearch { query = "" }
+            focus = GraphFocusRequest(target: .node(id))
+        } label: {
             HStack(spacing: 9) {
                 Circle().fill(color).frame(width: 8, height: 8)
                 Text(title).font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
@@ -590,7 +584,26 @@ struct DataPage: View {
         .padding(16)
     }
 
+    @ViewBuilder
     private func avatar(_ name: String) -> some View {
+        if let photo {
+            Image(nsImage: photo).resizable().scaledToFill()
+                .frame(width: 54, height: 54).clipShape(Circle())
+        } else {
+            initialsAvatar(name)
+        }
+    }
+
+    /// 主球照片(和图谱中间那颗球同一张)。
+    private func loadPhoto() {
+        guard MainBallPhoto.exists else { photo = nil; return }
+        let p = MainBallPhoto.url.path
+        Task {
+            photo = await Task.detached(priority: .userInitiated) { NSImage(contentsOfFile: p) }.value
+        }
+    }
+
+    private func initialsAvatar(_ name: String) -> some View {
         Text(String(name.first ?? "Y"))
             .font(.system(size: fs(22), weight: .semibold)).foregroundStyle(.white)
             .frame(width: 54, height: 54)
@@ -603,7 +616,7 @@ struct DataPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
                 cardHeader("EDIT PROFILE")
-                MainBallPhotoSlot().padding(.vertical, 6)
+                MainBallPhotoSlot().padding(.vertical, 2)
                 editField("First name", \.firstName, "First name")
                 editField("Middle name", \.middleName, "Optional")
                 editField("Last name", \.lastName, "Last name")
@@ -665,6 +678,7 @@ struct DataPage: View {
             TextField(placeholder, text: Binding(get: { profileDraft[keyPath: kp] },
                                                  set: { profileDraft[keyPath: kp] = $0 }))
                 .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
         }
     }
 
@@ -748,7 +762,7 @@ struct DataPage: View {
     // MARK: - 数据
 
     private func recomputeDigest() {
-        let input = DataDigest.Input(scene: scene)
+        let input = DataDigest.Input(scene: scene, refDay: refDay)
         Task {
             let d = await Task.detached(priority: .userInitiated) { DataDigest.build(input) }.value
             digest = d
@@ -793,14 +807,15 @@ struct DataDigest: Sendable {
 
     struct Input: Sendable {
         let nodes: [GraphNode]
-        init(scene: GraphScene) { nodes = scene.nodes }
+        let refDay: Date?
+        init(scene: GraphScene, refDay: Date?) { nodes = scene.nodes; self.refDay = refDay }
     }
 
     static func build(_ input: Input) -> DataDigest {
         let nodes = input.nodes
         var d = DataDigest()
         let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
+        let today = cal.startOfDay(for: input.refDay ?? Date())
         var items: [(Item, URL?)] = []
         var hubCount: [Int: Int] = [:]
         for n in nodes where !n.kind.isHub {

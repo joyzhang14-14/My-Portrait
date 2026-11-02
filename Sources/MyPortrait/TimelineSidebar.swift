@@ -105,21 +105,10 @@ struct TimelineSidebar: View {
                 .font(.custom("SignPainter-HouseScriptSemibold", size: 34))
                 .foregroundStyle(Theme.textPrimary)
 
-            HStack(spacing: Theme.Space.xs) {
-                ForEach([SidebarSection.timeline, .data, .settings], id: \.self) { item in
-                    NavIconButton(section: item, isSelected: selection == item) {
-                        // ⚠️ 这里曾经每次点开 Memory 都强制回 Neural Graph +
-                        // Events。**别加回来** —— Memories 现在记住你上次停在
-                        // 哪(MemoryLanding,冷启动从 config 恢复,同一次运行
-                        // 里 @State 本来就带着),再覆盖就等于那套白做。
-                        selection = item
-                    }
-                }
-                Spacer()
-            }
         }
         .padding(.horizontal, Theme.Space.lg)
-        .padding(.top, Theme.Space.md)
+        // 页面切换条浮在窗口左上角(ContentView),标题让到它下面
+        .padding(.top, Theme.Space.md + 26)
         .padding(.bottom, Theme.Space.md)
     }
 
@@ -486,58 +475,6 @@ private struct SidebarIconButton: View {
         .buttonStyle(.bouncyIcon)
         .onHover { hover = $0 }
         .help(help)
-    }
-}
-
-private struct NavIconButton: View {
-    let section: SidebarSection
-    let isSelected: Bool
-    let action: () -> Void
-
-    @State private var hover = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: section.symbol)
-                .font(.system(size: 13, weight: .medium))
-                .symbolRenderingMode(.hierarchical)
-                .frame(width: 30, height: 30)
-                .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                        .fill(isSelected ? Theme.accent.opacity(0.16)
-                              : hover ? Theme.hover : .clear)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
-                                .strokeBorder(isSelected ? Theme.accent.opacity(0.40) : .clear,
-                                              lineWidth: 1))
-                )
-        }
-        .buttonStyle(.bouncyIcon)
-        .onHover { hover = $0 }
-        // 系统 .help() tooltip 要停留 ~2 秒才弹,太慢。hover 时直接在 icon
-        // 下方浮一个小气泡 label,即时反馈分区名。
-        .overlay(alignment: .bottom) {
-            if hover {
-                Text(section.label)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                            .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.6))
-                    )
-                    .fixedSize()
-                    .offset(y: 26)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-                    .zIndex(999)
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }
 

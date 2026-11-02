@@ -143,7 +143,6 @@ struct TimelineView: View {
                 }
                 datePill(g, sl)
                 tooltip(g)
-                pageSwitcher
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .onAppear { ui.size = proxy.size; updateShotPx() }
@@ -394,30 +393,6 @@ struct TimelineView: View {
                 .allowsHitTesting(false)
         }
         .frame(width: g.size.width, height: g.size.height)
-    }
-
-    private var pageSwitcher: some View {
-        HStack(spacing: 0) {
-            ForEach(SidebarSection.allCases) { s in
-                let on = (selection ?? .timeline) == s
-                Button { selection = s } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: s.symbol).font(.system(size: 13, weight: .medium))
-                        Text(s.label).font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundStyle(on ? pal.fg : pal.muted)
-                    .padding(.horizontal, 14).frame(height: 26)
-                    .background(Capsule().fill(on ? pal.seg : .clear)
-                        .shadow(color: .black.opacity(on ? 0.15 : 0), radius: 1.5, y: 1))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(pal.pill))
-        .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
-        .offset(x: 88, y: 10)
     }
 
     // MARK: Ring

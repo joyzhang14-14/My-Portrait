@@ -77,9 +77,18 @@ struct GraphRootView: View {
     var reloadToken: Int = 0
     /// 场景换了(重载 / 时间线换日)→ 页面重算最近、统计、节点数。
     var onSceneChange: (GraphScene) -> Void = { _ in }
+    /// 时间线停在哪天(nil = 不在时间线)→ 页面的「最近 / 本周」跟着那天算。
+    var onDayChange: (Date?) -> Void = { _ in }
 
-    /// 总览取景时隐形环直径占视口短边的比例(圆形页里图谱要撑满中间的圆)。
-    private static let ringFill: Double = 0.86
+    /// 总览取景:**全部球**(含最外圈陨石)的包围圆直径占视口短边的比例。
+    /// 圆形遮罩边缘有一圈渐隐,留出余量保证开局所有球都在圆里。
+    private static let ringFill: Double = 0.88
+    /// 预加载环只有环基准半径,陨石还在它外面几排 → 开局按它放大一点估。
+    private static let beltOverhang: Float = 1.14
+    /// 圆形视窗边缘的渐隐宽度。
+    private static let maskFade: CGFloat = 36
+    /// 连线显隐渐变期间保持逐帧重绘。
+    @State private var linkAnimating = false
     @State private var searchHits: Set<Int>? = nil
 
     @State private var scene: GraphScene = .empty
@@ -181,7 +190,7 @@ struct GraphRootView: View {
     /// 全静止 → TimelineView 暂停,重绘只由相机等状态变化触发(CPU≈0)。
     private var renderPaused: Bool {
         physicsParked && hoveredId == nil && pulses.isEmpty && !cameraTracking
-            && floatNodeId == nil
+            && floatNodeId == nil && !linkAnimating
     }
 
     var body: some View {
@@ -215,6 +224,13 @@ struct GraphRootView: View {
                 }
             }
             .onChange(of: searchQuery, initial: true) { refreshSearchHits() }
+            .onChange(of: config.current.display.graphHideLinks) {
+                linkAnimating = true
+                Task {
+                    try? await Task.sleep(for: .seconds(GraphRendererView.linkFadeSec + 0.1))
+                    linkAnimating = false
+                }
+            }
             .onChange(of: reloadToken) { Task { await reload() } }
     }
 
@@ -249,6 +265,8 @@ struct GraphRootView: View {
                                     onContextRecolor: beginRecolor,
                                     onContextDelete: beginFolderDelete)
                         .background(Color.black.opacity(0.001))   // 空白处也接手势
+                        // 圆形视窗:只在圆里显示,边缘渐隐(打开时间线时圆跟着上移)
+                        .mask(circleMask(geo.size))
                         // 08-31 用户:播放期间整块画布不可点击、不可 hover。
                         .allowsHitTesting(!timelinePlaying)
                 } else {
@@ -303,7 +321,8 @@ struct GraphRootView: View {
         }
         // 时间线:换日 → 重建那天的场景喂给引擎(按身份迁移位置,不重排)
         .onChange(of: timelineDay) { _, d in
-            guard timelineIndex != nil, d != .distantPast else { return }
+            guard timelineIndex != nil, d != .distantPast else { onDayChange(nil); return }
+            onDayChange(d)
             applyTimelineDay(d)
             // ③ 逐日图谱规模差很多(几百 → 一千多球),焦点必须跟着重取,
             // 否则停在旧视角上看不全。frameCameraToRing 是**跟随实时目标的
@@ -420,7 +439,7 @@ struct GraphRootView: View {
     /// 实时环。
     private func openCamera(_ vs: CGSize) -> GraphCamera? {
         if let pr = preloadedRing {
-            return frameFor(vs, center: pr.center, radius: pr.radius)
+            return frameFor(vs, center: pr.center, radius: pr.radius * Self.beltOverhang)
         }
         return overviewCamera(vs)
     }
@@ -431,11 +450,18 @@ struct GraphRootView: View {
     private func overviewCamera(_ vs: CGSize) -> GraphCamera? {
         guard let engine else { return nil }
         let ring = engine.readRingSnapshot()
+        let snap = engine.readSnapshot()
         if ring.radius > 1 {
-            return frameFor(vs, center: ring.center, radius: ring.radius,
+            // 以环心为中心,半径取到最远那颗球的外沿(陨石带在环外几排)
+            var r = ring.radius
+            if snap.count == scene.nodes.count {
+                for i in snap.indices {
+                    r = max(r, simd_length(snap[i] - ring.center) + Float(scene.nodes[i].radius))
+                }
+            }
+            return frameFor(vs, center: ring.center, radius: r,
                             bottomInset: timelineBarInset)
         }
-        let snap = engine.readSnapshot()
         guard snap.count == scene.nodes.count, !snap.isEmpty else { return nil }
         var c = SIMD2<Float>.zero
         for p in snap { c += p }
@@ -912,6 +938,21 @@ struct GraphRootView: View {
         guard let tgt = frameFor(viewSize, center: snap[idx], radius: Float(br),
                                  fill: GraphConstants.cameraFolderFill) else { return }
         animateCamera(toCenter: tgt.center, toZoom: tgt.zoom)
+    }
+
+    /// 圆形视窗遮罩:圆心 = 可见区(时间线条以上)中心,半径 = 可见区短边一半,
+    /// 外缘 maskFade 内渐隐到透明。
+    private func circleMask(_ size: CGSize) -> some View {
+        let usableH = max(1, size.height - timelineBarInset)
+        let r = max(40, min(size.width, usableH) / 2 + 6)
+        let inner = max(0, (r - Self.maskFade) / r)
+        return RadialGradient(
+            gradient: Gradient(stops: [.init(color: .black, location: 0),
+                                       .init(color: .black, location: inner),
+                                       .init(color: .clear, location: 1)]),
+            center: UnitPoint(x: 0.5, y: usableH / 2 / max(1, size.height)),
+            startRadius: 0, endRadius: r)
+            .animation(.easeInOut(duration: 0.35), value: timelineBarInset)
     }
 
     /// 搜索命中:标题含搜索词的末端球(组球、主球不算)。场景或搜索词变了才重算。

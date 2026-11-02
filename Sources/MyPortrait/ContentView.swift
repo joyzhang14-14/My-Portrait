@@ -248,8 +248,19 @@ struct ContentView: View {
 
     /// Timeline / Data 整窗显示(没有侧栏,页面切换在左上角的药丸里);
     /// Settings 照旧是侧栏 + 右侧内容。
-    @ViewBuilder
     private var mainSplit: some View {
+        pageContent
+            // 三个页面共用同一个切换条,钉在窗口左上角(红绿灯右边),切页不跳
+            .overlay(alignment: .topLeading) {
+                PageSwitcher(selection: $selection)
+                    .padding(.leading, 88).padding(.top, 10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .ignoresSafeArea()
+            }
+    }
+
+    @ViewBuilder
+    private var pageContent: some View {
         switch selection ?? .timeline {
         case .timeline:
             TimelineView(state: timeline, selection: $selection)
@@ -304,5 +315,35 @@ struct ContentView: View {
             DataPage(selection: $selection, scope: $dataScope, inputJump: $memoryInputJump)
         case .settings:      SettingsPane(subsection: $settingsSubsection)
         }
+    }
+}
+
+/// Timeline / Data / Settings 的页面切换条(三页共用,位置固定在窗口左上角)。
+struct PageSwitcher: View {
+    @Binding var selection: SidebarSection?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let pal = RingPalette(dark: scheme == .dark)
+        HStack(spacing: 0) {
+            ForEach(SidebarSection.allCases) { s in
+                let on = (selection ?? .timeline) == s
+                Button { selection = s } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: s.symbol).font(.system(size: 13, weight: .medium))
+                        Text(s.label).font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundStyle(on ? pal.fg : pal.muted)
+                    .padding(.horizontal, 14).frame(height: 26)
+                    .background(Capsule().fill(on ? pal.seg : .clear)
+                        .shadow(color: .black.opacity(on ? 0.15 : 0), radius: 1.5, y: 1))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(pal.pill))
+        .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
     }
 }
