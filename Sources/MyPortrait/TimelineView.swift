@@ -204,13 +204,22 @@ struct TimelineView: View {
     private func arrow(_ dir: Int, _ note: Notification) {
         guard !state.frames.isEmpty, !Self.isRepeat(note) else { return }
         let alt = (note.object as? Bool) ?? false
-        let state = self.state
+        let state = self.state, px = shotPx
         let step: @MainActor () -> Bool = {
             let old = state.focusIndex
             let new = dir < 0
                 ? (alt ? Self.previousAppBoundary(in: state.frames, from: old) : max(0, old - 1))
                 : (alt ? Self.nextAppBoundary(in: state.frames, from: old) : min(state.frames.count - 1, old + 1))
             state.focusIndex = new
+            // 顺着方向预解后面 8 帧清晰图(在解的/已缓存的跳过),播放时每帧都是清晰图
+            if !alt, new != old {
+                for i in 1...8 {
+                    let j = new + dir * i
+                    guard state.frames.indices.contains(j) else { break }
+                    ImageThumbnailCache.shared.prefetch(state.frames[j], targetPixelSize: px,
+                                                        priority: .userInitiated)
+                }
+            }
             return new != old
         }
         _ = step()
@@ -784,7 +793,7 @@ struct TimelineView: View {
                 .position(x: g.c.x, y: sl.urlY)
             }
             // 原图完整显示:按比例放进框里,不裁边、不切圆角
-            FrameShot(frame: f, contentMode: .fit, pt: shotPx)
+            FrameShot(frame: f, contentMode: .fit, pt: shotPx, playing: ui.playing)
                 .frame(width: sl.w, height: sl.h)
                 .contentShape(Rectangle())
                 .onTapGesture { toggleFocus() }
@@ -848,10 +857,12 @@ final class TimelineUI {
     static let wheelStep: CGFloat = 22
     static let minStepInterval: TimeInterval = 0.04
 
-    /// 长按方向键播放:按下 0.3s 后每 45ms 走一帧(≈22 帧/秒,刚好赶在主图
-    /// 50ms 解码延迟之前,播放中只显示预览)。到头、松手、app 失焦都停。
+    /// 长按方向键播放:按下 0.3s 后每 45ms 走一帧(≈22 帧/秒);播放中主图
+    /// 不等延迟直接解清晰图,并顺着方向预解后面几帧。到头、松手、app 失焦都停。
     static let playDelay: TimeInterval = 0.3
     static let playInterval: TimeInterval = 0.045
+    /// 播放中(FrameShot 据此不等延迟、直接解清晰图)。
+    private(set) var playing = false
     @ObservationIgnored private var playTimer: Timer?
     @ObservationIgnored private var playKey: UInt16?
 
@@ -869,6 +880,7 @@ final class TimelineUI {
                 }
                 RunLoop.main.add(t, forMode: .common)
                 self.playTimer = t
+                self.playing = true
             }
         }
         RunLoop.main.add(start, forMode: .common)
@@ -881,6 +893,7 @@ final class TimelineUI {
         playTimer?.invalidate()
         playTimer = nil
         playKey = nil
+        if playing { playing = false }
     }
 
     func canStep() -> Bool {
@@ -1562,9 +1575,11 @@ private struct FrameShot: View {
     let contentMode: ContentMode
     /// 解码尺寸(pt),见 TimelineView.shotPx。
     let pt: CGFloat
+    /// 长按方向键播放中:不等、直接解清晰图(前面几帧已在预取)。
+    var playing = false
     /// 解码前等 30ms(连拨时一闪而过的帧不解);有预览时至少等 50ms,见
     /// AsyncDiskThumbnail.previewSettle。
-    private let delay: Duration = .milliseconds(30)
+    private var delay: Duration { playing ? .zero : .milliseconds(30) }
     var body: some View {
         // Color.clear 严格取槽位尺寸,图 overlay 上去 —— 直接放 fill 的图会上报
         // 超过槽位的布局尺寸。
@@ -1573,12 +1588,14 @@ private struct FrameShot: View {
                 NoMediaPlaceholder()
             } else if let path = frame.snapshotPath {
                 AsyncDiskThumbnail(path: path, targetPixelSize: pt, contentMode: contentMode,
-                                   decodeDelay: delay, previewKey: ImageThumbnailCache.previewKey(frame))
+                                   decodeDelay: delay, previewKey: ImageThumbnailCache.previewKey(frame),
+                                   previewDelay: playing ? .zero : AsyncDiskThumbnail.previewSettle)
             } else if let vpath = frame.videoPath {
                 AsyncMP4FrameThumbnail(videoPath: vpath, offsetMs: frame.videoOffsetMs,
                                        fps: frame.videoFps, targetPixelSize: pt,
                                        contentMode: contentMode, decodeDelay: delay,
-                                       previewKey: ImageThumbnailCache.previewKey(frame))
+                                       previewKey: ImageThumbnailCache.previewKey(frame),
+                                       previewDelay: playing ? .zero : AsyncDiskThumbnail.previewSettle)
             }
         }
         .clipped()

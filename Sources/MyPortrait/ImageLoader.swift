@@ -94,32 +94,39 @@ final class ImageThumbnailCache {
     /// 几帧用 —— 快速划过时图片已就绪,不用现等 MP4 抽帧/JPG downsample。
     /// cache key / pixelSize 跟 AsyncDiskThumbnail / AsyncMP4FrameThumbnail
     /// **完全一致**,这样预取的结果它们的 .task 直接命中。
-    /// 优先级 .utility(低于当前帧的 .userInitiated),不抢当前帧的解码。
-    func prefetch(_ frame: TimelineFrame, targetPixelSize: CGFloat) {
+    /// 默认优先级 .utility(低于当前帧的 .userInitiated),不抢当前帧的解码;
+    /// Timeline 播放时预解前方几帧传 .userInitiated。在解的 key 不重复排队。
+    func prefetch(_ frame: TimelineFrame, targetPixelSize: CGFloat,
+                  priority: TaskPriority = .utility) {
         guard frame.hasViewableMedia else { return }
         let pixelSize = targetPixelSize * (NSScreen.main?.backingScaleFactor ?? 2.0)
         if let path = frame.snapshotPath {
             let key = "\(path)|\(Int(targetPixelSize))"
-            if cache.object(forKey: key as NSString) != nil { return }
-            Task.detached(priority: .utility) {
-                guard FileManager.default.fileExists(atPath: path),
-                      let img = AsyncDiskThumbnail.downsample(path: path, maxPixel: pixelSize)
-                else { return }
-                await MainActor.run { ImageThumbnailCache.shared.store(img, for: key) }
+            guard cache.object(forKey: key as NSString) == nil, fetching.insert(key).inserted else { return }
+            Task.detached(priority: priority) {
+                let img = FileManager.default.fileExists(atPath: path)
+                    ? AsyncDiskThumbnail.downsample(path: path, maxPixel: pixelSize) : nil
+                await MainActor.run {
+                    if let img { ImageThumbnailCache.shared.store(img, for: key) }
+                    ImageThumbnailCache.shared.fetching.remove(key)
+                }
             }
         } else if let vpath = frame.videoPath {
             let key = "mp4:\(vpath)#\(frame.videoOffsetMs)|\(Int(targetPixelSize))"
-            if cache.object(forKey: key as NSString) != nil { return }
+            guard cache.object(forKey: key as NSString) == nil, fetching.insert(key).inserted else { return }
             let ms = frame.videoOffsetMs
             let f = frame.videoFps
-            Task.detached(priority: .utility) {
-                guard let img = await AsyncMP4FrameThumbnail.extract(
+            Task.detached(priority: priority) {
+                let img = await AsyncMP4FrameThumbnail.extract(
                     videoPath: vpath, offsetMs: ms, fps: f, maxPixel: pixelSize)
-                else { return }
-                await MainActor.run { ImageThumbnailCache.shared.store(img, for: key) }
+                await MainActor.run {
+                    if let img { ImageThumbnailCache.shared.store(img, for: key) }
+                    ImageThumbnailCache.shared.fetching.remove(key)
+                }
             }
         }
     }
+    private var fetching = Set<String>()
 }
 
 /// Background-loaded thumbnail view. Drop-in for `Image(...)` — gives a placeholder while
@@ -135,6 +142,8 @@ struct AsyncDiskThumbnail: View {
     var decodeDelay: Duration = .zero
     /// ImageThumbnailCache.previewKey:有就在清晰图解出来前先显示那张小预览。
     var previewKey: String? = nil
+    /// 先上了预览时清晰图至少等多久再解;Timeline 播放中传 .zero(每帧都解清晰图)。
+    var previewDelay: Duration = AsyncDiskThumbnail.previewSettle
 
     @State private var image: NSImage?
     /// 当前 image 属于哪一帧(预览或清晰图)。
@@ -166,7 +175,7 @@ struct AsyncDiskThumbnail: View {
             shownID = path
             return
         }
-        let delay = showPreview(id: path) ? max(decodeDelay, Self.previewSettle) : decodeDelay
+        let delay = showPreview(id: path) ? max(decodeDelay, previewDelay) : decodeDelay
         // Race-defensive: the file may have existed when the TimelineFrame
         // was built but been deleted since (e.g. CompactionWorker embeds
         // it into an MP4 chunk and rm's the JPG). Skip silently to avoid
@@ -230,6 +239,8 @@ struct AsyncMP4FrameThumbnail: View {
     var decodeDelay: Duration = .zero
     /// ImageThumbnailCache.previewKey:有就在清晰图解出来前先显示那张小预览。
     var previewKey: String? = nil
+    /// 先上了预览时清晰图至少等多久再解;Timeline 播放中传 .zero(每帧都解清晰图)。
+    var previewDelay: Duration = AsyncDiskThumbnail.previewSettle
 
     @State private var image: NSImage?
     /// 当前 image 属于哪一帧(预览或清晰图)。
@@ -266,7 +277,7 @@ struct AsyncMP4FrameThumbnail: View {
         if shownID != id, let pk = previewKey, let pv = ImageThumbnailCache.shared.preview(pk) {
             image = pv
             shownID = id
-            delay = max(delay, AsyncDiskThumbnail.previewSettle)
+            delay = max(delay, previewDelay)
         }
         if delay > .zero {
             try? await Task.sleep(for: delay)
