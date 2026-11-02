@@ -28,6 +28,8 @@ struct DataPage: View {
     @State private var profileEditing = false
     @State private var profileDraft = PersonalInfoConfig()
     @State private var newLanguage = ""
+    /// 编辑 Profile 时内容的实际高度:卡片正好长到 Cancel / Save 那一行。
+    @State private var editorH: CGFloat = 0
     @State private var scene: GraphScene = .empty
     @State private var digest = DataDigest.empty
     @State private var counts = DataCounts()
@@ -89,11 +91,12 @@ struct DataPage: View {
                 navPanel
                     .frame(width: sideW, alignment: .topLeading)
                     .offset(x: leftX, y: topY)
+                    .zIndex(2)
 
                 if zone == .input {
-                    inputCard
-                        .frame(width: W - rightPad - (centerL + 6), height: H - topY - 24)
-                        .offset(x: centerL + 6, y: topY)
+                    DataInputPage(size: CGSize(width: W, height: H), sideW: sideW, leftX: leftX,
+                                  rightPad: rightPad, listTop: recentTop(H), rightTopY: rightTopY,
+                                  pal: pal, fs: fs)
                 } else {
                     // 左下:最近
                     recentPanel
@@ -109,10 +112,10 @@ struct DataPage: View {
                     // 右上:搜索 + 卡片(阅读视图时往左铺开)
                     let rx = reader ? centerL + 6 : W - rightPad - sideW
                     rightTop(H: H)
-                        .frame(width: W - rightPad - rx,
-                               height: reader ? H - rightTopY - 22 : cardBottom(H) - rightTopY)
+                        .frame(width: W - rightPad - rx, height: rightTopH(H))
                         .offset(x: rx, y: rightTopY)
                         .animation(.spring(duration: 0.42, bounce: 0.1), value: reader)
+                        .animation(.spring(duration: 0.32, bounce: 0.1), value: profileEditing)
                 }
             }
             .frame(width: W, height: H, alignment: .topLeading)
@@ -148,6 +151,15 @@ struct DataPage: View {
     }
     /// 右上卡片的底边。
     private func cardBottom(_ H: CGFloat) -> CGFloat { H * 0.5 }
+    /// 右上(搜索行 + 卡片)的高度:阅读视图拉满;编辑 Profile 时长到装下内容为止,
+    /// 最多到「本周」上沿。
+    private func rightTopH(_ H: CGFloat) -> CGFloat {
+        if reader { return H - rightTopY - 22 }
+        let normal = cardBottom(H) - rightTopY
+        guard profileEditing, editorH > 0 else { return normal }
+        let maxH = H - 22 - weekH - 12 - rightTopY
+        return min(maxH, max(normal, editorH + 44))
+    }
     /// 右下「本周」的高度(贴窗口底边)。
     private let weekH: CGFloat = 250
 
@@ -667,8 +679,12 @@ struct DataPage: View {
                 .padding(.top, 10)
             }
             .padding(16)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: EditorHeightKey.self, value: g.size.height)
+            })
         }
         .scrollIndicators(.never)
+        .onPreferenceChange(EditorHeightKey.self) { editorH = $0 }
     }
 
     private func editField(_ label: String, _ kp: WritableKeyPath<PersonalInfoConfig, String>,
@@ -748,15 +764,6 @@ struct DataPage: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Input
-
-    private var inputCard: some View {
-        InputActivityChartView(jumpToRecordId: $inputJump)
-            .background(RoundedRectangle(cornerRadius: 18).fill(pal.row))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(pal.rowb, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     // MARK: - 数据
@@ -929,4 +936,9 @@ private struct FlowChips: View {
             }
         }
     }
+}
+
+private struct EditorHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
