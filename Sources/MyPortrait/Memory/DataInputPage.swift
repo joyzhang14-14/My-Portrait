@@ -30,14 +30,14 @@ struct DataInputPage: View {
     @State private var textH: CGFloat = 0
 
     // 动态高度:底部两块(STATS / TODAY)按 app 行数往上长,最多长到给右上卡片留 140;
-    // 右上卡片按内容长,内容多时盖在 TODAY 上面往下长,最多盖住 TODAY 的一半
+    // 右上卡片按内容长,内容多时往下压底部两块(它们变矮、列表滚动),底部两块至少留 200
     private var appCount: Int { Set(segments.map(\.app)).count }
     private var bottomH: CGFloat {
         let maxH = H - 22 - (rightTopY + 44 + 140 + 16)
         return max(200, min(maxH, 34 + CGFloat(appCount) * 28))
     }
     private var cardH: CGFloat {
-        let avail = H - 22 - bottomH * 0.5 - (rightTopY + 44)
+        let avail = H - 22 - min(bottomH, 200) - 16 - (rightTopY + 44)
         let need: CGFloat
         if !query.trimmingCharacters(in: .whitespaces).isEmpty {
             need = 32 + 34 + CGFloat(shown.count) * 30
@@ -48,6 +48,9 @@ struct DataInputPage: View {
         }
         return max(110, min(avail, need))
     }
+
+    /// 底部两块的实际高度:被右上卡片压过之后剩下的部分。
+    private var lowH: CGFloat { min(bottomH, H - 22 - 16 - (rightTopY + 44 + cardH)) }
 
     private var W: CGFloat { size.width }
     private var H: CGFloat { size.height }
@@ -103,15 +106,16 @@ struct DataInputPage: View {
             datePill.position(x: c.x, y: c.y - R + 62)
 
             statTiles
-                .frame(width: sideW, height: bottomH, alignment: .topLeading)
-                .offset(x: leftX, y: H - 22 - bottomH)
-            appBars
-                .frame(width: sideW, height: bottomH)
-                .offset(x: W - rightPad - sideW, y: H - 22 - bottomH)
-            // 卡片画在 TODAY 后面 → 长下来时压在 app 列表上
+                .frame(width: sideW, height: lowH, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - lowH)
+                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
             rightTop
                 .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
+                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
+            appBars
+                .frame(width: sideW, height: lowH)
+                .offset(x: W - rightPad - sideW, y: H - 22 - lowH)
                 .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
         }
         .frame(width: W, height: H, alignment: .topLeading)
@@ -350,10 +354,6 @@ struct DataInputPage: View {
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 18).fill(pal.row))
-            // 不透明底:盖住下面的 TODAY 时不透字
-            .background(RoundedRectangle(cornerRadius: 18)
-                .fill(pal.dark ? Color(white: 0.075) : Color(white: 0.975))
-                .shadow(color: .black.opacity(pal.dark ? 0.5 : 0.12), radius: 14, y: 6))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(pal.rowb, lineWidth: 1))
         }
     }
