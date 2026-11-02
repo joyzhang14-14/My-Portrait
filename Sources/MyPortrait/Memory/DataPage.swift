@@ -43,17 +43,19 @@ struct DataPage: View {
         }
     }
 
-    // 版式(按 1600×960 的草图定,两侧列宽固定,中间随窗口伸缩)
-    private let sideW: CGFloat = 326
-    private let leftX: CGFloat = 26
-    private let rightPad: CGFloat = 24
-    private let topY: CGFloat = 66
+    // 版式:两侧列宽固定、字号整体缩一档,中间的圆随窗口伸缩、尽量大
+    private let sideW: CGFloat = 288
+    private let leftX: CGFloat = 22
+    private let rightPad: CGFloat = 22
+    private let topY: CGFloat = 62
+    /// 四角面板字号缩放(让出空间给中间的图谱)。
+    private func fs(_ size: CGFloat) -> CGFloat { size * 0.86 }
 
     var body: some View {
         GeometryReader { geo in
             let W = geo.size.width, H = geo.size.height
-            let centerL = leftX + sideW + 20
-            let centerR = W - rightPad - sideW - 20
+            let centerL = leftX + sideW + 8
+            let centerR = W - rightPad - sideW - 8
             ZStack(alignment: .topLeading) {
                 backdrop(W: W, H: H)
 
@@ -198,9 +200,9 @@ struct DataPage: View {
 
     private func sectionTitle(_ t: String, trailing: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(t).font(.system(size: 12, weight: .semibold)).kerning(0.96)
+            Text(t).font(.system(size: fs(12), weight: .semibold)).kerning(0.96)
             Spacer(minLength: 0)
-            if let trailing { Text(trailing).font(.system(size: 12, design: .monospaced)) }
+            if let trailing { Text(trailing).font(.system(size: fs(12), design: .monospaced)) }
         }
         .foregroundStyle(pal.faint)
         .padding(.horizontal, 4)
@@ -242,22 +244,22 @@ struct DataPage: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: fs(15), weight: .medium))
                     .foregroundStyle(on ? Color.white : pal.muted)
-                    .frame(width: 34, height: 34)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(on ? pal.accent : pal.pill))
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(on ? pal.accent : pal.pill))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(.system(size: 15.5, weight: .semibold)).foregroundStyle(pal.fg)
-                    Text(sub).font(.system(size: 12, design: .monospaced)).foregroundStyle(pal.faint)
+                    Text(name).font(.system(size: fs(15.5), weight: .semibold)).foregroundStyle(pal.fg)
+                    Text(sub).font(.system(size: fs(12), design: .monospaced)).foregroundStyle(pal.faint)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: fs(11), weight: .semibold))
                     .foregroundStyle(pal.faint)
                     .rotationEffect(.degrees(open ? 90 : 0))
             }
-            .padding(.horizontal, 12).padding(.vertical, 10)
+            .padding(.horizontal, 10).padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 16).fill(on ? pal.accentbg : .clear))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(on ? pal.accentb : .clear, lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 16))
@@ -268,7 +270,7 @@ struct DataPage: View {
     /// 原 Neural Graph 设置(主球照片在 Profile,排序在阅读视图列表头)。
     private var settingsBox: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("GRAPH").font(.system(size: 10.5, weight: .semibold)).kerning(0.7)
+            Text("GRAPH").font(.system(size: fs(10.5), weight: .semibold)).kerning(0.7)
                 .foregroundStyle(pal.faint).padding(.top, 6).padding(.bottom, 2)
             settingRow("Animation") {
                 Picker("", selection: config.binding(\.display.graphAnimationSpeed)) {
@@ -289,12 +291,12 @@ struct DataPage: View {
                     .labelsHidden().toggleStyle(.switch).controlSize(.small)
             }
         }
-        .padding(.leading, 58).padding(.trailing, 12)
+        .padding(.leading, 52).padding(.trailing, 10)
     }
 
     private func settingRow<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
         HStack {
-            Text(label).font(.system(size: 13.5)).foregroundStyle(pal.fg)
+            Text(label).font(.system(size: fs(13.5))).foregroundStyle(pal.fg)
             Spacer(minLength: 8)
             control()
         }
@@ -314,12 +316,12 @@ struct DataPage: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 HStack(spacing: 7) {
                                     Text(DataDigest.md(it.date))
-                                        .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
+                                        .font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
                                     Circle().fill(it.color).frame(width: 8, height: 8)
-                                    Text(it.hub).font(.system(size: 12.5, weight: .semibold))
+                                    Text(it.hub).font(.system(size: fs(12.5), weight: .semibold))
                                         .foregroundStyle(pal.muted).lineLimit(1)
                                 }
-                                Text(it.title).font(.system(size: 14)).foregroundStyle(pal.fg)
+                                Text(it.title).font(.system(size: fs(14))).foregroundStyle(pal.fg)
                                     .lineLimit(2).multilineTextAlignment(.leading)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -352,16 +354,16 @@ struct DataPage: View {
         VStack(alignment: .leading, spacing: 0) {
             sectionTitle("THIS WEEK")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("+\(digest.week)").font(.system(size: 30, weight: .bold))
+                Text("+\(digest.week)").font(.system(size: fs(30), weight: .bold))
                     .foregroundStyle(pal.fg)
                 let d = digest.week - digest.prevWeek
                 Text("new \(zone == .events ? "events" : "notes") · \(d >= 0 ? "▲" : "▼") \(abs(d)) vs last week")
-                    .font(.system(size: 13)).foregroundStyle(pal.muted)
+                    .font(.system(size: fs(13))).foregroundStyle(pal.muted)
             }
             .padding(.horizontal, 4)
             spark.padding(.horizontal, 4).padding(.top, 8)
             if !digest.tags.isEmpty {
-                Text("TOP TAGS").font(.system(size: 11, weight: .semibold)).kerning(0.77)
+                Text("TOP TAGS").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
                     .foregroundStyle(pal.faint).padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 5)
                 FlowChips(items: digest.tags.map { "\($0.0)  \($0.1)" }, pal: pal)
                     .padding(.horizontal, 4)
@@ -370,7 +372,7 @@ struct DataPage: View {
             HStack {
                 Spacer()
                 Text("\(scene.nodes.count.formatted()) nodes · \(scene.edges.count.formatted()) links")
-                    .font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
+                    .font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
             }
         }
     }
@@ -392,7 +394,7 @@ struct DataPage: View {
                 Spacer()
                 Text(DataDigest.md(Date()))
             }
-            .font(.system(size: 11, design: .monospaced)).foregroundStyle(pal.faint)
+            .font(.system(size: fs(11), design: .monospaced)).foregroundStyle(pal.faint)
         }
     }
 
@@ -402,9 +404,9 @@ struct DataPage: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(pal.faint)
+                    Image(systemName: "magnifyingglass").font(.system(size: fs(13))).foregroundStyle(pal.faint)
                     TextField(zone == .events ? "Search events" : "Search portrait", text: $query)
-                        .textFieldStyle(.plain).font(.system(size: 14))
+                        .textFieldStyle(.plain).font(.system(size: fs(14)))
                     if !query.isEmpty {
                         Button { query = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(pal.faint)
@@ -456,7 +458,7 @@ struct DataPage: View {
     }
 
     private func cardHeader(_ crumb: String) -> some View {
-        Text(crumb).font(.system(size: 11, weight: .semibold, design: .monospaced))
+        Text(crumb).font(.system(size: fs(11), weight: .semibold, design: .monospaced))
             .foregroundStyle(pal.faint)
     }
 
@@ -465,9 +467,9 @@ struct DataPage: View {
         return VStack(alignment: .leading, spacing: 4) {
             cardHeader("SEARCH")
             Text("\(hits.count) result\(hits.count == 1 ? "" : "s")")
-                .font(.system(size: 18, weight: .semibold)).foregroundStyle(pal.fg)
+                .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
             Text("matching balls stay lit in the graph")
-                .font(.system(size: 12, design: .monospaced)).foregroundStyle(pal.muted)
+                .font(.system(size: fs(12), design: .monospaced)).foregroundStyle(pal.muted)
                 .padding(.bottom, 6)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -490,18 +492,18 @@ struct DataPage: View {
                 cardHeader(zone == .events ? "GROUP" : "CATEGORY")
                 Spacer()
                 Button { reader = true } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 12))
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: fs(12)))
                 }
                 .buttonStyle(.bouncyIcon).help("Open in reader")
             }
             HStack(spacing: 9) {
                 Circle().fill(hub.color).frame(width: 12, height: 12)
-                Text(hub.title).font(.system(size: 18, weight: .semibold)).foregroundStyle(pal.fg)
+                Text(hub.title).font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
             }
             Text("\(leaves.count) \(zone == .events ? "events" : "notes")")
-                .font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.muted)
+                .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
                 .padding(.bottom, 6)
-            Text("BY WEIGHT").font(.system(size: 11, weight: .semibold)).kerning(0.77)
+            Text("BY WEIGHT").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
                 .foregroundStyle(pal.faint)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -519,9 +521,9 @@ struct DataPage: View {
         Button { focus = GraphFocusRequest(target: .node(id)) } label: {
             HStack(spacing: 9) {
                 Circle().fill(color).frame(width: 8, height: 8)
-                Text(title).font(.system(size: 14)).foregroundStyle(pal.fg).lineLimit(1)
+                Text(title).font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
                 Spacer(minLength: 6)
-                Text(trailing).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
+                Text(trailing).font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .contentShape(Rectangle())
@@ -555,19 +557,19 @@ struct DataPage: View {
                 Button {
                     profileDraft = info
                     withAnimation { profileEditing = true }
-                } label: { Image(systemName: "pencil").font(.system(size: 13)) }
+                } label: { Image(systemName: "pencil").font(.system(size: fs(13))) }
                     .buttonStyle(.bouncyIcon).help("Edit profile")
             }
             HStack(spacing: 12) {
                 avatar(name)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name.isEmpty ? "You" : name).font(.system(size: 18, weight: .semibold)).foregroundStyle(pal.fg)
-                    if !sub.isEmpty { Text(sub).font(.system(size: 13)).foregroundStyle(pal.muted) }
+                    Text(name.isEmpty ? "You" : name).font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
+                    if !sub.isEmpty { Text(sub).font(.system(size: fs(13))).foregroundStyle(pal.muted) }
                 }
             }
             .padding(.top, 6)
             Text("\(counts.events.formatted()) events   \(counts.portraitNotes) portrait notes")
-                .font(.system(size: 12.5, design: .monospaced)).foregroundStyle(pal.muted)
+                .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
                 .padding(.vertical, 10)
             ForEach(rows, id: \.0) { r in
                 HStack {
@@ -575,11 +577,11 @@ struct DataPage: View {
                     Spacer()
                     Text(r.1).foregroundStyle(pal.fg)
                 }
-                .font(.system(size: 14)).padding(.vertical, 7)
+                .font(.system(size: fs(14))).padding(.vertical, 7)
                 .overlay(alignment: .bottom) { Rectangle().fill(pal.rowb).frame(height: 1) }
             }
             if !info.languages.isEmpty {
-                Text("LANGUAGES").font(.system(size: 11, weight: .semibold)).kerning(0.77)
+                Text("LANGUAGES").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
                     .foregroundStyle(pal.faint).padding(.top, 14).padding(.bottom, 5)
                 FlowChips(items: info.languages, pal: pal)
             }
@@ -590,7 +592,7 @@ struct DataPage: View {
 
     private func avatar(_ name: String) -> some View {
         Text(String(name.first ?? "Y"))
-            .font(.system(size: 22, weight: .semibold)).foregroundStyle(.white)
+            .font(.system(size: fs(22), weight: .semibold)).foregroundStyle(.white)
             .frame(width: 54, height: 54)
             .background(Circle().fill(RadialGradient(colors: [Color(red: 0.56, green: 0.71, blue: 1), Theme.accent],
                                                      center: UnitPoint(x: 0.35, y: 0.3),
@@ -607,7 +609,7 @@ struct DataPage: View {
                 editField("Last name", \.lastName, "Last name")
                 editField("Also goes by", \.alias, "Nickname")
                 HStack {
-                    Text("Pronouns").font(.system(size: 13.5)).foregroundStyle(pal.muted).frame(width: 104, alignment: .leading)
+                    Text("Pronouns").font(.system(size: fs(13.5))).foregroundStyle(pal.muted).frame(width: 104, alignment: .leading)
                     Picker("", selection: $profileDraft.gender) {
                         ForEach(PersonalInfoGender.allCases, id: \.self) { Text($0.displayName).tag($0) }
                     }
@@ -616,17 +618,17 @@ struct DataPage: View {
                 editField("Nationality", \.nationality, "e.g. Chinese")
                 editField("Ethnicity", \.ethnicity, "Optional")
                 editField("Date of birth", \.birthDate, "YYYY-MM-DD")
-                Text("LANGUAGES").font(.system(size: 11, weight: .semibold)).kerning(0.77)
+                Text("LANGUAGES").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
                     .foregroundStyle(pal.faint).padding(.top, 8)
                 HStack(spacing: 6) {
                     ForEach(Array(profileDraft.languages.enumerated()), id: \.offset) { i, l in
                         HStack(spacing: 4) {
                             Text(l)
                             Button { profileDraft.languages.remove(at: i) } label: {
-                                Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                                Image(systemName: "xmark").font(.system(size: fs(9), weight: .bold))
                             }.buttonStyle(.plain)
                         }
-                        .font(.system(size: 12.5)).foregroundStyle(pal.muted)
+                        .font(.system(size: fs(12.5))).foregroundStyle(pal.muted)
                         .padding(.horizontal, 10).padding(.vertical, 3)
                         .background(Capsule().fill(pal.pill))
                     }
@@ -659,7 +661,7 @@ struct DataPage: View {
     private func editField(_ label: String, _ kp: WritableKeyPath<PersonalInfoConfig, String>,
                            _ placeholder: String) -> some View {
         HStack {
-            Text(label).font(.system(size: 13.5)).foregroundStyle(pal.muted).frame(width: 104, alignment: .leading)
+            Text(label).font(.system(size: fs(13.5))).foregroundStyle(pal.muted).frame(width: 104, alignment: .leading)
             TextField(placeholder, text: Binding(get: { profileDraft[keyPath: kp] },
                                                  set: { profileDraft[keyPath: kp] = $0 }))
                 .textFieldStyle(.roundedBorder)
@@ -680,7 +682,7 @@ struct DataPage: View {
                      topInset: 14)
             .overlay(alignment: .topTrailing) {
                 Button { reader = false } label: {
-                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 12))
+                    Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: fs(12)))
                 }
                 .buttonStyle(.bouncyIcon).help("Back to graph").padding(10)
             }
@@ -690,7 +692,7 @@ struct DataPage: View {
     private var groupColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(zone == .events ? "GROUPS" : "CATEGORIES")
-                .font(.system(size: 11, weight: .semibold)).kerning(0.77).foregroundStyle(pal.faint)
+                .font(.system(size: fs(11), weight: .semibold)).kerning(0.77).foregroundStyle(pal.faint)
                 .padding(.horizontal, 14).padding(.top, 16).padding(.bottom, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -722,9 +724,9 @@ struct DataPage: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Circle().fill(color).frame(width: 9, height: 9)
-                Text(title).font(.system(size: 14)).foregroundStyle(pal.fg).lineLimit(1)
+                Text(title).font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
                 Spacer(minLength: 4)
-                Text("\(count)").font(.system(size: 11.5, design: .monospaced)).foregroundStyle(pal.faint)
+                Text("\(count)").font(.system(size: fs(11.5), design: .monospaced)).foregroundStyle(pal.faint)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: 10).fill(on ? pal.accentbg : .clear))
@@ -906,7 +908,7 @@ private struct FlowChips: View {
     var body: some View {
         FlowLayout(spacing: 6) {
             ForEach(items, id: \.self) { t in
-                Text(t).font(.system(size: 12.5)).foregroundStyle(pal.muted)
+                Text(t).font(.system(size: 11)).foregroundStyle(pal.muted)
                     .padding(.horizontal, 10).padding(.vertical, 3)
                     .background(Capsule().fill(pal.pill))
             }

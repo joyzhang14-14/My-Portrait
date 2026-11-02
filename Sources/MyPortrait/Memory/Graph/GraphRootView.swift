@@ -79,7 +79,7 @@ struct GraphRootView: View {
     var onSceneChange: (GraphScene) -> Void = { _ in }
 
     /// 总览取景时隐形环直径占视口短边的比例(圆形页里图谱要撑满中间的圆)。
-    private static let ringFill: Double = 0.8
+    private static let ringFill: Double = 0.86
     @State private var searchHits: Set<Int>? = nil
 
     @State private var scene: GraphScene = .empty
