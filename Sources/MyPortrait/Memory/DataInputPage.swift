@@ -61,8 +61,13 @@ struct DataInputPage: View {
         let q = query.trimmingCharacters(in: .whitespaces)
         return q.isEmpty ? segments : segments.filter { $0.text.localizedCaseInsensitiveContains(q) }
     }
-    /// 选中的是一整段连续打字:不分 app,前后停顿不到 3 分钟的段都算一段时间,
-    /// 卡片里把这段时间所有 app 的输入逐段列出来。
+    /// 可选的段:TODAY 里选了 app 就只在这个 app 的段里选,否则全部 app。
+    private var pool: [InputSegment] {
+        guard let a = selectedApp else { return segments }
+        return segments.filter { $0.app == a }
+    }
+    /// 选中的是一整段连续打字:前后停顿不到 3 分钟的段都算一段时间,
+    /// 卡片里把这段时间的输入逐段列出来(没选 app = 所有 app,选了 = 只那个 app)。
     private var current: InputSegment? {
         let groups = segmentGroups
         let g = groups.first { $0.contains { $0.id == selectedId } } ?? groups.last
@@ -74,11 +79,11 @@ struct DataInputPage: View {
                             keys: g.reduce(0) { $0 + $1.keys })
     }
 
-    /// 段按连续打字分组(跨 app;离这组最晚结束时刻不到 3 分钟就并进来)。
+    /// 段按连续打字分组(离这组最晚结束时刻不到 3 分钟就并进来)。
     private var segmentGroups: [[InputSegment]] {
         var out: [[InputSegment]] = []
         var groupEnd: Int64 = .min
-        for s in segments.sorted(by: { $0.startMs < $1.startMs }) {
+        for s in pool.sorted(by: { $0.startMs < $1.startMs }) {
             if !out.isEmpty, s.startMs - groupEnd < 180_000 {
                 out[out.count - 1].append(s)
                 groupEnd = max(groupEnd, s.endMs)
@@ -189,7 +194,7 @@ struct DataInputPage: View {
             var a = atan2(Double(p.x - c.x), Double(c.y - p.y))
             if a < 0 { a += 2 * .pi }
             let ms = Int64(day.timeIntervalSince1970 * 1000) + Int64(a / (2 * .pi) * 86_400_000)
-            let hit = segments.min { dist($0, ms) < dist($1, ms) }
+            let hit = pool.min { dist($0, ms) < dist($1, ms) }
             selectedId = hit?.id
         }
     }
@@ -305,8 +310,9 @@ struct DataInputPage: View {
                     .scrollIndicators(.never)
                 } else if let s = current {
                     // 选中那块的时间区间里**所有 app** 的输入,一段一张小卡,按时间排
-                    let inRange = segments.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
-                    Text(selectedId == nil ? "LATEST" : "SELECTED")
+                    let inRange = pool.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
+                    Text((selectedId == nil ? "LATEST" : "SELECTED")
+                         + (selectedApp.map { " · " + InputCaptureView.appLabel($0).uppercased() } ?? ""))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(pal.faint)
                     Text("\(Self.hm(s.startMs)) – \(Self.hm(s.endMs))")
                         .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
@@ -417,7 +423,12 @@ struct DataInputPage: View {
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? pal.accentb : .clear, lineWidth: 1))
                         .opacity(selectedApp != nil && !on ? 0.5 : 1)
                         .contentShape(Rectangle())
-                        .onTapGesture { selectedApp = on ? nil : app }
+                        .onTapGesture {
+                            selectedApp = on ? nil : app
+                            // 选中的段不属于新选的 app → 回到这个 app 最近一段
+                            if let a = selectedApp, let id = selectedId,
+                               segments.first(where: { $0.id == id })?.app != a { selectedId = nil }
+                        }
                     }
                 }
             }
