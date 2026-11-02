@@ -107,8 +107,8 @@ struct DataInputPage: View {
 
             // STATS 固定高度,不随 app 行数和右上卡片变
             statTiles
-                .frame(width: sideW, height: 200, alignment: .topLeading)
-                .offset(x: leftX, y: H - 22 - 200)
+                .frame(width: sideW, height: 280, alignment: .topLeading)
+                .offset(x: leftX, y: H - 22 - 280)
             rightTop
                 .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
