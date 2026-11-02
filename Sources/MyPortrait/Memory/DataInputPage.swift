@@ -30,14 +30,14 @@ struct DataInputPage: View {
     @State private var textH: CGFloat = 0
 
     // 动态高度:底部两块(STATS / TODAY)按 app 行数往上长,最多长到给右上卡片留 140;
-    // 右上卡片按内容长,最多长到底部两块的上沿
+    // 右上卡片按内容长,内容多时盖在 TODAY 上面往下长,最多到窗口底边
     private var appCount: Int { Set(segments.map(\.app)).count }
     private var bottomH: CGFloat {
         let maxH = H - 22 - (rightTopY + 44 + 140 + 16)
         return max(200, min(maxH, 34 + CGFloat(appCount) * 28))
     }
     private var cardH: CGFloat {
-        let avail = H - 22 - bottomH - 16 - (rightTopY + 44)
+        let avail = H - 22 - (rightTopY + 44)
         let need: CGFloat
         if !query.trimmingCharacters(in: .whitespaces).isEmpty {
             need = 32 + 34 + CGFloat(shown.count) * 30
@@ -105,13 +105,14 @@ struct DataInputPage: View {
             statTiles
                 .frame(width: sideW, height: bottomH, alignment: .topLeading)
                 .offset(x: leftX, y: H - 22 - bottomH)
+            appBars
+                .frame(width: sideW, height: bottomH)
+                .offset(x: W - rightPad - sideW, y: H - 22 - bottomH)
+            // 卡片画在 TODAY 后面 → 长下来时压在 app 列表上
             rightTop
                 .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
                 .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
-            appBars
-                .frame(width: sideW, height: bottomH)
-                .offset(x: W - rightPad - sideW, y: H - 22 - bottomH)
         }
         .frame(width: W, height: H, alignment: .topLeading)
         .task(id: day) { await reload() }
@@ -354,6 +355,10 @@ struct DataInputPage: View {
             .padding(16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(RoundedRectangle(cornerRadius: 18).fill(pal.row))
+            // 不透明底:盖住下面的 TODAY 时不透字
+            .background(RoundedRectangle(cornerRadius: 18)
+                .fill(pal.dark ? Color(white: 0.075) : Color(white: 0.975))
+                .shadow(color: .black.opacity(pal.dark ? 0.5 : 0.12), radius: 14, y: 6))
             .overlay(RoundedRectangle(cornerRadius: 18).stroke(pal.rowb, lineWidth: 1))
         }
     }
