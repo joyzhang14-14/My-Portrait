@@ -147,7 +147,7 @@ struct DataPage: View {
 
     /// 左下「最近」的顶边:贴下半边;左上展开设置时再往下让。
     private func recentTop(_ H: CGFloat) -> CGFloat {
-        settingsOpen ? max(H * 0.56, topY + 430) : H * 0.56
+        settingsOpen && zone != .input ? max(H * 0.56, topY + 430) : H * 0.56
     }
     /// 右上卡片的底边。
     private func cardBottom(_ H: CGFloat) -> CGFloat { H * 0.5 }
@@ -218,12 +218,15 @@ struct DataPage: View {
                    "\(counts.events.formatted()) events · \(counts.folders) groups",
                    on: zone == .events) { switchTo(.events) }
             navRow(.input, "Input", "keyboard", "Typing activity by day", on: zone == .input) { switchTo(.input) }
-            Rectangle().fill(pal.rowb).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 6)
-            navRow(nil, "Settings", "slider.horizontal.3", "Graph animation and links",
-                   on: false, open: settingsOpen) {
-                withAnimation(.spring(duration: 0.32, bounce: 0.1)) { settingsOpen.toggle() }
+            // 设置只管图谱(动画 / 脉冲 / 连线),Input 没有图谱就不显示
+            if zone != .input {
+                Rectangle().fill(pal.rowb).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 6)
+                navRow(nil, "Settings", "slider.horizontal.3", "Graph animation and links",
+                       on: false, open: settingsOpen) {
+                    withAnimation(.spring(duration: 0.32, bounce: 0.1)) { settingsOpen.toggle() }
+                }
+                if settingsOpen { settingsBox.transition(.opacity) }
             }
-            if settingsOpen { settingsBox.transition(.opacity) }
         }
     }
 
