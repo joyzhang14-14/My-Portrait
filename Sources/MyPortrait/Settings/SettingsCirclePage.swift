@@ -76,35 +76,38 @@ struct SettingsCirclePage: View {
 
     // MARK: - 左边导航
 
+    /// 行高按窗口高度分:15 行 + 4 个组标题正好铺满左列,窗口矮了最少 30、高了最多 42。
     private func navList(H: CGFloat) -> some View {
-        SideScroll(height: H - navTop - 22, enabled: true, pal: pal) {
+        let avail = H - navTop - 22
+        let rowH = max(30, min(42, (avail - 4 * 26 - 30) / 15))
+        return SideScroll(height: avail, enabled: true, pal: pal) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(SettingsSubsection.Group.allCases, id: \.self) { grp in
                     sectionTitle(grp.rawValue)
                         .padding(.top, grp == .app ? 0 : 10)
                     ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
-                        navRow(s)
+                        navRow(s, height: rowH)
                     }
                 }
             }
         }
     }
 
-    private func navRow(_ s: SettingsSubsection) -> some View {
+    private func navRow(_ s: SettingsSubsection, height: CGFloat) -> some View {
         let on = s == current
         return Button { subsection = s } label: {
             HStack(spacing: 9) {
                 Image(systemName: s.icon)
-                    .font(.system(size: fs(13.5)))
+                    .font(.system(size: 15 * panelScale))
                     .foregroundStyle(on ? pal.accent : pal.muted)
-                    .frame(width: 18)
-                Text(s.label).font(.system(size: fs(14.5))).foregroundStyle(pal.fg)
+                    .frame(width: 20)
+                Text(s.label).font(.system(size: 16 * panelScale)).foregroundStyle(pal.fg)
                     .lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
                 if let lamp = lamp(for: s) { Lamp(state: lamp, pal: pal) }
             }
-            .padding(.horizontal, 9)
-            .frame(height: 30)
+            .padding(.horizontal, 10)
+            .frame(height: height)
             .background(RoundedRectangle(cornerRadius: 9).fill(on ? pal.accentbg : .clear))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(on ? pal.accentb : .clear, lineWidth: 1))
             .contentShape(Rectangle())
@@ -184,7 +187,7 @@ struct SettingsCirclePage: View {
     }
 
     private func sectionTitle(_ t: String) -> some View {
-        Text(t).font(.system(size: fs(11.5), weight: .semibold, design: .monospaced)).kerning(0.9)
+        Text(t).font(.system(size: 12 * panelScale, weight: .semibold, design: .monospaced)).kerning(0.9)
             .foregroundStyle(pal.faint)
             .padding(.horizontal, 4).padding(.bottom, 5)
     }
@@ -195,13 +198,13 @@ struct SettingsCirclePage: View {
         Button { subsection = target } label: {
             HStack(spacing: 8) {
                 if let state { Lamp(state: state, pal: pal) } else { Color.clear.frame(width: 7, height: 7) }
-                Text(label).font(.system(size: fs(14))).foregroundStyle(pal.fg).lineLimit(1)
+                Text(label).font(.system(size: 15 * panelScale)).foregroundStyle(pal.fg).lineLimit(1)
                 Spacer(minLength: 6)
-                Text(value).font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
+                Text(value).font(.system(size: 13 * panelScale, design: .monospaced)).foregroundStyle(pal.muted)
                     .lineLimit(1).truncationMode(.middle)
             }
             .padding(.horizontal, 4)
-            .frame(height: 26)
+            .frame(height: 32)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -210,7 +213,7 @@ struct SettingsCirclePage: View {
     private func legend(_ t: String, _ c: Color) -> some View {
         HStack(spacing: 5) {
             Circle().fill(c).frame(width: 7, height: 7)
-            Text(t).font(.system(size: fs(12))).foregroundStyle(pal.muted)
+            Text(t).font(.system(size: 13 * panelScale)).foregroundStyle(pal.muted)
         }
     }
 
@@ -225,7 +228,7 @@ struct SettingsCirclePage: View {
     }
 
     private var todayRing: some View {
-        let side = min(196, sideW - 28)
+        let side = sideW - 28
         let rings = self.rings
         return ZStack {
             Canvas { ctx, size in

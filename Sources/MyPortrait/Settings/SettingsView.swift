@@ -11,7 +11,7 @@ struct SettingsPane: View {
             case .app(.display):       DisplaySettingsView()
             case .app(.general):       GeneralSettingsView()
             case .app(.downloads):     AIModelsSettingsView()
-            case .app(.connections):   ConnectionsView(showsBackground: false)
+            case .app(.connections):   ConnectionsView(showsBackground: false, showsSearch: false)
             case .app(.notifications): NotificationsSettingsView()
             case .capture(.screen):    ScreenCaptureSettingsView()
             case .capture(.audio):     AudioCaptureSettingsView()
