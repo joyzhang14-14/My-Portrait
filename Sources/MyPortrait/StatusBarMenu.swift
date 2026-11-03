@@ -275,7 +275,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         menu.addItem(devModeBanner)
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "Quit My Portrait", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 
