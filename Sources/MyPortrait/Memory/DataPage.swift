@@ -196,7 +196,7 @@ struct DataPage: View {
 
     private func sectionTitle(_ t: String, trailing: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(t).font(.system(size: fs(12), weight: .semibold))
+            Text(t).font(.system(size: fs(15), weight: .semibold))
             Spacer(minLength: 0)
             if let trailing { Text(trailing).font(.system(size: fs(12), design: .monospaced)) }
         }
@@ -269,7 +269,7 @@ struct DataPage: View {
     /// 原 Neural Graph 设置(主球照片在 Profile,排序在阅读视图列表头)。
     private var settingsBox: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Graph").font(.system(size: fs(10.5), weight: .semibold))
+            Text("Graph").font(.system(size: fs(13.5), weight: .semibold))
                 .foregroundStyle(pal.faint).padding(.top, 6).padding(.bottom, 2)
             settingRow("Animation") {
                 Picker("", selection: config.binding(\.display.graphAnimationSpeed)) {
@@ -363,7 +363,7 @@ struct DataPage: View {
             .padding(.horizontal, 4)
             spark.padding(.horizontal, 4).padding(.top, 8)
             if !digest.tags.isEmpty {
-                Text("Top tags").font(.system(size: fs(11), weight: .semibold))
+                Text("Top tags").font(.system(size: fs(13.5), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 5)
                 FlowChips(items: digest.tags.map { "\($0.0)  \($0.1)" }, pal: pal)
                     .padding(.horizontal, 4)
@@ -464,7 +464,7 @@ struct DataPage: View {
     }
 
     private func cardHeader(_ crumb: String) -> some View {
-        Text(crumb).font(.system(size: fs(11), weight: .semibold))
+        Text(crumb).font(.system(size: fs(14), weight: .semibold))
             .foregroundStyle(pal.faint)
     }
 
@@ -510,7 +510,7 @@ struct DataPage: View {
             Text("\(leaves.count) \(zone == .events ? "events" : "notes")")
                 .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
                 .padding(.bottom, 6)
-            Text("By weight").font(.system(size: fs(11), weight: .semibold))
+            Text("By weight").font(.system(size: fs(13.5), weight: .semibold))
                 .foregroundStyle(pal.faint)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -593,7 +593,7 @@ struct DataPage: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(pal.rowb).frame(height: 1) }
             }
             if !info.languages.isEmpty {
-                Text("Languages").font(.system(size: fs(11), weight: .semibold))
+                Text("Languages").font(.system(size: fs(13.5), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.top, 14).padding(.bottom, 5)
                 FlowChips(items: info.languages, pal: pal)
             }
@@ -649,7 +649,7 @@ struct DataPage: View {
                 editField("Nationality", \.nationality, "e.g. Chinese")
                 editField("Ethnicity", \.ethnicity, "Optional")
                 editField("Date of birth", \.birthDate, "YYYY-MM-DD")
-                Text("Languages").font(.system(size: fs(11), weight: .semibold))
+                Text("Languages").font(.system(size: fs(13.5), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.top, 8)
                 HStack(spacing: 6) {
                     ForEach(Array(profileDraft.languages.enumerated()), id: \.offset) { i, l in

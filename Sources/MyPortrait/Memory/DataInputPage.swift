@@ -275,7 +275,7 @@ struct DataInputPage: View {
 
     private func title(_ t: String, _ trailing: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(t).font(.system(size: fs(12), weight: .semibold))
+            Text(t).font(.system(size: fs(15), weight: .semibold))
             Spacer(minLength: 0)
             if let trailing { Text(trailing).font(.system(size: fs(12), design: .monospaced)) }
         }
@@ -318,7 +318,7 @@ struct DataInputPage: View {
                     let inRange = pool.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
                     Text((selectedId == nil ? "Latest" : "Selected")
                          + (selectedApp.map { " · " + InputCaptureView.appLabel($0) } ?? ""))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(pal.faint)
+                        .font(.system(size: fs(14), weight: .semibold)).foregroundStyle(pal.faint)
                     Text("\(Self.hm(s.startMs)) – \(Self.hm(s.endMs))")
                         .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
                     Text("\(inRange.count) segment\(inRange.count == 1 ? "" : "s") · \(inRange.reduce(0) { $0 + $1.keys }) keys")

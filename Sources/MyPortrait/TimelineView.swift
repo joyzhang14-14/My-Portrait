@@ -1954,7 +1954,7 @@ private struct SectionTitle<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(title).font(.system(size: 12 * panelFont, weight: .semibold))
+            Text(title).font(.system(size: 15 * panelFont, weight: .semibold))
             if let count { Text(count).font(.system(size: 12 * panelFont, design: .monospaced)) }
             Spacer(minLength: 0)
             trailing()
