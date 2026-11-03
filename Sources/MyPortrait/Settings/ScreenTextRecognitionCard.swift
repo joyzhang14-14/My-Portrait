@@ -8,29 +8,46 @@ struct ScreenTextRecognitionCard: View {
 
     var body: some View {
         SettingsCard(title: "Screen Text Recognition") {
-            SettingsRow("Run OCR engine while idle",
+            SettingsRow("When to OCR",
                         description: backlogText,
-                        info: "**Frees around 500 MB of memory while the app is running.**\n\nScreenshots are saved as they're taken, but the text on them is read later, at the time picked below.\n\nIt only runs when macOS reports normal memory pressure and at least \(minFree) of memory can be freed right away. Compressed memory and swap don't count.\n\nTurn this off to read all waiting screenshots right away.\n\nEvents, portrait and personality — and anything sent to My Portrait Premium — wait until the text of a time range has been read.",
+                        info: "Screenshots are saved as they're taken; the text on them is read at the time picked here.\n\n• **Always**: read right away, any time.\n• **Only while charging**: any time the Mac is charging.\n• **Only while charging & lid closed**: the lid is closed.\n• **Only while charging & idle**: the lid is closed, the screen brightness is at zero, or there's been no keyboard or mouse input for 5 minutes.\n\nThe last three free around 500 MB of memory while you use the Mac. If more than 5 GB of screenshots are waiting, they run whenever the Mac is charging. OCR only runs when macOS reports normal memory pressure and at least \(minFree) of memory can be freed right away.\n\nEvents, portrait and personality — and anything sent to My Portrait Premium — wait until the text of a time range has been read.",
                         icon: "text.viewfinder") {
-                Toggle("", isOn: config.binding(\.capture.screen.deferOCR)).labelsHidden().toggleStyle(.switch)
-            }
-            SettingsDivider()
-            SettingsRow("When to run OCR",
-                        info: "• **Charging**: any time the Mac is charging.\n• **Charging & lid closed**: the lid is closed.\n• **Charging & idle**: the lid is closed, the screen brightness is at zero, or there's been no keyboard or mouse input for 5 minutes.\n\nIf more than 5 GB of screenshots are waiting, it runs whenever the Mac is charging. With the lid closed it keeps running via a background helper.",
-                        icon: "powerplug") {
-                Picker("", selection: config.binding(\.capture.screen.ocrPowerMode)) {
-                    Text("Only while charging").tag(OCRPowerMode.charging)
-                    Text("Only while charging & lid closed").tag(OCRPowerMode.chargingLidClosed)
-                    Text("Only while charging & idle").tag(OCRPowerMode.chargingIdle)
+                Picker("", selection: whenBinding) {
+                    Text("Always").tag(When.always)
+                    Text("Only while charging").tag(When.mode(.charging))
+                    Text("Only while charging & lid closed").tag(When.mode(.chargingLidClosed))
+                    Text("Only while charging & idle").tag(When.mode(.chargingIdle))
                 }
                 .pickerStyle(.menu).labelsHidden().frame(width: 240)
-                .onChange(of: config.current.capture.screen.ocrPowerMode) { _, _ in
+            }
+        }
+    }
+
+    /// 四档合成一个下拉:Always = 不延后(deferOCR 关);其余三档 = 延后 + 对应时机。
+    private enum When: Hashable {
+        case always
+        case mode(OCRPowerMode)
+    }
+
+    private var whenBinding: Binding<When> {
+        Binding(
+            get: {
+                let c = config.current.capture.screen
+                return c.deferOCR ? .mode(c.ocrPowerMode) : .always
+            },
+            set: { w in
+                switch w {
+                case .always:
+                    config.mutate { $0.capture.screen.deferOCR = false }
+                case .mode(let m):
+                    config.mutate {
+                        $0.capture.screen.deferOCR = true
+                        $0.capture.screen.ocrPowerMode = m
+                    }
                     // 合盖补 OCR 靠 helper → 改档即幂等注册(未批准则引导系统设置)。
                     SleepHelperClient.shared.enable()
                 }
-            }
-            .disabled(!config.current.capture.screen.deferOCR)
-        }
+            })
     }
 
     private var minFree: String {
