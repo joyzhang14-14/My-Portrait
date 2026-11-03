@@ -491,13 +491,22 @@ private struct ResourceChart: View {
     }
     private func color(_ v: Double) -> Color { v >= bad ? badC : v >= warn ? warnC : okC }
 
-    /// 这个时间范围里的点,和"隔多久算断开"。
+    /// 这个时间范围里的点,和"隔多久算断开"。1 小时 / 24 小时 = 每分钟一笔 + 最近几分钟的细采样;
+    /// 断开门槛放到 400 秒,容得下 health.log 补进来的每 5 分钟一笔。CPU 不知道的点(-1)不画。
     private var points: (data: [ResourceSampler.Sample], gap: TimeInterval) {
         let cut = Date().addingTimeInterval(-range.span)
+        var data: [ResourceSampler.Sample]
+        let gap: TimeInterval
         if range == .fiveMinutes, !sampler.fine.isEmpty {
-            return (sampler.fine.filter { $0.t >= cut }, ResourceSampler.fineInterval * 3)
+            data = sampler.fine.filter { $0.t >= cut }
+            gap = ResourceSampler.fineInterval * 3
+        } else {
+            let lastCoarse = sampler.coarse.last?.t ?? .distantPast
+            data = sampler.coarse.filter { $0.t >= cut } + sampler.fine.filter { $0.t > lastCoarse }
+            gap = 400
         }
-        return (sampler.coarse.filter { $0.t >= cut }, ResourceSampler.coarseInterval * 3)
+        if kind == .cpu { data = data.filter { $0.cpu >= 0 } }
+        return (data, gap)
     }
 
     var body: some View {

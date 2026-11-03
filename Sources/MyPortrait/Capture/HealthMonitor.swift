@@ -151,7 +151,7 @@ final class HealthMonitor: ObservableObject {
         }
     }
 
-    static var logFileURL: URL {
+    nonisolated static var logFileURL: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent(".portrait", isDirectory: true)
