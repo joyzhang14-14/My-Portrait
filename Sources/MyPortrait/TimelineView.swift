@@ -91,7 +91,7 @@ struct TimelineView: View {
     static let tickStep: Double = 2.4
     /// 聚焦条带一列宽(12pt 竖条 + 6pt 缝)。
     static let stripCol: CGFloat = 18
-    static let focusAnim = Animation.spring(duration: 0.45, bounce: 0.12)
+    static let focusAnim = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.45)
 
     private var pal: RingPalette { RingPalette(dark: colorScheme == .dark) }
 
@@ -406,10 +406,6 @@ struct TimelineView: View {
     private func backdrop(_ g: RingGeo) -> some View {
         ZStack {
             SidebarBackdrop()
-            RadialGradient(colors: [pal.glow, .clear], center: UnitPoint(x: g.c.x / max(1, g.size.width),
-                                                                         y: g.c.y / max(1, g.size.height)),
-                           startRadius: 0, endRadius: 434 * g.k)
-                .allowsHitTesting(false)
         }
         .frame(width: g.size.width, height: g.size.height)
     }
@@ -488,10 +484,7 @@ struct TimelineView: View {
                 ctx.stroke(tri, with: .color(pal.fg), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
                 let p = g.pt(g.r, a), rr = 5.5 * k
                 let dot = Path(ellipseIn: CGRect(x: p.x - rr, y: p.y - rr, width: rr * 2, height: rr * 2))
-                ctx.drawLayer { l in
-                    l.addFilter(.shadow(color: pal.curglow, radius: 4))
-                    l.fill(dot, with: .color(.white))
-                }
+                ctx.fill(dot, with: .color(.white))
                 ctx.stroke(dot, with: .color(.black.opacity(0.35)), lineWidth: 1)
             }
         }
@@ -613,7 +606,6 @@ struct TimelineView: View {
                     Capsule()
                         .fill(TimelineBarColor.barColor(for: frames[i].appName))
                         .frame(width: 11 * k, height: len + 11 * k)
-                        .shadow(color: cur ? pal.curglow : .clear, radius: cur ? 6 * k : 0)
                 }
                 .frame(width: 18 * k, height: 76 * k, alignment: .top)
                 .contentShape(Rectangle())
@@ -679,7 +671,6 @@ struct TimelineView: View {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(TimelineBarColor.barColor(for: app))
                 .frame(width: 12, height: barH)
-                .shadow(color: glow ? pal.curglow : .clear, radius: glow ? 6 : 0)
         }
         .frame(width: col, height: boxH, alignment: .bottom)
         .position(x: x, y: H + 6 - boxH / 2)
@@ -801,7 +792,7 @@ struct TimelineView: View {
             HStack(spacing: 9) {
                 RealAppIcon(appName: f.appName, size: 22 * fk)
                 Text(f.appName.isEmpty ? "(unknown app)" : f.appName)
-                    .font(.system(size: 15 * fk, weight: .bold, design: .monospaced))
+                    .font(.system(size: 15 * fk, weight: .semibold, design: .monospaced))
                     .foregroundStyle(pal.fg)
                     .lineLimit(1).layoutPriority(1)
                 Text("·").font(.system(size: 15 * fk)).foregroundStyle(pal.fg.opacity(0.3))
@@ -824,7 +815,7 @@ struct TimelineView: View {
 
     private func corners(_ g: RingGeo, hideToday: Bool) -> some View {
         let focus = currentFrame?.timestamp ?? Date()
-        let title = isToday ? "TODAY" : Fmt.monthDay(state.selectedDay).uppercased()
+        let title = isToday ? "Today" : Fmt.monthDay(state.selectedDay)
         return TimelineCorners(
             g: g, pal: pal, model: model, focusIndex: state.focusIndex, focusTime: focus,
             dayTitle: title, hideToday: hideToday, apps: activeApps, audio: transcripts, audioMoments: audioMoments,
@@ -1734,7 +1725,7 @@ private struct TimelineCorners: View {
         let w = g.sideW, lw = leftW
         ZStack(alignment: .topLeading) {
             // ── Active Apps ──
-            SectionTitle(pal: pal, title: "ACTIVE APPS", count: "\(apps.count)", action: reset)
+            SectionTitle(pal: pal, title: "Active apps", count: "\(apps.count)", action: reset)
                 .place(leftX, appsTop, lw)
             SideScroll(height: af.listH, enabled: af.scroll, pal: pal) {
                 ForEach(apps) { a in
@@ -1752,7 +1743,7 @@ private struct TimelineCorners: View {
             }
 
             // ── Audio ──
-            SectionTitle(pal: pal, title: "AUDIO", count: "\(audio.count)", action: reset)
+            SectionTitle(pal: pal, title: "Audio", count: "\(audio.count)", action: reset)
                 .place(leftX, audioTop, lw)
             SideScroll(height: audioH, enabled: true, pal: pal, contentHeight: $audioContentH,
                        target: currentAudioID, token: audioScrollToken, animated: audioScrollAnimated) {
@@ -1852,7 +1843,7 @@ private struct TimelineCorners: View {
         let prev = audioMoments.last { $0 < focusTime }
         let next = audioMoments.first { $0 > focusTime }
         return VStack(alignment: .leading, spacing: 2) {
-            Text("No audio around this moment.")
+            Text("No audio around this moment")
             if let p = prev { jumpLink("Previous: ", p) }
             if let n = next { jumpLink("Next: ", n) }
         }
@@ -1874,7 +1865,7 @@ private struct TimelineCorners: View {
         let n = model.blocks.count
         let si = model.blockIndex(ofFrame: focusIndex) ?? 0
         return VStack(alignment: .leading, spacing: 2) {
-            SectionTitle(pal: pal, title: "EVENT SESSION", count: nil, action: reset) {
+            SectionTitle(pal: pal, title: "Event session", count: nil, action: reset) {
                 HStack(spacing: 2) {
                     navButton("chevron.left", enabled: si > 0) { jumpToFrame(model.blocks[si - 1].f0) }
                     Text("\(n == 0 ? 0 : si + 1) / \(n)").font(.system(size: 12 * panelFont, design: .monospaced))
@@ -1895,7 +1886,7 @@ private struct TimelineCorners: View {
                                 .lineLimit(1)
                         }
                     }
-                    Text("Not summarized yet.")
+                    Text("Not summarized yet")
                         .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
                         .padding(.top, 10)
                 }
@@ -1963,7 +1954,7 @@ private struct SectionTitle<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(title).font(.system(size: 12 * panelFont, weight: .semibold)).kerning(0.96)
+            Text(title).font(.system(size: 12 * panelFont, weight: .semibold))
             if let count { Text(count).font(.system(size: 12 * panelFont, design: .monospaced)) }
             Spacer(minLength: 0)
             trailing()

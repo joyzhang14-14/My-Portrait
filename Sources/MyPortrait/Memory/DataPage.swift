@@ -116,9 +116,9 @@ struct DataPage: View {
                     rightTop(H: H)
                         .frame(width: W - rightPad - rx, height: rightTopH(H))
                         .offset(x: rx, y: rightTopY)
-                        .animation(.spring(duration: 0.42, bounce: 0.1), value: reader)
-                        .animation(.spring(duration: 0.32, bounce: 0.1), value: profileEditing)
-                        .animation(.spring(duration: 0.32, bounce: 0.1), value: editorH)
+                        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.42), value: reader)
+                        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.32), value: profileEditing)
+                        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.32), value: editorH)
                 }
             }
             .frame(width: W, height: H, alignment: .topLeading)
@@ -175,10 +175,6 @@ struct DataPage: View {
     private func backdrop(W: CGFloat, H: CGFloat) -> some View {
         ZStack {
             SidebarBackdrop()
-            RadialGradient(colors: [pal.glow, .clear],
-                           center: UnitPoint(x: 0.5, y: 0.5),
-                           startRadius: 0, endRadius: 434)
-                .allowsHitTesting(false)
         }
         .frame(width: W, height: H)
     }
@@ -200,7 +196,7 @@ struct DataPage: View {
 
     private func sectionTitle(_ t: String, trailing: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Text(t).font(.system(size: fs(12), weight: .semibold)).kerning(0.96)
+            Text(t).font(.system(size: fs(12), weight: .semibold))
             Spacer(minLength: 0)
             if let trailing { Text(trailing).font(.system(size: fs(12), design: .monospaced)) }
         }
@@ -213,7 +209,7 @@ struct DataPage: View {
 
     private var navPanel: some View {
         VStack(alignment: .leading, spacing: 4) {
-            sectionTitle("DATA")
+            sectionTitle("Data")
             navRow(.portrait, "Portrait", "person", "\(counts.portraitNotes) notes · \(counts.portraitCategories) categories",
                    on: zone == .portrait) { switchTo(.portrait) }
             navRow(.events, "Events", "point.3.connected.trianglepath.dotted",
@@ -225,7 +221,7 @@ struct DataPage: View {
                 Rectangle().fill(pal.rowb).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 6)
                 navRow(nil, "Settings", "slider.horizontal.3", "Graph animation and links",
                        on: false, open: settingsOpen) {
-                    withAnimation(.spring(duration: 0.32, bounce: 0.1)) { settingsOpen.toggle() }
+                    withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.32)) { settingsOpen.toggle() }
                 }
                 if settingsOpen { settingsBox.transition(.opacity) }
             }
@@ -273,7 +269,7 @@ struct DataPage: View {
     /// 原 Neural Graph 设置(主球照片在 Profile,排序在阅读视图列表头)。
     private var settingsBox: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("GRAPH").font(.system(size: fs(10.5), weight: .semibold)).kerning(0.7)
+            Text("Graph").font(.system(size: fs(10.5), weight: .semibold))
                 .foregroundStyle(pal.faint).padding(.top, 6).padding(.bottom, 2)
             settingRow("Animation") {
                 Picker("", selection: config.binding(\.display.graphAnimationSpeed)) {
@@ -311,7 +307,7 @@ struct DataPage: View {
 
     private var recentPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle(zone == .events ? "RECENT" : "RECENTLY UPDATED",
+            sectionTitle(zone == .events ? "Recent" : "Recently updated",
                          trailing: refDay.map { "until \(DataDigest.md($0))" })
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
@@ -356,18 +352,18 @@ struct DataPage: View {
 
     private var weekPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionTitle(refDay.map { "WEEK OF \(DataDigest.md($0).uppercased())" } ?? "THIS WEEK")
+            sectionTitle(refDay.map { "Week of \(DataDigest.md($0))" } ?? "This week")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("+\(digest.week)").font(.system(size: fs(30), weight: .bold))
+                Text("+\(digest.week)").font(.system(size: fs(30), weight: .medium).monospacedDigit())
                     .foregroundStyle(pal.fg)
                 let d = digest.week - digest.prevWeek
-                Text("new \(zone == .events ? "events" : "notes") · \(d >= 0 ? "▲" : "▼") \(abs(d)) vs last week")
+                Text("new \(zone == .events ? "events" : "notes") · " + (d == 0 ? "same as last week" : "\(d > 0 ? "+" : "−")\(abs(d)) vs last week"))
                     .font(.system(size: fs(13))).foregroundStyle(pal.muted)
             }
             .padding(.horizontal, 4)
             spark.padding(.horizontal, 4).padding(.top, 8)
             if !digest.tags.isEmpty {
-                Text("TOP TAGS").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
+                Text("Top tags").font(.system(size: fs(11), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 5)
                 FlowChips(items: digest.tags.map { "\($0.0)  \($0.1)" }, pal: pal)
                     .padding(.horizontal, 4)
@@ -419,8 +415,8 @@ struct DataPage: View {
                     }
                 }
                 .padding(.horizontal, 12).frame(height: 34)
-                .background(Capsule().fill(pal.pill))
-                .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 10).fill(pal.pill))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(pal.pillb, lineWidth: 1))
                 roundButton("list.bullet", on: reader, help: "Reader — read and edit as a list") {
                     reader.toggle()
                     if reader { profileEditing = false }
@@ -468,14 +464,14 @@ struct DataPage: View {
     }
 
     private func cardHeader(_ crumb: String) -> some View {
-        Text(crumb).font(.system(size: fs(11), weight: .semibold, design: .monospaced))
+        Text(crumb).font(.system(size: fs(11), weight: .semibold))
             .foregroundStyle(pal.faint)
     }
 
     private func searchCard(_ q: String) -> some View {
         let hits = scene.nodes.filter { !$0.kind.isHub && $0.title.localizedCaseInsensitiveContains(q) }
         return VStack(alignment: .leading, spacing: 4) {
-            cardHeader("SEARCH")
+            cardHeader("Search")
             Text("\(hits.count) result\(hits.count == 1 ? "" : "s")")
                 .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
             Text("matching balls stay lit in the graph")
@@ -500,7 +496,7 @@ struct DataPage: View {
             .sorted { $0.radius > $1.radius }
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                cardHeader(zone == .events ? "GROUP" : "CATEGORY")
+                cardHeader(zone == .events ? "Group" : "Category")
                 Spacer()
                 Button { reader = true } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: fs(12)))
@@ -514,7 +510,7 @@ struct DataPage: View {
             Text("\(leaves.count) \(zone == .events ? "events" : "notes")")
                 .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.muted)
                 .padding(.bottom, 6)
-            Text("BY WEIGHT").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
+            Text("By weight").font(.system(size: fs(11), weight: .semibold))
                 .foregroundStyle(pal.faint)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -568,7 +564,7 @@ struct DataPage: View {
                                         ("Date of birth", info.birthDate)].filter { !$0.1.isEmpty }
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                cardHeader("PROFILE")
+                cardHeader("Profile")
                 Spacer()
                 Button {
                     profileDraft = info
@@ -597,7 +593,7 @@ struct DataPage: View {
                 .overlay(alignment: .bottom) { Rectangle().fill(pal.rowb).frame(height: 1) }
             }
             if !info.languages.isEmpty {
-                Text("LANGUAGES").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
+                Text("Languages").font(.system(size: fs(11), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.top, 14).padding(.bottom, 5)
                 FlowChips(items: info.languages, pal: pal)
             }
@@ -637,7 +633,7 @@ struct DataPage: View {
     private var profileEditor: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                cardHeader("EDIT PROFILE")
+                cardHeader("Edit profile")
                 MainBallPhotoSlot().padding(.vertical, 2)
                 editField("First name", \.firstName, "First name")
                 editField("Middle name", \.middleName, "Optional")
@@ -653,7 +649,7 @@ struct DataPage: View {
                 editField("Nationality", \.nationality, "e.g. Chinese")
                 editField("Ethnicity", \.ethnicity, "Optional")
                 editField("Date of birth", \.birthDate, "YYYY-MM-DD")
-                Text("LANGUAGES").font(.system(size: fs(11), weight: .semibold)).kerning(0.77)
+                Text("Languages").font(.system(size: fs(11), weight: .semibold))
                     .foregroundStyle(pal.faint).padding(.top, 8)
                 HStack(spacing: 6) {
                     ForEach(Array(profileDraft.languages.enumerated()), id: \.offset) { i, l in

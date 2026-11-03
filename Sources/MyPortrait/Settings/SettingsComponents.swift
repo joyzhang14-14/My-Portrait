@@ -21,10 +21,9 @@ struct SettingsCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             if let title {
                 HStack(spacing: 0) {
-                    Text(title.uppercased())
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .tracking(0.8)
-                        .foregroundStyle(Theme.textPrimary.opacity(0.45))
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
                     if let info { SettingsInfoBadge(text: info) }
                 }
                 .padding(.leading, 14)

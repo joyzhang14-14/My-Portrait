@@ -255,6 +255,8 @@ struct ContentView: View {
         GeometryReader { geo in
             pageContent
                 .environment(\.panelScale, PanelScale.of(geo.size))
+                // 一个强调色:系统开关 / 滑块也用它,不再另冒一个系统蓝
+                .tint(Theme.accent)
         }
             // 三个页面共用同一个切换条,钉在窗口左上角(红绿灯右边),切页不跳
             .overlay(alignment: .topLeading) {

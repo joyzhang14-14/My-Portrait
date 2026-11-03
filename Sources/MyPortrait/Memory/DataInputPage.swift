@@ -112,11 +112,11 @@ struct DataInputPage: View {
             rightTop
                 .frame(width: sideW, height: 44 + cardH)
                 .offset(x: W - rightPad - sideW, y: rightTopY)
-                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
+                .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3), value: cardH)
             appBars
                 .frame(width: sideW, height: lowH)
                 .offset(x: W - rightPad - sideW, y: H - 22 - lowH)
-                .animation(.spring(duration: 0.3, bounce: 0.1), value: cardH)
+                .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3), value: cardH)
         }
         .frame(width: W, height: H, alignment: .topLeading)
         .task(id: day) { await reload() }
@@ -233,7 +233,7 @@ struct DataInputPage: View {
                 Text("No typing this day").font(.system(size: fs(15))).foregroundStyle(pal.muted)
             } else {
                 // 圆心是当天输入总量 = 击键 + 点击(两项分开的数在左下 STATS)
-                Text((totalKeys + clicks).formatted()).font(.system(size: 40, weight: .bold)).foregroundStyle(pal.fg)
+                Text((totalKeys + clicks).formatted()).font(.system(size: 40, weight: .medium).monospacedDigit()).foregroundStyle(pal.fg)
                 Text("total activity").font(.system(size: fs(14))).foregroundStyle(pal.muted)
                 Text("\(Self.hm(segments.first!.startMs)) – \(Self.hm(segments.last!.endMs)) active")
                     .font(.system(size: fs(12.5), design: .monospaced)).foregroundStyle(pal.faint)
@@ -275,7 +275,7 @@ struct DataInputPage: View {
 
     private func title(_ t: String, _ trailing: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(t).font(.system(size: fs(12), weight: .semibold)).kerning(0.96)
+            Text(t).font(.system(size: fs(12), weight: .semibold))
             Spacer(minLength: 0)
             if let trailing { Text(trailing).font(.system(size: fs(12), design: .monospaced)) }
         }
@@ -289,8 +289,8 @@ struct DataInputPage: View {
                 TextField("Search what you typed", text: $query).textFieldStyle(.plain).font(.system(size: 14))
             }
             .padding(.horizontal, 12).frame(height: 34)
-            .background(Capsule().fill(pal.pill))
-            .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 10).fill(pal.pill))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(pal.pillb, lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     // 搜索:列出含这段文字的输入,点一条看全文
@@ -316,8 +316,8 @@ struct DataInputPage: View {
                 } else if let s = current {
                     // 选中那块的时间区间里**所有 app** 的输入,一段一张小卡,按时间排
                     let inRange = pool.filter { $0.endMs >= s.startMs && $0.startMs <= s.endMs }
-                    Text((selectedId == nil ? "LATEST" : "SELECTED")
-                         + (selectedApp.map { " · " + InputCaptureView.appLabel($0).uppercased() } ?? ""))
+                    Text((selectedId == nil ? "Latest" : "Selected")
+                         + (selectedApp.map { " · " + InputCaptureView.appLabel($0) } ?? ""))
                         .font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(pal.faint)
                     Text("\(Self.hm(s.startMs)) – \(Self.hm(s.endMs))")
                         .font(.system(size: fs(18), weight: .semibold)).foregroundStyle(pal.fg)
@@ -349,7 +349,7 @@ struct DataInputPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } }
                 } else {
-                    Text("Nothing typed on this day.").font(.system(size: fs(14))).foregroundStyle(pal.faint)
+                    Text("Nothing typed on this day").font(.system(size: fs(14))).foregroundStyle(pal.faint)
                 }
             }
             .padding(16)
@@ -364,7 +364,7 @@ struct DataInputPage: View {
         let typing = segments.reduce(0) { $0 + max(1, Int(($1.endMs - $1.startMs) / 60_000)) }
         let peak = buckets.rawTotals.max() ?? 0
         return VStack(alignment: .leading, spacing: 0) {
-            title("STATS")
+            title("Stats")
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
                     stat(totalKeys.formatted(), "keystrokes")
@@ -383,7 +383,7 @@ struct DataInputPage: View {
 
     private func stat(_ v: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(v).font(.system(size: 30, weight: .bold)).foregroundStyle(pal.fg)
+            Text(v).font(.system(size: 30, weight: .medium).monospacedDigit()).foregroundStyle(pal.fg)
                 .lineLimit(1).minimumScaleFactor(0.6)
             Text(label).font(.system(size: fs(13))).foregroundStyle(pal.muted)
         }
@@ -398,7 +398,7 @@ struct DataInputPage: View {
         let rows = byApp.sorted { $0.value > $1.value }
         let mx = max(1, rows.first?.value ?? 1)
         return VStack(alignment: .leading, spacing: 0) {
-            title(Calendar.current.isDateInToday(day) ? "TODAY" : Self.dayFmt.string(from: day).uppercased())
+            title(Calendar.current.isDateInToday(day) ? "Today" : Self.dayFmt.string(from: day))
             GeometryReader { g in SideScroll(height: g.size.height, enabled: true, pal: pal) {
                 VStack(spacing: 4) {
                     ForEach(rows, id: \.key) { app, n in

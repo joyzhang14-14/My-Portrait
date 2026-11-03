@@ -149,7 +149,7 @@ struct DataReaderView: View {
     private var divider: some View { Rectangle().fill(pal.rowb).frame(width: 1) }
 
     private func sectionLabel(_ t: String) -> some View {
-        Text(t).font(.system(size: 11, weight: .semibold)).kerning(0.77).foregroundStyle(pal.faint)
+        Text(t).font(.system(size: 12, weight: .semibold)).foregroundStyle(pal.faint)
     }
 
     private func dot(_ c: Color, _ d: CGFloat) -> some View { Circle().fill(c).frame(width: d, height: d) }
@@ -175,7 +175,7 @@ struct DataReaderView: View {
             .mapValues(\.count)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                sectionLabel(isEvents ? "GROUPS" : "CATEGORIES")
+                sectionLabel(isEvents ? "Groups" : "Categories")
                 Spacer()
                 if isEvents {
                     toolButton("plus", "New group") { newGroupFor = nil; newGroupSheet = true }
@@ -368,7 +368,7 @@ struct DataReaderView: View {
         let n = entries.filter { groupOf[$0.id] == g.key }.count
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                HStack { crumb(nil, isEvents ? "GROUP" : "CATEGORY"); Spacer(); backButton }
+                HStack { crumb(nil, isEvents ? "Group" : "Category"); Spacer(); backButton }
                 HStack(spacing: 10) {
                     dot(color(g.key), 14)
                     Text(g.title).font(.system(size: 22, weight: .semibold)).foregroundStyle(pal.fg)
@@ -524,7 +524,7 @@ struct DataReaderView: View {
 
     private func labeled<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(0.77)
+            Text(label).font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(pal.faint)
             FlowLayout(spacing: 6) { content() }
         }
@@ -559,7 +559,7 @@ struct DataReaderView: View {
             HStack(spacing: 6) {
                 Image(systemName: on.wrappedValue ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                Text(title.uppercased()).font(.system(size: 11, weight: .semibold)).kerning(0.77)
+                Text(title).font(.system(size: 12, weight: .semibold))
                 if let count { Text("\(count)").font(.system(size: 11, design: .monospaced)) }
             }
             .foregroundStyle(pal.faint).contentShape(Rectangle())
@@ -625,7 +625,7 @@ struct DataReaderView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    crumb(nil, "EDITING")
+                    crumb(nil, "Editing")
                     Spacer()
                     Button("Cancel") { editing = false }.keyboardShortcut(.cancelAction)
                     Button("Save") { save(e) }.keyboardShortcut("s", modifiers: .command)

@@ -603,7 +603,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 跟其余视图不一致的色块。
         window.backgroundColor = NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
-                ? NSColor(red: 0.97, green: 0.96, blue: 0.99, alpha: 1.0)
+                ? NSColor(white: 0.98, alpha: 1.0)
                 : .black
         }
         // Explicit unhide — some macOS 26 chrome configurations hide these

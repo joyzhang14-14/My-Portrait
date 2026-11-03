@@ -141,9 +141,8 @@ struct GraphFloatWindow: View {
 
     private var derivedChips: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("DERIVED FROM EVENTS")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .tracking(0.6)
+            Text("Derived from events")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
             FlowLayout(spacing: 5) {
                 ForEach(derivedRefs) { ref in
@@ -166,9 +165,8 @@ struct GraphFloatWindow: View {
 
     private var wrChips: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("DERIVED FROM WRITING RECORDS")
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .tracking(0.6)
+            Text("Derived from writing records")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
             FlowLayout(spacing: 5) {
                 ForEach(wrIds, id: \.self) { id in

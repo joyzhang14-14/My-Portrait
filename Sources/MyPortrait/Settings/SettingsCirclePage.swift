@@ -75,10 +75,6 @@ struct SettingsCirclePage: View {
     private func backdrop(W: CGFloat, H: CGFloat, cx: CGFloat) -> some View {
         ZStack {
             SidebarBackdrop()
-            RadialGradient(colors: [pal.glow, .clear],
-                           center: UnitPoint(x: cx / max(1, W), y: 0.4),
-                           startRadius: 0, endRadius: 420)
-                .allowsHitTesting(false)
         }
         .frame(width: W, height: H)
     }
@@ -88,12 +84,12 @@ struct SettingsCirclePage: View {
     /// 行高按窗口高度分:15 行 + 4 个组标题正好铺满左列,窗口矮了最少 30、高了最多 42。
     private func navList(H: CGFloat) -> some View {
         let avail = H - navTop - 22
-        let rowH = max(30, min(42, (avail - 4 * 26 - 30) / 15))
+        let rowH = (max(32, min(40, (avail - 4 * 26 - 30) / 15)) / 4).rounded(.down) * 4
         return SideScroll(height: avail, enabled: navContentH > avail + 1, pal: pal,
                           contentHeight: $navContentH) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(SettingsSubsection.Group.allCases, id: \.self) { grp in
-                    sectionTitle(grp.rawValue)
+                    sectionTitle(grp.rawValue.capitalized)
                         .padding(.top, grp == .app ? 0 : 10)
                     ForEach(SettingsSubsection.allCases.filter { $0.group == grp }) { s in
                         navRow(s, height: rowH)
@@ -155,7 +151,7 @@ struct SettingsCirclePage: View {
         let ring = max(120, min(sideW - 28, H - statusTop - 22 - 12 - 390 - 70))
         return VStack(alignment: .leading, spacing: 12) {
             box {
-                sectionTitle("TODAY")
+                sectionTitle("Today")
                 todayRing(side: ring)
                     .frame(maxWidth: .infinity)
                 HStack(spacing: 12) {
@@ -167,17 +163,17 @@ struct SettingsCirclePage: View {
                 .padding(.top, 6)
             }
             box {
-                sectionTitle("CAPTURE")
+                sectionTitle("Capture")
                 let c = config.current.capture
                 statusRow("Screen", c.screen.enabled ? .on : .off, c.screen.enabled ? "On" : "Off", .capture(.screen))
                 statusRow("Audio", c.audio.enabled ? .on : .off, c.audio.enabled ? "On" : "Off", .capture(.audio))
                 statusRow("Typing", c.typingCaptureEnabled ? .on : .off, c.typingCaptureEnabled ? "On" : "Off", .capture(.typing))
-                sectionTitle("WORKFLOW").padding(.top, 8)
+                sectionTitle("Workflow").padding(.top, 8)
                 statusRow("Needs attention", attention > 0 ? .warn : .on,
                           attention > 0 ? "\(attention)" : "None", .workflow(.changelog))
                 statusRow("Events", config.current.scheduler.event.frequency == .off ? .off : .on,
                           eventsSchedule, .workflow(.eventsProcessor))
-                sectionTitle("DATA").padding(.top, 8)
+                sectionTitle("Data").padding(.top, 8)
                 statusRow("Storage", nil, usedBytes.map(Self.bytes) ?? "Measuring…", .data(.storage))
                 statusRow("Free", nil, freeBytes.map(Self.bytes) ?? "—", .data(.storage))
                 statusRow("Health", health.unhealthy ? .warn : .on,
@@ -205,7 +201,7 @@ struct SettingsCirclePage: View {
     }
 
     private func sectionTitle(_ t: String) -> some View {
-        Text(t).font(.system(size: 12 * panelScale, weight: .semibold, design: .monospaced)).kerning(0.9)
+        Text(t).font(.system(size: 13 * panelScale, weight: .semibold))
             .foregroundStyle(pal.faint)
             .padding(.horizontal, 4).padding(.bottom, 5)
     }
@@ -222,7 +218,7 @@ struct SettingsCirclePage: View {
                     .lineLimit(1).truncationMode(.middle)
             }
             .padding(.horizontal, 4)
-            .frame(height: 34)
+            .frame(height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -238,10 +234,11 @@ struct SettingsCirclePage: View {
     // MARK: 今天的三条细圈
 
     private func ringColor(_ i: Int) -> Color {
+        // 屏幕是底色(中性灰),音频 / 打字各一个色;琥珀强调色留给打字
         switch i {
-        case 0: return pal.accent
+        case 0: return pal.muted
         case 1: return pal.audio
-        default: return Color(red: 0.88, green: 0.57, blue: 0.18)
+        default: return pal.accent
         }
     }
 
@@ -265,7 +262,7 @@ struct SettingsCirclePage: View {
                 }
             }
             VStack(spacing: 2) {
-                Text(rings.frames.formatted()).font(.system(size: fs(36), weight: .bold)).foregroundStyle(pal.fg)
+                Text(rings.frames.formatted()).font(.system(size: fs(36), weight: .medium).monospacedDigit()).foregroundStyle(pal.fg)
                 Text("frames captured").font(.system(size: fs(15))).foregroundStyle(pal.muted)
                 if let span = rings.activeSpan {
                     Text(span).font(.system(size: fs(13.5), design: .monospaced)).foregroundStyle(pal.faint)
@@ -317,7 +314,6 @@ private struct Lamp: View {
         case .off:  pal.faint
         }
         Circle().fill(c).frame(width: 7, height: 7)
-            .shadow(color: state == .off ? .clear : c.opacity(0.8), radius: 3)
     }
 }
 

@@ -947,7 +947,7 @@ struct TypingCaptureSettingsView: View {
             info: "Input methods seen while you typed. Each keystroke records which one was active, so text typed with pinyin or other input methods can be read back correctly."
         ) {
             if inputSources.isEmpty {
-                Text("No input method recorded yet.")
+                Text("No input method recorded yet")
                     .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
                     .padding(.horizontal, 14).padding(.vertical, 12)
             } else {

@@ -30,9 +30,13 @@ enum Theme {
     })
     static let stroke = Color(nsColor: .separatorColor)
 
-    /// Blue accent — close to the indigo ambient-background blob so
-    /// highlights feel native to the gradient behind them. 不分主题。
-    static let accent = Color(hue: 0.60, saturation: 0.70, brightness: 0.98)
+    /// 强调色:琥珀(表盘夜光 / 台灯)。只用在选中、主操作和那一个关键数字上;
+    /// 浅色主题用深一档,保证当文字用时对比度够。
+    static let accent = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+            ? NSColor(red: 0.72, green: 0.45, blue: 0.06, alpha: 1)
+            : NSColor(red: 0.91, green: 0.64, blue: 0.24, alpha: 1)
+    })
 
     // MARK: Spacing scale — use these instead of magic numbers
     enum Space {
@@ -121,8 +125,7 @@ extension View {
 
 // MARK: - Sidebar backdrop
 
-/// Sidebar / main pane 的「静态」背景。Dark 走近黑 + 紫色 glow,Light 走奶白
-/// + 浅薰衣草 glow —— 跨主题都给 glass 卡一个能"浮起来"的底色。
+/// Sidebar / main pane 的「静态」背景:中性灰阶,上浅下深一点点,没有色光晕。
 ///
 /// `.ignoresSafeArea()` lives inside the body (same as `AmbientBackground`)
 /// so that when used via `.background(SidebarBackdrop())` it reliably fills
@@ -134,26 +137,11 @@ struct SidebarBackdrop: View {
     var body: some View {
         ZStack {
             if colorScheme == .light {
-                // Light:奶白 → 极浅薰衣草。底色暖,跟 ultraThinMaterial 玻璃
-                // 卡叠加后高级感强,不像纯白那么平。
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.97, green: 0.96, blue: 0.99),
-                        Color(red: 0.93, green: 0.92, blue: 0.96),
-                    ],
-                    startPoint: .top, endPoint: .bottom)
-                // 浅薰衣草 glow,比 dark 强一些(light 底色亮,glow 不强看不出)。
-                RadialGradient(
-                    colors: [Color(hue: 0.72, saturation: 0.30, brightness: 0.92).opacity(0.40), .clear],
-                    center: .topLeading, startRadius: 0, endRadius: 420)
+                LinearGradient(colors: [Color(white: 0.98), Color(white: 0.955)],
+                               startPoint: .top, endPoint: .bottom)
             } else {
-                // Dark:原近黑 + 紫色 glow。
-                LinearGradient(
-                    colors: [Color(white: 0.10), Color(white: 0.05)],
-                    startPoint: .top, endPoint: .bottom)
-                RadialGradient(
-                    colors: [Theme.accent.opacity(0.13), .clear],
-                    center: .topLeading, startRadius: 0, endRadius: 340)
+                LinearGradient(colors: [Color(white: 0.10), Color(white: 0.06)],
+                               startPoint: .top, endPoint: .bottom)
             }
         }
         .ignoresSafeArea()
