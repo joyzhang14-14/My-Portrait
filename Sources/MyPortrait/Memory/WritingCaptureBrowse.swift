@@ -76,6 +76,14 @@ enum WritingCaptureBrowse {
         }.value
     }
 
+    /// 击键库里记到过的输入法;演示数据没有,返回空。
+    static func inputSources() async -> [InputSourceUsage] {
+        guard !isDemo, let store else { return [] }
+        return await Task.detached(priority: .utility) {
+            (try? store.inputSources()) ?? []
+        }.value
+    }
+
     static func keystrokes(startMs: Int64, endMs: Int64,
                            excludeBundleIds: Set<String>) async -> [KeystrokeEntry] {
         if isDemo {

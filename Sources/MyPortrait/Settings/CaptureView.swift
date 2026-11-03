@@ -1,3 +1,4 @@
+import Carbon
 import SwiftUI
 
 /// Audio Recording 设置子分区：麦克风 + 转录 + 说话人。
@@ -862,6 +863,8 @@ struct TypingCaptureSettingsView: View {
     @Environment(\.services) private var services
     /// 用户打过字的 app（bundle id）—— 给两个 app 选择器的下拉用。
     @State private var discovered: [String] = []
+    /// 击键库里记到过的输入法。
+    @State private var inputSources: [InputSourceUsage] = []
 
     var body: some View {
         // dev mode:capture / privacy 属于后台 section,永远读真实 config,
@@ -881,11 +884,13 @@ struct TypingCaptureSettingsView: View {
                      }) {
             Group {
                 typingSection
+                inputMethodSection
                 blacklistSection
             }
         }
         .task {
             discovered = await Self.loadDiscovered(services?.typingStore)
+            inputSources = await WritingCaptureBrowse.inputSources()
         }
     }
 
@@ -933,6 +938,50 @@ struct TypingCaptureSettingsView: View {
                 .map(\.bundleId)
                 .filter { seen.insert($0).inserted } ?? []
         }.value
+    }
+
+    /// 检测到的输入法:击键库里每条击键都带输入源,列出出现过的每一个。
+    private var inputMethodSection: some View {
+        SettingsCard(
+            title: "Detected input methods",
+            info: "Input methods seen while you typed. Each keystroke records which one was active, so text typed with pinyin or other input methods can be read back correctly."
+        ) {
+            if inputSources.isEmpty {
+                Text("No input method recorded yet.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(inputSources.enumerated()), id: \.element.id) { i, src in
+                        if i > 0 { SettingsDivider() }
+                        SettingsRow(Self.inputSourceName(src.id), description: src.id,
+                                    icon: src.id.contains(".keylayout.") ? "keyboard" : "character.cursor.ibeam") {
+                            Text("\(src.keys.formatted()) keys · \(Self.lastSeen(src.lastMs))")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 输入源 ID → 系统里的显示名(如 "Pinyin - Simplified");这台 Mac 上没装的就用 ID 最后一段。
+    private static func inputSourceName(_ id: String) -> String {
+        let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+        if let list = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource],
+           let src = list.first,
+           let ptr = TISGetInputSourceProperty(src, kTISPropertyLocalizedName) {
+            return Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+        }
+        return id.split(separator: ".").last.map(String.init) ?? id
+    }
+
+    private static func lastSeen(_ ms: Int64) -> String {
+        let d = Date(timeIntervalSince1970: Double(ms) / 1000)
+        if Calendar.current.isDateInToday(d) { return "today" }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM d"
+        return f.string(from: d)
     }
 
     private var typingSection: some View {

@@ -28,6 +28,17 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 击键里记到过的输入法(输入源 ID),按击键数从多到少;没记输入源的旧行不算。
+    func inputSources() throws -> [InputSourceUsage] {
+        try inputPool.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT input_source AS id, COUNT(*) AS n, MAX(ts_ms) AS last FROM keystroke_log
+                WHERE input_source IS NOT NULL AND input_source != ''
+                GROUP BY input_source ORDER BY n DESC
+                """).map { InputSourceUsage(id: $0["id"], keys: $0["n"], lastMs: $0["last"]) }
+        }
+    }
+
     func keystrokesInRange(
         startMs: Int64, endMs: Int64, excludeBundleIds: Set<String>
     ) throws -> [KeystrokeEntry] {
@@ -141,4 +152,11 @@ struct WritingRecordViewRow: Sendable, Identifiable {
     let kind: String                 // "long_form" | "short_form" | "other"
     let workerRunId: String?
     let createdAt: Int64
+}
+
+/// 一个输入法在击键库里的用量。
+struct InputSourceUsage: Sendable, Identifiable {
+    let id: String
+    let keys: Int
+    let lastMs: Int64
 }
