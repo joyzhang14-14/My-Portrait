@@ -32,12 +32,15 @@ final class HealthMonitor: ObservableObject {
     /// 后台无窗时的内存占用才是干扰用户用电脑的部分,MEM 行标 fg/bg 区分。
     /// @Published:关窗只是隐藏,页面视图树还活着,永动动画会继续按刷新率
     /// 重绘看不见的窗口(实测主线程 35% CPU)。视图观察它,不可见时停动画。
-    @Published var windowVisible = true
+    @Published var windowVisible = true {
+        didSet { ResourceSampler.shared.setFine(windowVisible) }
+    }
 
     private var memSamplerTimer: Timer?
     private var memPressureSource: DispatchSourceMemoryPressure?
 
     private init() {
+        ResourceSampler.shared.start(windowVisible: windowVisible)
         startMemorySampler()
         startMemoryPressureRelief()
     }

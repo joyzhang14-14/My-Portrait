@@ -26,15 +26,17 @@ struct CaptureHealthView: View {
     @State private var exportedBundleURL: URL?
     @State private var exportedBundleMode: DiagnosticBundleMode = .publicReport
     @State private var showUploadGuide = false
+    @State private var sampler = ResourceSampler.shared
+    @State private var usageRange: UsageRange = .fiveMinutes
+    @State private var detailsOpen = false
 
     var body: some View {
         SettingsPage("Health", onResetCurrentPage: nil) {
 
             statusCard
-            visionCard
-            audioCard
-            pauseCard
+            usageCard
             recentCard
+            detailsCard
             diagnosticCard
         }
         .onAppear { startRefresh() }
@@ -199,6 +201,17 @@ struct CaptureHealthView: View {
 
     private var statusCard: some View {
         let active = !recent.isEmpty && Self.activeWithinSec(recent.last!, sec: 300)
+        if let issue = sampler.issue {
+            let since = sampler.issueSince.map { "since \(Self.shortTime($0))" } ?? ""
+            return SettingsCard(title: "Status") {
+                SettingsRow(issue == "CPU high" ? "CPU has been high" : "Memory is high",
+                            icon: "exclamationmark.triangle.fill") {
+                    Text(since)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.85))
+                }
+            }
+        }
         // 灰字说明这一页全收进 ⓘ,但这一行的副文是**当前状态本身**,不是解释 ——
         // 塞进 ⓘ 等于把唯一有用的信息藏起来。改放右侧值位(跟下面各卡的
         // 数值行同一个位置),灰字没了,信息还在。
@@ -216,49 +229,100 @@ struct CaptureHealthView: View {
         }
     }
 
-    private var visionCard: some View {
-        SettingsCard(title: "Vision", info: "If \"Silent loss\" keeps rising, some screenshots aren't being saved.") {
-            kv("Uptime",         Self.uptimeStr(vision.uptimeSec))
-            SettingsDivider()
-            kv("Capture attempts", "\(vision.captureAttempts)")
-            SettingsDivider()
-            kv("Frames persisted", "\(vision.framesPersisted)")
-            SettingsDivider()
-            kv("Dedup skips",      "\(vision.dedupSkips)")
-            SettingsDivider()
-            kv("Silent loss",      "\(vision.silentLoss)")
-            SettingsDivider()
-            kv("Last attempt",     Self.tsAgo(vision.lastAttemptMs))
-            SettingsDivider()
-            kv("Last DB write",    Self.tsAgo(vision.lastDbWriteMs))
+    /// CPU / 内存两张趋势图,共用一个时间范围。
+    private var usageCard: some View {
+        SettingsCard(title: "Usage", info: "My Portrait's own CPU and memory. Green is normal; the part above the dashed line turns orange, and red past the limit. Gaps are times the app wasn't running.") {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Picker("", selection: $usageRange) {
+                        ForEach(UsageRange.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.menu).labelsHidden().fixedSize()
+                }
+                .padding(.horizontal, 14).padding(.top, 10)
+                ResourceChart(kind: .cpu, range: usageRange, sampler: sampler)
+                SettingsDivider()
+                ResourceChart(kind: .memory, range: usageRange, sampler: sampler)
+            }
         }
     }
 
-    private var audioCard: some View {
-        SettingsCard(title: "Audio") {
-            kv("Uptime",            Self.uptimeStr(audio.uptimeSec))
-            SettingsDivider()
-            kv("Chunks produced",   "\(audio.chunksProduced)")
-            SettingsDivider()
-            kv("Chunks transcribed","\(audio.chunksTranscribed)")
-            SettingsDivider()
-            kv("Pending queue",     "\(pendingAudioCount)")
-            SettingsDivider()
-            kv("Oldest pending",    pendingAudioCount > 0 ? "\(pendingAudioOldestAgeSec)s" : "—")
+    /// 原来的 Vision / Audio / 暂停原因三张卡,默认收起。
+    private var detailsCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.25)) { detailsOpen.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .rotationEffect(.degrees(detailsOpen ? 90 : 0))
+                            .foregroundStyle(Theme.textSecondary)
+                        Text("Details").font(.system(size: 14, weight: .medium))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).frame(height: 40)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if detailsOpen {
+                    detailsGroup("Vision") { visionRows }
+                    detailsGroup("Audio") { audioRows }
+                    detailsGroup("Why capture is paused") { pauseRows }
+                }
+            }
         }
     }
 
-    private var pauseCard: some View {
-        SettingsCard(title: "Why capture is paused",
-                     info: "When any of these is on, capture pauses on purpose — this isn't a problem.") {
-            kv("DRM active",                pauseState.drmActive ? "ON" : "off")
-            SettingsDivider()
-            kv("Screen asleep",             pauseState.screenAsleep ? "ON" : "off")
-            SettingsDivider()
-            kv("Capture disabled",          pauseState.captureDisabled ? "ON" : "off")
-            SettingsDivider()
-            kv("Audio transcribe (battery)", pauseState.audioTranscriptionPaused ? "ON" : "off")
+    private func detailsGroup<C: View>(_ title: String, @ViewBuilder _ rows: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 2)
+            rows()
         }
+    }
+
+    @ViewBuilder private var visionRows: some View {
+        kv("Uptime",         Self.uptimeStr(vision.uptimeSec))
+        SettingsDivider()
+        kv("Capture attempts", "\(vision.captureAttempts)")
+        SettingsDivider()
+        kv("Frames persisted", "\(vision.framesPersisted)")
+        SettingsDivider()
+        kv("Dedup skips",      "\(vision.dedupSkips)")
+        SettingsDivider()
+        kv("Silent loss",      "\(vision.silentLoss)")
+        SettingsDivider()
+        kv("Last attempt",     Self.tsAgo(vision.lastAttemptMs))
+        SettingsDivider()
+        kv("Last DB write",    Self.tsAgo(vision.lastDbWriteMs))
+    }
+
+    @ViewBuilder private var audioRows: some View {
+        kv("Uptime",            Self.uptimeStr(audio.uptimeSec))
+        SettingsDivider()
+        kv("Chunks produced",   "\(audio.chunksProduced)")
+        SettingsDivider()
+        kv("Chunks transcribed","\(audio.chunksTranscribed)")
+        SettingsDivider()
+        kv("Pending queue",     "\(pendingAudioCount)")
+        SettingsDivider()
+        kv("Oldest pending",    pendingAudioCount > 0 ? "\(pendingAudioOldestAgeSec)s" : "—")
+    }
+
+    /// 任何一项开着,采集就是有意暂停,不算问题。
+    @ViewBuilder private var pauseRows: some View {
+        kv("DRM active",                pauseState.drmActive ? "On" : "Off")
+        SettingsDivider()
+        kv("Screen asleep",             pauseState.screenAsleep ? "On" : "Off")
+        SettingsDivider()
+        kv("Capture disabled",          pauseState.captureDisabled ? "On" : "Off")
+        SettingsDivider()
+        kv("Audio transcribe (battery)", pauseState.audioTranscriptionPaused ? "On" : "Off")
     }
 
     private var recentCard: some View {
@@ -379,5 +443,152 @@ extension VisionSnapshot {
 extension AudioMetricsSnapshot {
     static var zero: AudioMetricsSnapshot {
         AudioMetricsSnapshot(chunksProduced: 0, chunksTranscribed: 0, startedAtMs: 0)
+    }
+}
+
+// MARK: - 趋势图
+
+enum UsageRange: String, CaseIterable, Identifiable {
+    case fiveMinutes, hour, day
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .fiveMinutes: return "Last 5 minutes"
+        case .hour:        return "Last hour"
+        case .day:         return "Last 24 hours"
+        }
+    }
+    var span: TimeInterval { switch self { case .fiveMinutes: 300; case .hour: 3600; case .day: 86_400 } }
+    var ticks: [String] {
+        switch self {
+        case .fiveMinutes: return ["5m ago", "4m", "3m", "2m", "1m", "Now"]
+        case .hour:        return ["1h ago", "45m", "30m", "15m", "Now"]
+        case .day:         return ["24h ago", "18h", "12h", "6h", "Now"]
+        }
+    }
+}
+
+/// 一张趋势图:正常绿、过警戒线(虚线)橙、过上限红;前后两笔隔太久(app 没在跑)就断开。
+private struct ResourceChart: View {
+    enum Kind { case cpu, memory }
+    let kind: Kind
+    let range: UsageRange
+    let sampler: ResourceSampler
+    @Environment(\.colorScheme) private var scheme
+    @State private var hoverX: CGFloat?
+
+    private var dark: Bool { scheme == .dark }
+    private var okC: Color { dark ? Color(red: 0.30, green: 0.76, blue: 0.54) : Color(red: 0.09, green: 0.64, blue: 0.29) }
+    private var warnC: Color { dark ? Color(red: 0.94, green: 0.65, blue: 0.28) : Color(red: 0.85, green: 0.53, blue: 0.10) }
+    private var badC: Color { dark ? Color(red: 0.90, green: 0.28, blue: 0.30) : Color(red: 0.86, green: 0.15, blue: 0.15) }
+
+    private var warn: Double { kind == .cpu ? ResourceSampler.cpuWarn : ResourceSampler.memWarn }
+    private var bad: Double { kind == .cpu ? ResourceSampler.cpuBad : ResourceSampler.memBad }
+    private func value(_ s: ResourceSampler.Sample) -> Double { kind == .cpu ? s.cpu : s.memMB }
+    private func fmt(_ v: Double) -> String {
+        if kind == .cpu { return v < 10 ? String(format: "%.1f%%", v) : "\(Int(v.rounded()))%" }
+        return v >= 1024 ? String(format: "%.1f GB", v / 1024) : "\(Int(v.rounded())) MB"
+    }
+    private func color(_ v: Double) -> Color { v >= bad ? badC : v >= warn ? warnC : okC }
+
+    /// 这个时间范围里的点,和"隔多久算断开"。
+    private var points: (data: [ResourceSampler.Sample], gap: TimeInterval) {
+        let cut = Date().addingTimeInterval(-range.span)
+        if range == .fiveMinutes, !sampler.fine.isEmpty {
+            return (sampler.fine.filter { $0.t >= cut }, ResourceSampler.fineInterval * 3)
+        }
+        return (sampler.coarse.filter { $0.t >= cut }, ResourceSampler.coarseInterval * 3)
+    }
+
+    var body: some View {
+        let (data, gap) = points
+        let vals = data.map(value)
+        let worst = vals.max() ?? 0
+        let state: (Color, String) = worst >= bad ? (badC, "High")
+            : worst >= warn ? (warnC, "Above usual") : (okC, data.isEmpty ? "Collecting…" : "Normal")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(kind == .cpu ? "CPU" : "Memory").font(.system(size: 13, weight: .medium))
+                Text(vals.last.map(fmt) ?? "—").font(.system(size: 20, weight: .medium).monospacedDigit())
+                HStack(spacing: 6) {
+                    Circle().fill(state.0).frame(width: 7, height: 7)
+                    Text(state.1).font(.system(size: 12)).foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+            }
+            chart(data: data, gap: gap)
+                .frame(height: 132)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private func chart(data: [ResourceSampler.Sample], gap: TimeInterval) -> some View {
+        let now = Date(), start = now.addingTimeInterval(-range.span)
+        let top = max(warn * 1.15, data.map(value).max() ?? 0) * 1.05
+        let left: CGFloat = 48, bottom: CGFloat = 20
+        let grid = Theme.textPrimary.opacity(0.07), label = Theme.textPrimary.opacity(0.4)
+        return Canvas { ctx, size in
+            let w = size.width - left, h = size.height - bottom
+            func x(_ t: Date) -> CGFloat { left + CGFloat(t.timeIntervalSince(start) / range.span) * w }
+            func y(_ v: Double) -> CGFloat { 4 + (1 - CGFloat(v / top)) * (h - 4) }
+            for f in [0.0, 0.5, 1.0] {
+                let yy = y(top * f)
+                ctx.stroke(Path { $0.move(to: CGPoint(x: left, y: yy)); $0.addLine(to: CGPoint(x: size.width, y: yy)) },
+                           with: .color(grid), lineWidth: 1)
+                ctx.draw(Text(fmt(top * f)).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(label),
+                         at: CGPoint(x: left - 6, y: yy), anchor: .trailing)
+            }
+            let wy = y(warn)
+            ctx.stroke(Path { $0.move(to: CGPoint(x: left, y: wy)); $0.addLine(to: CGPoint(x: size.width, y: wy)) },
+                       with: .color(warnC.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+            for i in data.indices.dropLast() {
+                let a = data[i], b = data[i + 1]
+                guard b.t.timeIntervalSince(a.t) <= gap else { continue }
+                let c = color(max(value(a), value(b)))
+                let pa = CGPoint(x: x(a.t), y: y(value(a))), pb = CGPoint(x: x(b.t), y: y(value(b)))
+                ctx.fill(Path { p in
+                    p.move(to: pa); p.addLine(to: pb)
+                    p.addLine(to: CGPoint(x: pb.x, y: y(0))); p.addLine(to: CGPoint(x: pa.x, y: y(0))); p.closeSubpath()
+                }, with: .color(c.opacity(0.12)))
+                ctx.stroke(Path { $0.move(to: pa); $0.addLine(to: pb) }, with: .color(c),
+                           style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            }
+            let ticks = range.ticks
+            for (k, t) in ticks.enumerated() {
+                let f = CGFloat(k) / CGFloat(ticks.count - 1)
+                let anchor: UnitPoint = k == 0 ? .bottomLeading : k == ticks.count - 1 ? .bottomTrailing : .bottom
+                ctx.draw(Text(t).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(label),
+                         at: CGPoint(x: left + f * w, y: size.height), anchor: anchor)
+            }
+            if let hx = hoverX, hx >= left {
+                ctx.stroke(Path { $0.move(to: CGPoint(x: hx, y: 4)); $0.addLine(to: CGPoint(x: hx, y: h)) },
+                           with: .color(label), lineWidth: 1)
+            }
+        }
+        .onContinuousHover { phase in
+            if case .active(let p) = phase { hoverX = p.x } else { hoverX = nil }
+        }
+        .overlay(alignment: .topLeading) {
+            GeometryReader { g in
+                if let hx = hoverX, hx >= left, let s = nearest(data, at: hx, width: g.size.width - left, left: left, start: start) {
+                    let ago = Int(now.timeIntervalSince(s.t))
+                    Text("\(fmt(value(s))) · \(ago < 60 ? "\(ago)s" : ago < 3600 ? "\(ago / 60)m" : "\(ago / 3600)h") ago")
+                        .font(.system(size: 12, weight: .medium).monospacedDigit())
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(.regularMaterial))
+                        .fixedSize()
+                        .offset(x: min(hx + 10, g.size.width - 130), y: 0)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
+
+    private func nearest(_ data: [ResourceSampler.Sample], at hx: CGFloat, width: CGFloat, left: CGFloat,
+                         start: Date) -> ResourceSampler.Sample? {
+        let t = start.addingTimeInterval(Double((hx - left) / max(1, width)) * range.span)
+        guard let s = data.min(by: { abs($0.t.timeIntervalSince(t)) < abs($1.t.timeIntervalSince(t)) }),
+              abs(s.t.timeIntervalSince(t)) < range.span / 30 else { return nil }
+        return s
     }
 }
