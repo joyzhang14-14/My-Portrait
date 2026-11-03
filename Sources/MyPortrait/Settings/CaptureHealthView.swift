@@ -505,22 +505,16 @@ private struct ResourceChart: View {
         return out
     }
 
-    /// 这个时间范围里的点,和"隔多久算断开"。1 小时 / 24 小时 = 每分钟一笔 + 最近几分钟的细采样;
-    /// 断开门槛放到 400 秒,容得下 health.log 补进来的每 5 分钟一笔。CPU 不知道的点(-1)不画。
+    /// 这个时间范围里的点,和"隔多久算断开"。每分钟一笔(后台也在记)和窗口开着时
+    /// 每 2 秒一笔合在一起按时间排:关窗那段靠每分钟的点连上,不会断。
+    /// 断开门槛 90 秒(容得下每分钟一笔);24 小时放到 400 秒,容得下 health.log 补的每 5 分钟一笔。
+    /// CPU 不知道的点(-1)不画。
     private var points: (data: [ResourceSampler.Sample], gap: TimeInterval) {
         let cut = Date().addingTimeInterval(-range.span)
-        var data: [ResourceSampler.Sample]
-        let gap: TimeInterval
-        if range == .fiveMinutes, !sampler.fine.isEmpty {
-            data = sampler.fine.filter { $0.t >= cut }
-            gap = ResourceSampler.fineInterval * 3
-        } else {
-            let lastCoarse = sampler.coarse.last?.t ?? .distantPast
-            data = sampler.coarse.filter { $0.t >= cut } + sampler.fine.filter { $0.t > lastCoarse }
-            gap = 400
-        }
+        var data = (sampler.coarse.filter { $0.t >= cut } + sampler.fine.filter { $0.t >= cut })
+            .sorted { $0.t < $1.t }
         if kind == .cpu { data = data.filter { $0.cpu >= 0 } }
-        return (data, gap)
+        return (data, range == .day ? 400 : 90)
     }
 
     var body: some View {
