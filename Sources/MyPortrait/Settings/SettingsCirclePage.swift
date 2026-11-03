@@ -169,8 +169,8 @@ struct SettingsCirclePage: View {
                 statusRow("Audio", c.audio.enabled ? .on : .off, c.audio.enabled ? "On" : "Off", .capture(.audio))
                 statusRow("Typing", c.typingCaptureEnabled ? .on : .off, c.typingCaptureEnabled ? "On" : "Off", .capture(.typing))
                 sectionTitle("Workflow").padding(.top, 8)
-                statusRow("Needs attention", attention > 0 ? .warn : .on,
-                          attention > 0 ? "\(attention)" : "None", .workflow(.changelog))
+                statusRow("Pipelines", attention > 0 ? .warn : .on,
+                          attention > 0 ? "\(attention) need attention" : "Working well", .workflow(.changelog))
                 statusRow("Events", config.current.scheduler.event.frequency == .off ? .off : .on,
                           eventsSchedule, .workflow(.eventsProcessor))
                 sectionTitle("Data").padding(.top, 8)
