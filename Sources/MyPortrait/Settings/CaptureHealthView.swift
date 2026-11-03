@@ -491,6 +491,20 @@ private struct ResourceChart: View {
     }
     private func color(_ v: Double) -> Color { v >= bad ? badC : v >= warn ? warnC : okC }
 
+    /// 判颜色用的值:CPU 取这一笔往前 1 分钟的平均(启动、OCR 一闪而过的尖峰不算异常),
+    /// 内存就是这一笔本身。
+    private func levels(_ data: [ResourceSampler.Sample]) -> [Double] {
+        guard kind == .cpu else { return data.map(value) }
+        var out: [Double] = []
+        var lo = 0, sum = 0.0
+        for (i, s) in data.enumerated() {
+            sum += s.cpu
+            while data[lo].t < s.t.addingTimeInterval(-60) { sum -= data[lo].cpu; lo += 1 }
+            out.append(sum / Double(i - lo + 1))
+        }
+        return out
+    }
+
     /// 这个时间范围里的点,和"隔多久算断开"。1 小时 / 24 小时 = 每分钟一笔 + 最近几分钟的细采样;
     /// 断开门槛放到 400 秒,容得下 health.log 补进来的每 5 分钟一笔。CPU 不知道的点(-1)不画。
     private var points: (data: [ResourceSampler.Sample], gap: TimeInterval) {
@@ -512,7 +526,7 @@ private struct ResourceChart: View {
     var body: some View {
         let (data, gap) = points
         let vals = data.map(value)
-        let worst = vals.max() ?? 0
+        let worst = levels(data).max() ?? 0
         let state: (Color, String) = worst >= bad ? (badC, "High")
             : worst >= warn ? (warnC, "Above usual") : (okC, data.isEmpty ? "Collecting…" : "Normal")
         VStack(alignment: .leading, spacing: 4) {
@@ -550,10 +564,11 @@ private struct ResourceChart: View {
             let wy = y(warn)
             ctx.stroke(Path { $0.move(to: CGPoint(x: left, y: wy)); $0.addLine(to: CGPoint(x: size.width, y: wy)) },
                        with: .color(warnC.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+            let lv = levels(data)
             for i in data.indices.dropLast() {
                 let a = data[i], b = data[i + 1]
                 guard b.t.timeIntervalSince(a.t) <= gap else { continue }
-                let c = color(max(value(a), value(b)))
+                let c = color(max(lv[i], lv[i + 1]))
                 let pa = CGPoint(x: x(a.t), y: y(value(a))), pb = CGPoint(x: x(b.t), y: y(value(b)))
                 ctx.fill(Path { p in
                     p.move(to: pa); p.addLine(to: pb)
