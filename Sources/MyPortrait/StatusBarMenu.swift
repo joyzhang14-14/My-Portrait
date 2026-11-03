@@ -7,7 +7,7 @@ import Foundation
 /// 显示内容：
 ///   - 图标：基于当前状态变化（录制中 / 关闭 / Dev Mode）
 ///   - 菜单项：
-///     * Open My Portrait(置顶,唯一高频动作)
+///     * My Portrait(打开主窗口;置顶,唯一高频动作)
 ///     * 屏幕采集 toggle
 ///     * 音频采集(子菜单:Enabled + 输入源 + system audio)
 ///     * 打字采集 toggle
@@ -246,13 +246,14 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     // MARK: - 菜单构造
 
     private func buildMenu() {
-        // Open My Portrait 放最上面 —— 这是这个菜单里唯一高频的动作。
+        // My Portrait(打开主窗口)放最上面 —— 这是这个菜单里唯一高频的动作。
         let openWindow = NSMenuItem(
-            title: "Open My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
+            title: "My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
         )
         openWindow.target = self
         menu.addItem(openWindow)
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        // 动作名别叫 openSettings:macOS 26 认出这个标准名会自动配齿轮图标,整列错位
+        let settings = NSMenuItem(title: "Settings…", action: #selector(goToSettingsPage), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
         menu.addItem(.separator())
@@ -419,7 +420,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
     /// 打开主窗口并停在 Settings 页:窗口没建时靠 lastPage 落到 Settings,
     /// 已经开着时靠通知切页。
-    @objc private func openSettings() {
+    @objc private func goToSettingsPage() {
         ConfigStore.shared.mutate { $0.display.lastPage = SidebarSection.settings.rawValue }
         AppDelegate.current?.showMainWindow()
         NotificationCenter.default.post(name: .openSettingsPage, object: nil)
