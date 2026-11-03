@@ -67,26 +67,29 @@ final class ResourceSampler {
     }
 
     /// 当前要提醒的问题(没有 = nil):最近 2 分钟 CPU 平均过警戒线,或内存过警戒线。
-    var issue: String? {
+    /// 存下来的值,只在变了时才写 —— 页面级视图只读它,不会因为每 2 秒多一笔采样就整页重排。
+    private(set) var issue: String?
+    /// 问题从什么时候开始(连续超线的第一笔)。
+    private(set) var issueSince: Date?
+
+    private func updateIssue() {
         let cut = Date().addingTimeInterval(-120)
         let recent = fine.filter { $0.t > cut }
+        var now: String?
         if recent.count >= 10, recent.reduce(0, { $0 + $1.cpu }) / Double(recent.count) >= Self.cpuWarn {
-            return "CPU high"
+            now = "CPU high"
+        } else if let m = (fine.last ?? coarse.last)?.memMB, m >= Self.memWarn {
+            now = "Memory high"
         }
-        if let m = (fine.last ?? coarse.last)?.memMB, m >= Self.memWarn { return "Memory high" }
-        return nil
-    }
-
-    /// 问题从什么时候开始(连续超线的第一笔)。
-    var issueSince: Date? {
-        guard let issue else { return nil }
-        let s = fine.isEmpty ? coarse : fine
         var since: Date?
-        for x in s.reversed() {
-            let over = issue == "CPU high" ? x.cpu >= Self.cpuWarn : x.memMB >= Self.memWarn
-            if over { since = x.t } else { break }
+        if let now {
+            for x in (fine.isEmpty ? coarse : fine).reversed() {
+                let over = now == "CPU high" ? x.cpu >= Self.cpuWarn : x.memMB >= Self.memWarn
+                if over { since = x.t } else { break }
+            }
         }
-        return since
+        if now != issue { issue = now }
+        if since != issueSince { issueSince = since }
     }
 
     private func takeFine() {
@@ -94,6 +97,7 @@ final class ResourceSampler {
         fine.append(s)
         let cut = Date().addingTimeInterval(-600)
         if let i = fine.firstIndex(where: { $0.t >= cut }), i > 0 { fine.removeFirst(i) }
+        updateIssue()
     }
 
     private func takeCoarse() {
@@ -101,6 +105,7 @@ final class ResourceSampler {
         coarse.append(s)
         let cut = Date().addingTimeInterval(-86_400)
         if let i = coarse.firstIndex(where: { $0.t >= cut }), i > 0 { coarse.removeFirst(i) }
+        updateIssue()
         let line = String(format: "%.0f,%.2f,%.0f\n", s.t.timeIntervalSince1970, s.cpu, s.memMB)
         // 整点前后那一笔顺带裁文件:只留 24 小时
         let prune = Calendar.current.component(.minute, from: s.t) == 0
