@@ -215,11 +215,9 @@ struct SettingsCirclePage: View {
         let now = Date()
         guard let next = [s.event, s.portrait, s.personality, s.writingStyle]
             .compactMap({ Self.nextRun($0, after: now) }).min() else { return "Off" }
-        let cal = Calendar.current
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"
-        if cal.isDateInToday(next) { return "Today \(f.string(from: next))" }
-        if cal.isDateInTomorrow(next) { return "Tomorrow \(f.string(from: next))" }
-        f.dateFormat = "EEE HH:mm"
+        // 24 小时内只写钟点(列窄,"Tomorrow 03:00" 放不下),再远带星期
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = next.timeIntervalSince(now) < 86_400 ? "HH:mm" : "EEE HH:mm"
         return f.string(from: next)
     }
 
