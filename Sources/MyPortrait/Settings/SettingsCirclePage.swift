@@ -21,6 +21,9 @@ struct SettingsCirclePage: View {
 
     @State private var rings = TodayRings()
     @State private var attention = 0
+    /// 最近一次 pipeline 运行(Changelog 同一张表)。
+    @State private var lastRun: ProcessingLogStore.PipelineRunRecord?
+    @State private var sampler = ResourceSampler.shared
     @State private var usedBytes: Int64?
     @State private var freeBytes: Int64?
 
@@ -139,7 +142,7 @@ struct SettingsCirclePage: View {
         case .workflow(.personalityRefresher):  return c.scheduler.personality.frequency == .off ? .off : .on
         case .workflow(.writingStyleDistiller): return c.scheduler.writingStyle.frequency == .off ? .off : .on
         case .workflow(.changelog): return attention > 0 ? .warn : nil
-        case .data(.health):        return health.unhealthy ? .warn : .on
+        case .data(.health):        return healthIssue == nil ? .on : .warn
         default: return nil
         }
     }
@@ -169,23 +172,76 @@ struct SettingsCirclePage: View {
                 statusRow("Audio", c.audio.enabled ? .on : .off, c.audio.enabled ? "On" : "Off", .capture(.audio))
                 statusRow("Typing", c.typingCaptureEnabled ? .on : .off, c.typingCaptureEnabled ? "On" : "Off", .capture(.typing))
                 sectionTitle("Workflow").padding(.top, 8)
-                statusRow("Pipelines", attention > 0 ? .warn : .on,
-                          attention > 0 ? "\(attention) need attention" : "Working well", .workflow(.changelog))
-                statusRow("Events", config.current.scheduler.event.frequency == .off ? .off : .on,
-                          eventsSchedule, .workflow(.eventsProcessor))
+                statusRow("Last run", lastRunLamp, lastRunText, .workflow(.changelog))
+                statusRow("Next run", nil, nextRunText, .workflow(.eventsProcessor))
                 sectionTitle("Data").padding(.top, 8)
                 statusRow("Storage", nil, usedBytes.map(Self.bytes) ?? "Measuring…", .data(.storage))
                 statusRow("Free", nil, freeBytes.map(Self.bytes) ?? "—", .data(.storage))
-                statusRow("Health", health.unhealthy ? .warn : .on,
-                          health.unhealthy ? "\(health.faults.count) issue\(health.faults.count == 1 ? "" : "s")" : "OK",
-                          .data(.health))
+                statusRow("Health", healthIssue == nil ? .on : .warn, healthIssue ?? "OK", .data(.health))
             }
         }
     }
 
-    private var eventsSchedule: String {
-        let e = config.current.scheduler.event
-        return e.frequency == .off ? "Off" : "Daily \(e.timeOfDay)"
+    /// 健康状态:采集故障优先,其次 CPU / 内存超线。
+    private var healthIssue: String? {
+        if health.unhealthy { return "\(health.faults.count) issue\(health.faults.count == 1 ? "" : "s")" }
+        return sampler.issue
+    }
+
+    /// 上次运行:成功 / 没活可干 = 绿;失败、自动重试中,或有待处理的天 = 橙。
+    private var lastRunLamp: LampState {
+        guard let r = lastRun else { return .off }
+        return r.outcome == "failure" || r.outcome == "auto-recovering" || attention > 0 ? .warn : .on
+    }
+
+    private var lastRunText: String {
+        guard let r = lastRun else { return "Never" }
+        let d = Date(timeIntervalSince1970: Double(r.timestampMs) / 1000)
+        let cal = Calendar.current
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        if r.outcome == "failure" {
+            f.dateFormat = cal.isDateInToday(d) ? "HH:mm" : "MMM d"
+            return "Failed \(f.string(from: d))"
+        }
+        if cal.isDateInToday(d) { f.dateFormat = "HH:mm"; return "Today \(f.string(from: d))" }
+        if cal.isDateInYesterday(d) { return "Yesterday" }
+        f.dateFormat = "MMM d"
+        return f.string(from: d)
+    }
+
+    /// 下次运行:所有开着自动运行的流水线里最早的那次。
+    private var nextRunText: String {
+        let s = config.current.scheduler
+        let now = Date()
+        guard let next = [s.event, s.portrait, s.personality, s.writingStyle]
+            .compactMap({ Self.nextRun($0, after: now) }).min() else { return "Off" }
+        let cal = Calendar.current
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"
+        if cal.isDateInToday(next) { return "Today \(f.string(from: next))" }
+        if cal.isDateInTomorrow(next) { return "Tomorrow \(f.string(from: next))" }
+        f.dateFormat = "EEE HH:mm"
+        return f.string(from: next)
+    }
+
+    /// 按 SchedulerConfig 算下一次触发时刻(daily / weekly 0=周日 / monthly 超出当月落到月底)。
+    private static func nextRun(_ c: SchedulerConfig, after now: Date) -> Date? {
+        guard c.frequency != .off else { return nil }
+        let hm = c.timeOfDay.split(separator: ":").compactMap { Int($0) }
+        guard hm.count == 2 else { return nil }
+        let cal = Calendar.current
+        for d in 0..<62 {
+            guard let day = cal.date(byAdding: .day, value: d, to: cal.startOfDay(for: now)),
+                  let t = cal.date(bySettingHour: hm[0], minute: hm[1], second: 0, of: day), t > now else { continue }
+            switch c.frequency {
+            case .daily: return t
+            case .weekly: if cal.component(.weekday, from: t) - 1 == c.dayOfWeek { return t }
+            case .monthly:
+                let last = cal.range(of: .day, in: .month, for: t)?.count ?? 31
+                if cal.component(.day, from: t) == min(c.dayOfMonth, last) { return t }
+            case .off: return nil
+            }
+        }
+        return nil
     }
 
     private static func bytes(_ n: Int64) -> String {
@@ -277,6 +333,9 @@ struct SettingsCirclePage: View {
     private func refresh() async {
         attention = MemoryScheduler.localAttention(MemoryScheduler.shared.attentionDays(),
                                                    scheduler: config.current.scheduler).count
+        lastRun = await Task.detached(priority: .utility) {
+            ProcessingLogStore().recentPipelineRuns(limit: 1).first
+        }.value
         let day = Calendar.current.startOfDay(for: Date())
         if let db = services?.db {
             async let frames = TimelineFeed.framesForDay(day, db: db)
