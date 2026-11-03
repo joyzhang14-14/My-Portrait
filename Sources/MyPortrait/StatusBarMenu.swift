@@ -248,12 +248,13 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     private func buildMenu() {
         // My Portrait(打开主窗口)放最上面 —— 这是这个菜单里唯一高频的动作。
         let openWindow = NSMenuItem(
-            title: "My Portrait", action: #selector(openMainWindow), keyEquivalent: "o"
+            title: "My Portrait", action: #selector(openMainWindow), keyEquivalent: ""
         )
         openWindow.target = self
         menu.addItem(openWindow)
         // 动作名别叫 openSettings:macOS 26 认出这个标准名会自动配齿轮图标,整列错位
-        let settings = NSMenuItem(title: "Settings…", action: #selector(goToSettingsPage), keyEquivalent: ",")
+        // 菜单栏菜单的快捷键只在菜单展开时有效,不标;⌘, 由 app 菜单负责
+        let settings = NSMenuItem(title: "Settings…", action: #selector(goToSettingsPage), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
         menu.addItem(.separator())
@@ -421,9 +422,7 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
     /// 打开主窗口并停在 Settings 页:窗口没建时靠 lastPage 落到 Settings,
     /// 已经开着时靠通知切页。
     @objc private func goToSettingsPage() {
-        ConfigStore.shared.mutate { $0.display.lastPage = SidebarSection.settings.rawValue }
-        AppDelegate.current?.showMainWindow()
-        NotificationCenter.default.post(name: .openSettingsPage, object: nil)
+        AppDelegate.current?.showSettingsPage()
     }
 
     @objc private func quit() {

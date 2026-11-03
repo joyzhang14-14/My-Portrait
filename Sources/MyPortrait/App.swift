@@ -400,11 +400,16 @@ struct MyPortraitApp: App {
     var body: some Scene {
         // No WindowGroup — the AppDelegate creates the main window via
         // AppKit so SwiftUI doesn't insert any toolbar chrome of its own.
-        // The `Settings` scene gives us the standard ⌘, → Settings flow
-        // via the App menu without polluting the main sidebar.
+        // app 菜单的 Settings…(⌘,)换成切到主窗口的 Settings 页,不开独立窗口。
         Settings {
             SettingsScene()
                 .frame(minWidth: 880, minHeight: 580)
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { AppDelegate.current?.showSettingsPage() }
+                    .keyboardShortcut(",")
+            }
         }
     }
 }
@@ -793,7 +798,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// 把主窗口拉到前台。菜单栏 "Open My Portrait" 和 Dock 重开都走这里。
+    /// 打开主窗口并停在 Settings 页(app 菜单的 ⌘, 和菜单栏的 Settings… 都走这里):
+    /// 窗口没建时靠 lastPage 落到 Settings,已经开着时靠通知切页。
+    @MainActor func showSettingsPage() {
+        ConfigStore.shared.mutate { $0.display.lastPage = SidebarSection.settings.rawValue }
+        showMainWindow()
+        NotificationCenter.default.post(name: .openSettingsPage, object: nil)
+    }
+
+    /// 把主窗口拉到前台。菜单栏 "My Portrait" 和 Dock 重开都走这里。
     @objc func showMainWindow() {
         guard let window else { return }
         // 关窗/隐藏后再打开的唯一入口(Dock 重开与菜单栏 Open 都走这里)。
