@@ -601,11 +601,11 @@ struct DisplayConfig: Codable, Equatable {
 
 // MARK: - General
 
-/// 更新方式:手动检查 / 自动检查(发现新版提示)/ 自动检查并安装。
+/// 更新方式:手动检查 / 自动检查(发现新版提示)/ 自动下载安装并重启。
 enum UpdateMode: String, Codable, CaseIterable, Equatable, Sendable {
     case manual
     case autoDetect        = "auto_detect"
-    case autoDetectInstall = "auto_detect_install"
+    case autoUpdateRestart = "auto_update_restart"
 }
 
 struct GeneralConfig: Codable, Equatable {

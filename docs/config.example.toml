@@ -24,7 +24,7 @@ theme = 'system'
 translucent_sidebar = true
 
 [general]
-update_mode = "auto_detect"   # manual | auto_detect | auto_detect_install
+update_mode = "auto_detect"   # manual | auto_detect | auto_update_restart
 launch_at_login = false
 update_check_minutes = 60
 

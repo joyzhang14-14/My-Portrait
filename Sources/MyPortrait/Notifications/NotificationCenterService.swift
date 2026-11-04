@@ -37,7 +37,7 @@ final class NotificationCenterService {
         /// 连接的 AI 账号快到期(剩 ≤2 天)。到期后那条 provider 上的 pipeline
         /// 会整条停摆,所以这条默认开着。点一下跳 Settings → Provider。
         case credentialExpiring(provider: String, daysLeft: Int)
-        /// 自动更新倒计时 banner —— 更新方式选了自动检查并安装,Sparkle
+        /// 自动更新倒计时 banner —— 更新方式选了自动更新并重启,Sparkle
         /// 已经后台下完新版,banner 倒数 \`seconds\` 秒后调 onTimeout
         /// (触发 install + relaunch);用户在期间点 banner 调 onPostpone
         /// (取消这次,让 Sparkle 下次检查重试)。
