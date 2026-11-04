@@ -35,6 +35,8 @@ public enum PowerMonitor {
         guard let sourcesRef = IOPSCopyPowerSourcesList(snapshotRef)?.takeRetainedValue() as? [CFTypeRef] else {
             return .unknown
         }
+        // 没有任何电源(Mac mini / iMac / Studio 没电池)= 一直插着电。
+        if sourcesRef.isEmpty { return .ac }
 
         for source in sourcesRef {
             guard let info = IOPSGetPowerSourceDescription(snapshotRef, source)?.takeUnretainedValue() as? [String: Any],
