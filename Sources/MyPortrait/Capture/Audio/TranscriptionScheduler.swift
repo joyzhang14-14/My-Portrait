@@ -286,6 +286,9 @@ actor TranscriptionScheduler {
             // 选了 Qwen 但模型不在磁盘(缓存目录可能被系统清掉)→ 不消费队列:chunk 留在
             // pending,不耗重试次数;状态栏亮红提示去 AI models 下载,下载回来自动接着转。
             if engine == "qwen", !qwen.isModelOnDisk {
+                // 内存里可能还装着刚删掉的 Qwen,或切过来之前在用的 Whisper,一起卸。
+                whisper.unload()
+                qwen.unload()
                 await speaker.unload()
                 await MainActor.run {
                     HealthMonitor.shared.report(
