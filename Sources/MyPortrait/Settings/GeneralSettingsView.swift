@@ -29,9 +29,14 @@ struct GeneralSettingsView: View {
                     VersionChip(text: Self.currentVersionString)
                 }
                 SettingsDivider()
-                SettingsRow("Auto-update app",
+                SettingsRow("Update",
                             icon: "arrow.down.app") {
-                    Toggle("", isOn: config.binding(\.general.autoDownloadUpdates)).labelsHidden().toggleStyle(.switch)
+                    Picker("", selection: config.binding(\.general.updateMode)) {
+                        Text("Manually detect updates").tag(UpdateMode.manual)
+                        Text("Auto-detect updates").tag(UpdateMode.autoDetect)
+                        Text("Auto-detect & install updates").tag(UpdateMode.autoDetectInstall)
+                    }
+                    .pickerStyle(.menu).labelsHidden().frame(width: 240)
                 }
                 SettingsDivider()
                 SettingsRow("Check for updates now",
@@ -40,7 +45,7 @@ struct GeneralSettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                 }
             }
-            // autoDownloadUpdates 的同步由 UpdaterService.observeConfig() 常驻监听。
+            // updateMode 的同步由 UpdaterService.observeConfig() 常驻监听。
             // 检查间隔已写死 10 分钟,不再可配。
 
             // (Cron Jobs 的「History per cron job」08-09 搬去 Display 页最下面,

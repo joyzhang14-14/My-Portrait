@@ -6,9 +6,10 @@ import Sparkle
 ///
 /// Sparkle 自己内部已经是个完整的 controller + delegate 体系,我们这里只做两件事:
 ///   1. 持有 SPUStandardUpdaterController 让它活着(否则 controller 销毁自动检查就停)
-///   2. 把 ConfigStore.general.autoDownloadUpdates 接到 SPUUpdater 上
-///      (→ updater.automaticallyDownloadsUpdates)。检查间隔写死
-///      checkIntervalMinutes(10min),不再可配。
+///   2. 把 ConfigStore.general.updateMode 接到 SPUUpdater 上:
+///      manual = 不自动检查,只有点 Check now;autoDetect = 每 checkIntervalMinutes
+///      (10min)后台检查、发现新版提示;autoDetectInstall = 再加自动下载并安装
+///      (→ updater.automaticallyDownloadsUpdates)。
 ///
 /// 启动检查 + 后台轮询都由 Sparkle 自己跑(automaticallyChecksForUpdates=true)。
 /// 用户点 "Check for Updates" 菜单 → updater.checkForUpdates()。
@@ -59,23 +60,23 @@ final class UpdaterService: NSObject {
         observeConfig()
     }
 
-    /// 上次应用过的 autoDownloadUpdates 值。@Observable 追踪粒度是整个 `current`,
+    /// 上次应用过的 updateMode 值。@Observable 追踪粒度是整个 `current`,
     /// 任意 config 变更都会触发 onChange —— 必须 diff 真值,只在它真变了才
     /// applyConfig(否则随便改个别的设置都会重建 timer + 立即触发一次检查)。
-    private var observedAutoDownload: Bool = false
+    private var observedMode: UpdateMode = .autoDetect
 
-    /// 常驻监听 autoDownloadUpdates —— 页面不在屏幕上也要生效,vim 改 TOML
+    /// 常驻监听 updateMode —— 页面不在屏幕上也要生效,vim 改 TOML
     /// (ConfigStore 热加载)后 SPUUpdater 和 checkTimer 要跟着更新,不能等
     /// 到下次重启。跟 ConfigApplier / Services 一样用常驻
     /// withObservationTracking。
     private func observeConfig() {
-        observedAutoDownload = ConfigStore.shared.current.general.autoDownloadUpdates
+        observedMode = ConfigStore.shared.current.general.updateMode
         withObservationTracking {
-            _ = ConfigStore.shared.current.general.autoDownloadUpdates
+            _ = ConfigStore.shared.current.general.updateMode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if ConfigStore.shared.current.general.autoDownloadUpdates != self.observedAutoDownload {
+                if ConfigStore.shared.current.general.updateMode != self.observedMode {
                     self.applyConfig()
                 }
                 self.observeConfig()   // withObservationTracking 一次性,重订阅
@@ -84,7 +85,7 @@ final class UpdaterService: NSObject {
     }
 
     /// 用户点菜单 / 设置里的 "Check Now" 按钮调这个 —— 永远走 Sparkle
-    /// 原生 modal,**不受 autoDownloadUpdates toggle 影响**:用户主动点
+    /// 原生 modal,**不受 updateMode 影响**:用户主动点
     /// "Check now" 时想要的就是"有没有新版给我看一下",modal 给"是/否
     /// + 立刻装"的明确反馈。
     ///
@@ -117,10 +118,12 @@ final class UpdaterService: NSObject {
         // scheduler(那个 scheduler 被 hardcoded 1h minimum 卡死),我们用
         // 自己的 checkTimer 驱动 checkForUpdatesInBackground()。
         u.automaticallyChecksForUpdates = false
-        u.automaticallyDownloadsUpdates = g.autoDownloadUpdates
+        u.automaticallyDownloadsUpdates = g.updateMode == .autoDetectInstall
 
-        // 检查间隔写死 10 分钟。
+        // 检查间隔写死 10 分钟。手动档不开 timer。
         checkTimer?.invalidate()
+        checkTimer = nil
+        guard g.updateMode != .manual else { return }
         let interval = TimeInterval(Self.checkIntervalMinutes * 60)
         // **fires=true** 立刻先 check 一次,然后每 interval 再 check
         let t = Timer(timeInterval: interval, repeats: true) { _ in
@@ -145,7 +148,7 @@ final class UpdaterService: NSObject {
 ///   1. \`didFindValidUpdate\`:Sparkle 找到新版本 → post 一条 "new version
 ///      available" banner(\`.appUpdate\` kind,被 notifications.appUpdates
 ///      toggle 控制)
-///   2. \`willInstallUpdateOnQuit\`:autoDownloadUpdates toggle on + Sparkle
+///   2. \`willInstallUpdateOnQuit\`:updateMode = autoDetectInstall + Sparkle
 ///      已经**下载 + 解压完新版**,**这才是真正的"download complete"
 ///      callback**。我们 return YES 接管 install,post 倒计时 banner
 ///      "Updating in 10s, click to postpone"。10s 跑完没操作 → 调
@@ -175,16 +178,16 @@ private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate {
     ///   - 用户点 banner postpone → 不调 handler,Sparkle 还是会在用户
     ///     ⌘Q 时装(行为退化到 install-on-quit)
     ///
-    /// autoDownloadUpdates toggle off 时返回 NO 让 Sparkle 走标准 modal 流程。
+    /// 不是 autoDetectInstall 时返回 NO 让 Sparkle 走标准 modal 流程。
     nonisolated func updater(
         _ updater: SPUUpdater,
         willInstallUpdateOnQuit item: SUAppcastItem,
         immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
     ) -> Bool {
         let autoOn = MainActor.assumeIsolated {
-            ConfigStore.shared.current.general.autoDownloadUpdates
+            ConfigStore.shared.current.general.updateMode == .autoDetectInstall
         }
-        guard autoOn else { return false }   // toggle off → 让 Sparkle 走 modal
+        guard autoOn else { return false }   // 不自动安装 → 让 Sparkle 走 modal
 
         // Sparkle 这个 @escaping closure 不是 @Sendable,Swift 6 strict
         // concurrency 不让直接进 @MainActor Task。包一层 unchecked Sendable

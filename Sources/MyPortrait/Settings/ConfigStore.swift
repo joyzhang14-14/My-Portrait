@@ -382,7 +382,7 @@ final class ConfigStore {
 
         // — General
         c.general.launchAtLogin           = bool(ud, "Settings.launchAtLogin",         default: c.general.launchAtLogin)
-        c.general.autoDownloadUpdates     = bool(ud, "Settings.autoDownloadUpdates",   default: c.general.autoDownloadUpdates)
+        // autoDownloadUpdates 已换成 updateMode(11-04 update),旧 UserDefaults 不再迁移。
         // updateCheckMinutes 字段已下线(检查间隔写死 10min),旧 UserDefaults 不再迁移。
 
         // — Recording / audio

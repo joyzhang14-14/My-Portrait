@@ -601,9 +601,16 @@ struct DisplayConfig: Codable, Equatable {
 
 // MARK: - General
 
+/// 更新方式:手动检查 / 自动检查(发现新版提示)/ 自动检查并安装。
+enum UpdateMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case manual
+    case autoDetect        = "auto_detect"
+    case autoDetectInstall = "auto_detect_install"
+}
+
 struct GeneralConfig: Codable, Equatable {
     var launchAtLogin:       Bool = false
-    var autoDownloadUpdates: Bool = true
+    var updateMode:          UpdateMode = .autoDetect
     /// 首启 onboarding 是否走完(或被用户 Skip 到最后 Finish)。false → app
     /// 启动时 ContentView 弹 onboarding sheet 挡住主 UI;走完 sheet 自动关。
     /// 默认 false → 全新安装自动看到 onboarding。Settings → General → Onboarding
@@ -615,14 +622,14 @@ struct GeneralConfig: Codable, Equatable {
     init() {}
     enum CodingKeys: String, CodingKey {
         case launchAtLogin        = "launch_at_login"
-        case autoDownloadUpdates  = "auto_download_updates"
+        case updateMode           = "update_mode"
         case onboardingCompleted  = "onboarding_completed"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         launchAtLogin       = c.dflt(Bool.self, .launchAtLogin, launchAtLogin)
-        autoDownloadUpdates = c.dflt(Bool.self, .autoDownloadUpdates, autoDownloadUpdates)
+        updateMode          = c.dflt(UpdateMode.self, .updateMode, updateMode)
         onboardingCompleted = c.dflt(Bool.self, .onboardingCompleted, onboardingCompleted)
     }
 }
