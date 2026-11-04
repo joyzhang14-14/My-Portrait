@@ -274,7 +274,11 @@ actor TranscriptionScheduler {
             // 可跑几十分钟,重积压烧 CPU 时正是用户去关转录的时刻;期间新一轮
             // processQueueOnce 被 isDraining 守卫挡在门外,入口 gate 执行不到,
             // 只有这里能看到中途切换。
-            let engine = await MainActor.run { ConfigStore.shared.current.capture.audio.engine }
+            let (engine, qwenModel) = await MainActor.run {
+                let a = ConfigStore.shared.current.capture.audio
+                return (a.engine, a.qwenModel)
+            }
+            qwen.use(modelId: qwenModel)
             if engine == "disabled" {
                 whisper.unload()
                 qwen.unload()

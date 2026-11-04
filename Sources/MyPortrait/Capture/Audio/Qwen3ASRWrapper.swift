@@ -29,11 +29,21 @@ final class Qwen3ASRWrapper: @unchecked Sendable {
         ("aufklarer/Qwen3-ASR-0.6B-MLX-4bit", "Qwen3-ASR 0.6B (4-bit)", "~0.6 GB"),
     ]
 
-    /// 当前实例用的模型 id（从设置 `recording.audio.qwenModel` 传入）。
-    private let modelId: String
+    /// 当前用的模型 id(设置 `recording.audio.qwenModel`)。设置里换了模型,
+    /// TranscriptionScheduler 每轮用 `use(modelId:)` 同步过来。`nonisolated(unsafe)` 同 `model`。
+    nonisolated(unsafe) private var modelId: String
 
     init(modelId: String = defaultModelId) {
         self.modelId = modelId.isEmpty ? Self.defaultModelId : modelId
+    }
+
+    /// 换成设置里新选的模型:卸掉旧模型,下次 transcribe 按新 id 加载。
+    func use(modelId newId: String) {
+        let id = newId.isEmpty ? Self.defaultModelId : newId
+        guard id != modelId else { return }
+        unload()
+        modelId = id
+        logger.info("Qwen3-ASR model switched to \(id, privacy: .public)")
     }
 
     private let logger = Logger(subsystem: "com.myportrait.capture", category: "qwen-asr")
