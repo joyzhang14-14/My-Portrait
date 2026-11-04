@@ -215,6 +215,9 @@ final class SleepHelperClient {
     func setKeepAwake(_ enabled: Bool, owner: String) {
         if enabled { owners.insert(owner) } else { owners.remove(owner) }
         let want = !owners.isEmpty
+        // 不要、没持有、没连接、没残留时下面哪条分支都不会动作,直接返回,不去问
+        // status:它是主线程上同步问系统的 XPC,系统忙时能卡住主线程。
+        if !want, !holding, connection == nil, !PowerMonitor.systemSleepDisabled { return }
         guard service.status == .enabled else {
             if !want { teardownConnection(resetFirst: false) }   // 没批准:别占着 helper
             return
