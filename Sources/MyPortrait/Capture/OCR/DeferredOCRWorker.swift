@@ -41,8 +41,17 @@ actor DeferredOCRWorker {
     private var awake = false
     /// 这一轮的 OCR 子进程,第一帧时开,drain 结束关。
     private var helper: OCRHelper.Connection?
-    /// 子进程处理某帧时死掉的次数。同一帧死两次就跳过它(不 OCR),免得卡住整个队列。
+    /// 子进程处理某帧时死掉(含超时)的次数。
     private var crashes: [Int64: Int] = [:]
+    /// 死过两次的帧:先跳过,等别的帧做成功、证明子进程本身没问题,再认定是这帧的问题,
+    /// 不 OCR 放行,免得卡住整个队列。
+    private var suspects: Set<Int64> = []
+    /// 上次有帧做成功以来,子进程失败(起不来 / 交不出去 / 处理中死掉)的次数。
+    /// 连续失败到 `systemicFailures` 次 = 子进程本身坏了,不怪哪一帧:清掉嫌疑、亮健康红点,
+    /// 帧都留在队列里,每轮照常重试。
+    private var failuresSinceSuccess = 0
+    private static let systemicFailures = 3
+    static let healthComponent = "deferredOCR.helper"
 
     init(db: PortraitDB) {
         self.db = db
@@ -79,11 +88,15 @@ actor DeferredOCRWorker {
             let frames = (try? await db.pendingOCRFrames(beforeMs: nowMs - Self.settleMs, limit: Self.batch)) ?? []
             if frames.isEmpty { break }
             await holdAwake(true)
-            for f in frames {
+            var tried = false
+            for f in frames where !suspects.contains(f.id) {
                 if done > 0, await checkGate(backlogBytes: s.bytes) != nil { break outer }
+                tried = true
                 guard await process(f) else { break outer }
                 done += 1
             }
+            // 这一批全是嫌疑帧:等下一轮(有新帧做成功才能给它们定性)。
+            if !tried { break }
         }
         await helper?.close()
         helper = nil
@@ -104,26 +117,33 @@ actor DeferredOCRWorker {
             try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
             return true
         }
-        if helper == nil {
+        let connection: OCRHelper.Connection
+        if let helper {
+            connection = helper
+        } else {
             do {
-                helper = try OCRHelper.Connection()
+                connection = try OCRHelper.Connection()
+                helper = connection
             } catch {
                 logger.error("OCR helper failed to start: \(String(describing: error), privacy: .public)")
+                await helperFailed(frame: nil)
                 return false
             }
         }
-        guard let outcome = await helper?.run(OCRHelper.Request(id: f.id, path: path)),
-              case .reply(let reply) = outcome else {
-            helper = nil
-            let n = (crashes[f.id] ?? 0) + 1
-            crashes[f.id] = n
-            logger.error("frame \(f.id, privacy: .public): OCR helper exited (\(n, privacy: .public)x)")
-            if n >= 2 {
-                try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
-                crashes[f.id] = nil
-            }
+        let reply: OCRHelper.Reply
+        switch await connection.run(OCRHelper.Request(id: f.id, path: path)) {
+        case .reply(let r):
+            reply = r
+        case .notDelivered:
+            logger.error("frame \(f.id, privacy: .public): OCR helper wasn't running, frame not sent")
+            await helperFailed(frame: nil)
+            return false
+        case .died(let timedOut):
+            logger.error("frame \(f.id, privacy: .public): OCR helper \(timedOut ? "timed out" : "exited", privacy: .public) on this frame")
+            await helperFailed(frame: f.id)
             return false
         }
+        await helperWorked()
         guard reply.readable else {
             logger.warning("frame \(f.id, privacy: .public): image unreadable, leaving it without OCR")
             try? await db.completePendingOCR(frameId: f.id, ocr: nil, snapshotPath: nil)
@@ -137,6 +157,39 @@ actor DeferredOCRWorker {
             if let jpg = reply.jpg { try? FileManager.default.removeItem(atPath: jpg) }
         }
         return true
+    }
+
+    /// `frame` = 子进程是在处理这帧时死的;nil = 跟具体帧无关(起不来 / 没交出去)。
+    private func helperFailed(frame: Int64?) async {
+        helper = nil
+        failuresSinceSuccess += 1
+        if let id = frame {
+            let n = (crashes[id] ?? 0) + 1
+            crashes[id] = n
+            if n >= 2 { suspects.insert(id) }
+        }
+        guard failuresSinceSuccess >= Self.systemicFailures else { return }
+        crashes = [:]
+        suspects = []
+        let n = failuresSinceSuccess
+        await MainActor.run {
+            HealthMonitor.shared.report(component: Self.healthComponent,
+                                        reason: "OCR helper failed \(n)x in a row with no frame done")
+        }
+    }
+
+    /// 有帧做成功了:子进程是好的,之前死过两次的帧就是它们自己的问题,不 OCR 放行。
+    private func helperWorked() async {
+        if failuresSinceSuccess >= Self.systemicFailures {
+            await MainActor.run { HealthMonitor.shared.clear(component: Self.healthComponent) }
+        }
+        failuresSinceSuccess = 0
+        for id in suspects {
+            logger.warning("frame \(id, privacy: .public): OCR helper died on it twice, leaving it without OCR")
+            try? await db.completePendingOCR(frameId: id, ocr: nil, snapshotPath: nil)
+            crashes[id] = nil
+        }
+        suspects = []
     }
 
     // MARK: - 条件
