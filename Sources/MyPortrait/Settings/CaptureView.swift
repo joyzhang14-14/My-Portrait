@@ -180,7 +180,8 @@ struct AudioCaptureSettingsView: View {
         // active = 模型真在跑;waiting = 队列非空但在攒批(见 info 文案)。
         let active = !paused && statusInProgress > 0
         let waiting = !paused && !active && statusPending > 0
-        let stateText = paused ? "Paused on battery"
+        let stateText = paused ? (IntentionalPauseState.shared.audioWaitingForModel
+                                    ? "Waiting for model download" : "Paused on battery")
                       : active ? "Transcribing…"
                       : waiting ? "Waiting…"
                       :           "Up to date"

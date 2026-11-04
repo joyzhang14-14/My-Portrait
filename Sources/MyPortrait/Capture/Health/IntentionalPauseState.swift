@@ -44,6 +44,8 @@ final class IntentionalPauseState {
     /// **仅压 audio 类 stall**(audioBacklog),不进 anyPaused,vision 该报还报。
     /// 在电池场景:mic 段继续入库 → pending 队列堆 → 不是 stall,是设计。
     var audioTranscriptionPaused: Bool = false
+    /// 选了 Qwen 但模型没下载:也是暂停(上面那个为 true),状态行改显示等下载。
+    var audioWaitingForModel: Bool = false
 
     /// 当前是否处于任何 *全局* 故意暂停状态(DRM / 锁屏睡眠 / 用户关 toggle)。
     /// StallDetector 早查这个跳过所有 stall。audioTranscriptionPaused 不在此 ——

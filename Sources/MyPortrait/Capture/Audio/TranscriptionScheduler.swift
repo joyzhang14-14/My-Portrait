@@ -166,6 +166,9 @@ actor TranscriptionScheduler {
         Task { @MainActor in
             KeepAwakeAssertion.shared.set(false, owner: "transcription")
             SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
+            // 停了就不再转录,「模型没下载」的红点一起清。
+            HealthMonitor.shared.clear(component: Self.modelMissingComponent)
+            IntentionalPauseState.shared.audioWaitingForModel = false
         }
         logger.info("TranscriptionScheduler stopped")
     }
@@ -277,6 +280,9 @@ actor TranscriptionScheduler {
                 qwen.unload()
                 await speaker.unload()
                 await MainActor.run {
+                    // 不转录了,「模型没下载」的红点也不再有意义。
+                    HealthMonitor.shared.clear(component: Self.modelMissingComponent)
+                    IntentionalPauseState.shared.audioWaitingForModel = false
                     IntentionalPauseState.shared.audioTranscriptionPaused = true
                     KeepAwakeAssertion.shared.set(false, owner: "transcription")
                     SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
@@ -294,12 +300,18 @@ actor TranscriptionScheduler {
                     HealthMonitor.shared.report(
                         component: Self.modelMissingComponent,
                         reason: "Qwen3-ASR model isn't downloaded. Download it in Settings → AI models.")
+                    // 标成故意暂停:队列堆着是在等下载,别再报「转录卡住」。
+                    IntentionalPauseState.shared.audioTranscriptionPaused = true
+                    IntentionalPauseState.shared.audioWaitingForModel = true
                     KeepAwakeAssertion.shared.set(false, owner: "transcription")
                     SleepHelperClient.shared.setKeepAwake(false, owner: "transcription")
                 }
                 return
             }
-            await MainActor.run { HealthMonitor.shared.clear(component: Self.modelMissingComponent) }
+            await MainActor.run {
+                HealthMonitor.shared.clear(component: Self.modelMissingComponent)
+                IntentionalPauseState.shared.audioWaitingForModel = false
+            }
             // 电源档位不满足(电池 / 开盖但要求合盖等)→ 不转录:释放模型 + 放行睡眠 +
             // 标记 intentional pause(让 StallDetector 知道 pending 堆积是故意的,不报 backlog)。
             if !powerShouldRun() {
