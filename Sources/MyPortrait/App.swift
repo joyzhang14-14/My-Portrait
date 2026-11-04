@@ -462,6 +462,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainContentInstalled = false
     /// 开机自启(登录项)拉起的:不建视图树、不显示窗口,只在后台采集。
     private var launchedAtLogin = false
+    /// 被隐藏(⌘H / 别的 app 的「隐藏其他」)那一刻窗口开着没有。取消隐藏时只有开着才重建视图树。
+    private var windowOpenWhenHidden = false
+    /// 后台启动时没弹的完全磁盘访问提醒,留到第一次打开窗口时弹。
+    private var fullDiskPromptPending = false
 
     /// SwiftUI 生命周期下 `NSApp.delegate` 是 SwiftUI 自己的转发壳
     /// (SwiftUI.AppDelegate),`as? AppDelegate` 永远 nil。要拿真实例走这里。
@@ -647,6 +651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSApplication.didHideNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated {
+                AppDelegate.current?.windowOpenWhenHidden = HealthMonitor.shared.windowVisible
                 HealthMonitor.shared.windowVisible = false
                 AppDelegate.current?.scheduleMainContentTeardown()
             }
@@ -656,6 +661,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSApplication.willUnhideNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated {
+                // 窗口本来就关着(或后台启动)时被「隐藏其他」藏起来,取消隐藏也不显示窗口,不重建。
+                guard AppDelegate.current?.windowOpenWhenHidden == true else { return }
                 HealthMonitor.shared.windowVisible = true
                 AppDelegate.current?.installMainContent()
             }
@@ -684,7 +691,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 到 System Settings。第一轮 refresh 是同步的,刚才 startManagedLifecycle
         // 内部已经触发;直接读最新状态。用户主动 dismiss 过就不再 nag,直到
         // 重新启动 + 状态从未授权过(避免每次启动都打扰)。
-        promptForFullDiskAccessIfNeeded()
+        // 后台启动不弹(会把 app 拉到前台、卡住主线程),等第一次打开窗口再弹。
+        if launchedAtLogin {
+            fullDiskPromptPending = true
+        } else {
+            promptForFullDiskAccessIfNeeded()
+        }
     }
 
     // MARK: - 主窗口内容装卸
@@ -821,6 +833,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if fullDiskPromptPending {
+            fullDiskPromptPending = false
+            MainActor.assumeIsolated { AppDelegate.current?.promptForFullDiskAccessIfNeeded() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
