@@ -605,7 +605,7 @@ struct DisplayConfig: Codable, Equatable {
 enum UpdateMode: String, Codable, CaseIterable, Equatable, Sendable {
     case manual
     case autoDetect        = "auto_detect"
-    case autoUpdateRestart = "auto_update_restart"
+    case autoInstallRestart = "auto_install_restart"
 }
 
 struct GeneralConfig: Codable, Equatable {

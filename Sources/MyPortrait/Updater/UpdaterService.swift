@@ -8,7 +8,7 @@ import Sparkle
 ///   1. 持有 SPUStandardUpdaterController 让它活着(否则 controller 销毁自动检查就停)
 ///   2. 把 ConfigStore.general.updateMode 接到 SPUUpdater 上:
 ///      manual = 不自动检查,只有点 Check now;autoDetect = 每 checkIntervalMinutes
-///      (10min)后台检查、发现新版提示;autoUpdateRestart = 再加自动下载、安装并重启
+///      (10min)后台检查、发现新版提示;autoInstallRestart = 再加自动下载、安装并重启
 ///      (→ updater.automaticallyDownloadsUpdates)。
 ///
 /// 启动检查 + 后台轮询都由 Sparkle 自己跑(automaticallyChecksForUpdates=true)。
@@ -118,7 +118,7 @@ final class UpdaterService: NSObject {
         // scheduler(那个 scheduler 被 hardcoded 1h minimum 卡死),我们用
         // 自己的 checkTimer 驱动 checkForUpdatesInBackground()。
         u.automaticallyChecksForUpdates = false
-        u.automaticallyDownloadsUpdates = g.updateMode == .autoUpdateRestart
+        u.automaticallyDownloadsUpdates = g.updateMode == .autoInstallRestart
 
         // 检查间隔写死 10 分钟。手动档不开 timer。
         checkTimer?.invalidate()
@@ -148,7 +148,7 @@ final class UpdaterService: NSObject {
 ///   1. \`didFindValidUpdate\`:Sparkle 找到新版本 → post 一条 "new version
 ///      available" banner(\`.appUpdate\` kind,被 notifications.appUpdates
 ///      toggle 控制)
-///   2. \`willInstallUpdateOnQuit\`:updateMode = autoUpdateRestart + Sparkle
+///   2. \`willInstallUpdateOnQuit\`:updateMode = autoInstallRestart + Sparkle
 ///      已经**下载 + 解压完新版**,**这才是真正的"download complete"
 ///      callback**。我们 return YES 接管 install,post 倒计时 banner
 ///      "Updating in 10s, click to postpone"。10s 跑完没操作 → 调
@@ -178,14 +178,14 @@ private final class UpdateBannerDelegate: NSObject, SPUUpdaterDelegate {
     ///   - 用户点 banner postpone → 不调 handler,Sparkle 还是会在用户
     ///     ⌘Q 时装(行为退化到 install-on-quit)
     ///
-    /// 不是 autoUpdateRestart 时返回 NO 让 Sparkle 走标准 modal 流程。
+    /// 不是 autoInstallRestart 时返回 NO 让 Sparkle 走标准 modal 流程。
     nonisolated func updater(
         _ updater: SPUUpdater,
         willInstallUpdateOnQuit item: SUAppcastItem,
         immediateInstallationBlock immediateInstallHandler: @escaping () -> Void
     ) -> Bool {
         let autoOn = MainActor.assumeIsolated {
-            ConfigStore.shared.current.general.updateMode == .autoUpdateRestart
+            ConfigStore.shared.current.general.updateMode == .autoInstallRestart
         }
         guard autoOn else { return false }   // 不自动安装 → 让 Sparkle 走 modal
 

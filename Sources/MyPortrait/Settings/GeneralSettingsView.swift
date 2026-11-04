@@ -34,7 +34,7 @@ struct GeneralSettingsView: View {
                     Picker("", selection: config.binding(\.general.updateMode)) {
                         Text("Manually detect updates").tag(UpdateMode.manual)
                         Text("Auto-detect updates").tag(UpdateMode.autoDetect)
-                        Text("Auto-update & restart").tag(UpdateMode.autoUpdateRestart)
+                        Text("Auto-install update & restart").tag(UpdateMode.autoInstallRestart)
                     }
                     .pickerStyle(.menu).labelsHidden().frame(width: 240)
                 }
