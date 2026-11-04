@@ -56,12 +56,20 @@ final class PasteboardMonitor {
 
     // MARK: - 私有
 
+    /// 读内容走这条串行队列:复制方 app 只登记了类型、等有人读才交数据时,
+    /// 读取要等它响应,它忙就能卡几秒,不能放在主线程。
+    private let readQueue = DispatchQueue(label: "com.myportrait.pasteboard.read")
+
     private func poll() {
-        let pb = NSPasteboard.general
-        let cc = pb.changeCount
+        let cc = NSPasteboard.general.changeCount
         guard cc != lastChangeCount else { return }   // 没复制过，不读内容
         lastChangeCount = cc
-        currentText = pb.string(forType: .string)
-        logger?.record(pb)
+        logger?.record(on: readQueue)
+        readQueue.async { [weak self] in
+            let text = NSPasteboard.general.string(forType: .string)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.currentText = text }
+            }
+        }
     }
 }

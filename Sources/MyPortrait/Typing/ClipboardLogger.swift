@@ -17,25 +17,25 @@ import os.log
 @MainActor
 final class ClipboardLogger {
 
-    static let maxChars = 30
-    private static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+    nonisolated static let maxChars = 30
+    private nonisolated static let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
 
     private let dbPool: DatabasePool
-    private let writeQueue = DispatchQueue(label: "com.myportrait.clipboard.write")
     private let log = Logger(subsystem: "com.joyzhang.myportrait", category: "typing.clipboard")
 
     init(dbPool: DatabasePool) {
         self.dbPool = dbPool
     }
 
-    /// 剪贴板刚换过内容时调。在主线程取摘要,写库派到后台串行队列。
-    func record(_ pb: NSPasteboard) {
+    /// 剪贴板刚换过内容时在主线程调,记下时刻和前台 app;读内容取摘要和写库
+    /// 都在 `queue` 上做(读内容可能要等复制方 app 交数据)。
+    func record(on queue: DispatchQueue) {
         let ts = Int64(Date().timeIntervalSince1970 * 1000)
         let bundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
         let hidden = !bundleId.isEmpty && TypingPrivacyFilter.isBlacklisted(bundleId: bundleId)
-        let content = Self.summary(pb, concealed: hidden)
         let db = dbPool
-        writeQueue.async { [log] in
+        queue.async { [log] in
+            let content = ClipboardLogger.summary(.general, concealed: hidden)
             do {
                 try db.write {
                     try $0.execute(
@@ -48,7 +48,7 @@ final class ClipboardLogger {
         }
     }
 
-    static func summary(_ pb: NSPasteboard, concealed: Bool) -> String {
+    nonisolated static func summary(_ pb: NSPasteboard, concealed: Bool) -> String {
         let types = pb.types ?? []
         if concealed || types.contains(concealedType) { return "[concealed]" }
         if types.isEmpty { return "[empty]" }
@@ -61,7 +61,7 @@ final class ClipboardLogger {
         return "[other]"
     }
 
-    static func truncate(_ s: String) -> String {
+    nonisolated static func truncate(_ s: String) -> String {
         s.count > maxChars ? String(s.prefix(maxChars)) + "..." : s
     }
 }
