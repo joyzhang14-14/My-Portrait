@@ -150,8 +150,10 @@ actor DeferredOCRWorker {
             return true
         }
         do {
-            try await db.completePendingOCR(frameId: f.id, ocr: reply.ocr, snapshotPath: reply.jpg)
+            let applied = try await db.completePendingOCR(frameId: f.id, ocr: reply.ocr, snapshotPath: reply.jpg)
             if reply.jpg != nil { try? FileManager.default.removeItem(atPath: path) }
+            // 处理期间这帧被删了 / 图被清了:新写出的 JPG 没人指向,一起删。
+            if !applied, let jpg = reply.jpg { try? FileManager.default.removeItem(atPath: jpg) }
         } catch {
             logger.error("frame \(f.id, privacy: .public): DB update failed: \(String(describing: error), privacy: .public)")
             if let jpg = reply.jpg { try? FileManager.default.removeItem(atPath: jpg) }

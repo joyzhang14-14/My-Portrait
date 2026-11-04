@@ -89,9 +89,10 @@ actor PortraitDBImpl: PortraitDB {
         }
     }
 
-    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws {
+    @discardableResult
+    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws -> Bool {
         let ocrFields = try Self.encodeOCRFields(ocr)
-        try await screenPool.write { db in
+        return try await screenPool.write { db in
             if let ocrFields {
                 try db.execute(sql: """
                     UPDATE frames
@@ -102,11 +103,15 @@ actor PortraitDBImpl: PortraitDB {
                                      "confidence": ocrFields.confidence, "textSource": ocrFields.textSource,
                                      "id": frameId])
             }
+            var applied = true
             if let snapshotPath {
-                try db.execute(sql: "UPDATE frames SET snapshot_path = :p WHERE id = :id",
+                // snapshot_path 已是 NULL = 保留清理清掉了这帧的图,不写回。
+                try db.execute(sql: "UPDATE frames SET snapshot_path = :p WHERE id = :id AND snapshot_path IS NOT NULL",
                                arguments: ["p": AssetPath.normalize(snapshotPath), "id": frameId])
+                applied = db.changesCount > 0
             }
             try db.execute(sql: "DELETE FROM ocr_pending WHERE frame_id = :id", arguments: ["id": frameId])
+            return applied
         }
     }
 

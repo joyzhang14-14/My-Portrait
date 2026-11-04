@@ -44,7 +44,10 @@ protocol PortraitDB: Sendable {
 
     /// 一帧 OCR 做完:写 OCR 字段(`ocr` nil = 图读不到,不写)、`snapshotPath` 非 nil 时
     /// 换成新图路径,并移出 `ocr_pending`,同一事务。
-    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws
+    /// 返回新图路径有没有写上:帧已被删(隐私删除)或图已被保留清理清掉时为 false,
+    /// 调用方要把刚写出的新图删掉,否则磁盘上留一张没人指向的图。
+    @discardableResult
+    func completePendingOCR(frameId: Int64, ocr: OCRResult?, snapshotPath: String?) async throws -> Bool
 
     /// 积压概况:帧数 / 最旧帧时间 / 各帧图片的绝对路径(算占用用)。
     func pendingOCRSummary() async throws -> PendingOCRSummary
