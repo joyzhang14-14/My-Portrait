@@ -9,6 +9,9 @@ struct MyPortraitApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     init() {
+        // 往已经退出的子进程(OCR helper 等)的管道里写,默认会收到 SIGPIPE 直接结束整个 app。
+        // 忽略后写入只返回 EPIPE 错误,由调用方按普通失败处理。
+        signal(SIGPIPE, SIG_IGN)
         // 延后 OCR 的子进程(DeferredOCRWorker 拉起):只做 OCR,不跑迁移、不起窗口。
         if ProcessInfo.processInfo.arguments.contains(OCRHelper.flag) { OCRHelper.runChild() }
         // 数据路径迁移最先跑 —— CLI 模式也起 Services,所以放最前面,确保
