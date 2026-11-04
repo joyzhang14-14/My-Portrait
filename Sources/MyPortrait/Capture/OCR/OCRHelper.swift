@@ -75,12 +75,24 @@ enum OCRHelper {
 
     // MARK: - 主进程这头
 
+    /// 交一帧的结果。
+    enum Outcome {
+        case reply(Reply)
+        /// 没交出去:子进程已经不在 / 写管道失败。跟这帧无关。
+        case notDelivered
+        /// 交出去了,但处理这帧时子进程退出、超时被结束,或回复读不出来。
+        case died(timedOut: Bool)
+    }
+
+    /// 一帧最多等这么久。平时几秒;文字特别多的整屏也远用不到,只防 Vision / 解码卡死。
+    static let replyTimeout: Duration = .seconds(300)
+
     /// 一个跑着的子进程。主进程一轮补 OCR 开一个,补完 `close()`。
     actor Connection {
         private let process = Process()
         private let input = Pipe()
         private let output = Pipe()
-        private var lines: AsyncLineSequence<FileHandle.AsyncBytes>.AsyncIterator
+        private var bytes: FileHandle.AsyncBytes.AsyncIterator
 
         init() throws {
             guard let exe = Bundle.main.executableURL else { throw CocoaError(.fileNoSuchFile) }
@@ -89,29 +101,60 @@ enum OCRHelper {
             process.standardInput = input
             process.standardOutput = output
             process.standardError = FileHandle.nullDevice
-            lines = output.fileHandleForReading.bytes.lines.makeAsyncIterator()
+            bytes = output.fileHandleForReading.bytes.makeAsyncIterator()
             try process.run()
         }
 
-        /// 交一帧,等回复。子进程退出了(崩溃 / 被系统杀)返回 nil。
-        func run(_ req: Request) async -> Reply? {
-            guard process.isRunning, let data = try? JSONEncoder().encode(req) else { return nil }
+        /// 交一帧,等回复。
+        func run(_ req: Request) async -> Outcome {
+            guard process.isRunning, let data = try? JSONEncoder().encode(req) else { return .notDelivered }
             do {
                 try input.fileHandleForWriting.write(contentsOf: data + Data("\n".utf8))
-                // 一次只交一帧(DeferredOCRWorker 串行),拷出来等完再放回不会交错。
-                var it = lines
-                let line = try await it.next()
-                lines = it
-                guard let line else { return nil }
-                return try JSONDecoder().decode(Reply.self, from: Data(line.utf8))
             } catch {
-                return nil
+                return .notDelivered
             }
+            // 超时就结束手上这个子进程,管道随之 EOF,下面的读取返回。
+            let proc = UncheckedProcess(process)
+            let watchdog = Task {
+                try await Task.sleep(for: OCRHelper.replyTimeout)
+                if proc.process.isRunning { proc.process.terminate() }
+                return true
+            }
+            defer { watchdog.cancel() }
+            // 自己按 \n 切行:系统的按行读取还会在 U+2028 / U+2029 / U+0085 处断开,
+            // 而 JSON 不转义这几个字符,OCR 文字里一出现就会把一条回复切成两半。
+            // 一次只交一帧(DeferredOCRWorker 串行),拷出来等完再放回不会交错。
+            var it = bytes
+            var line: [UInt8] = []
+            var eof = false
+            do {
+                while true {
+                    guard let b = try await it.next() else { eof = true; break }
+                    if b == 0x0A { break }
+                    line.append(b)
+                }
+            } catch {
+                eof = true
+            }
+            bytes = it
+            if eof {
+                watchdog.cancel()
+                let timedOut = (try? await watchdog.value) == true
+                return .died(timedOut: timedOut)
+            }
+            guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(line)) else { return .died(timedOut: false) }
+            return .reply(reply)
         }
 
         /// 关 stdin,子进程读到 EOF 自己退出。
         func close() {
             try? input.fileHandleForWriting.close()
         }
+    }
+
+    /// Process 不是 Sendable;超时任务里只读 isRunning、调 terminate(),都是线程安全的。
+    private struct UncheckedProcess: @unchecked Sendable {
+        let process: Process
+        init(_ process: Process) { self.process = process }
     }
 }

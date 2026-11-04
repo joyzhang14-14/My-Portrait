@@ -112,7 +112,8 @@ actor DeferredOCRWorker {
                 return false
             }
         }
-        guard let reply = await helper?.run(OCRHelper.Request(id: f.id, path: path)) else {
+        guard let outcome = await helper?.run(OCRHelper.Request(id: f.id, path: path)),
+              case .reply(let reply) = outcome else {
             helper = nil
             let n = (crashes[f.id] ?? 0) + 1
             crashes[f.id] = n
