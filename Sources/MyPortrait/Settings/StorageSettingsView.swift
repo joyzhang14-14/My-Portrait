@@ -318,12 +318,16 @@ private struct StorageStats {
     /// 所以 app 行的和也不可能被 Data 磁贴(只扫数据目录)覆盖。
     nonisolated static func scan(at path: String) -> StorageStats {
         let root = URL(fileURLWithPath: path)
-        let dataBytes  = directorySize(root)
+        // 数据目录只走一遍,边走边按子目录归类。数据目录有近十万个文件(视频片段为主),
+        // 系统的文件信息缓存被挤掉后逐个重读很慢,分项再各走一遍等于同一批文件读两遍。
+        let (dataBytes, sub) = walk(root, buckets: [
+            "metadata/audio", "metadata/audio_queue", "metadata/video", "metadata/frames",
+            "logs", "events", "portrait", "pipeline/logs", "runtime", "models",
+        ])
         // 音频 = 转录后留存的 wav + 待转录队列。
-        let audioBytes = directorySize(root.appendingPathComponent("metadata/audio"))
-                       + directorySize(root.appendingPathComponent("metadata/audio_queue"))
-        let videoBytes = directorySize(root.appendingPathComponent("metadata/video"))
-        let frameBytes = directorySize(root.appendingPathComponent("metadata/frames"))
+        let audioBytes = sub["metadata/audio"]! + sub["metadata/audio_queue"]!
+        let videoBytes = sub["metadata/video"]!
+        let frameBytes = sub["metadata/frames"]!
         let mediaBytes = audioBytes + videoBytes + frameBytes
 
         /// 一个库连同 -wal / -shm 的大小。
@@ -333,7 +337,7 @@ private struct StorageStats {
         // 采集的三个库(帧和 OCR / 转录和说话人 / 击键、鼠标、剪贴板)。
         let dbBytes    = dbSize("metadata/screen.sqlite") + dbSize("metadata/audio.sqlite")
                        + dbSize("metadata/input.sqlite")
-        let logBytes   = directorySize(root.appendingPathComponent("logs"))
+        let logBytes   = sub["logs"]!
 
         // 和访达显示的「可用」同口径:含系统需要时会自动腾出的可清除空间
         // (本地 Time Machine 快照、iCloud 缓存等)。
@@ -345,14 +349,12 @@ private struct StorageStats {
         let months = Double(free) / Double(monthly)
 
         // 记忆层三个目录合成一行 —— 单拎出来每个都是几百 KB,占三行只是噪音。
-        let memoryBytes = directorySize(root.appendingPathComponent("events"))
-                        + directorySize(root.appendingPathComponent("portrait"))
-                        + directorySize(root.appendingPathComponent("pipeline/logs"))
+        let memoryBytes = sub["events"]! + sub["portrait"]! + sub["pipeline/logs"]!
                         + dbSize("pipeline/workflow.sqlite")
         // app 本体在 ~/.portrait 之外(/Applications 之类),单独量。
         let bundleBytes = directorySize(Bundle.main.bundleURL)
         // 首次启动下载的 AI 运行时:Bun + pi-agent 包 + 注入 PATH 的小 wrapper。
-        let runtimeBytes = directorySize(root.appendingPathComponent("runtime"))
+        let runtimeBytes = sub["runtime"]!
 
         return StorageStats(
             dataBytes: dataBytes, cacheBytes: 0, freeBytes: free,
@@ -360,7 +362,7 @@ private struct StorageStats {
                 screenVideo: frameBytes + videoBytes,
                 audio: audioBytes,
                 metadata: dbBytes,
-                localModels: localModelBytes(root: root),
+                localModels: localModelBytes(inDataDir: sub["models"]!),
                 memory: memoryBytes,
                 bundle: bundleBytes,
                 runtime: runtimeBytes,
@@ -376,8 +378,8 @@ private struct StorageStats {
     ///   - WhisperKit                     `~/Documents/huggingface/…`(它自己定的)
     ///   - Qwen3-ASR                      `~/Library/Caches/qwen3-speech/models/`
     /// 后两个路径由各自的 wrapper 提供,这里不重拼 —— 它们改了这里跟着改。
-    nonisolated private static func localModelBytes(root: URL) -> Int64 {
-        var total = directorySize(root.appendingPathComponent("models"))
+    nonisolated private static func localModelBytes(inDataDir: Int64) -> Int64 {
+        var total = inDataDir
         if let d = WhisperKitWrapper.modelsRootDir { total += directorySize(d) }
         if let d = Qwen3ASRWrapper.modelsRootDir   { total += directorySize(d) }
         return total
@@ -396,6 +398,28 @@ private struct StorageStats {
         }
         return total
     }
+    /// 走一遍 `root`,返回总大小和每个子目录(相对 `root` 的路径,互不嵌套)各自的大小。
+    nonisolated private static func walk(_ root: URL, buckets: [String]) -> (total: Int64, sub: [String: Int64]) {
+        var sub = Dictionary(uniqueKeysWithValues: buckets.map { ($0, Int64(0)) })
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: root.path),
+              let it = fm.enumerator(at: root, includingPropertiesForKeys: [.totalFileAllocatedSizeKey],
+                                     options: [.skipsHiddenFiles], errorHandler: nil)
+        else { return (0, sub) }
+        let base = root.standardizedFileURL.path + "/"
+        let prefixes = buckets.map { ($0, $0 + "/") }
+        var total: Int64 = 0
+        for case let u as URL in it {
+            let size = Int64((try? u.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? 0)
+            total += size
+            let path = u.standardizedFileURL.path
+            guard path.hasPrefix(base) else { continue }
+            let rel = path.dropFirst(base.count)
+            if let (key, _) = prefixes.first(where: { rel.hasPrefix($0.1) }) { sub[key]! += size }
+        }
+        return (total, sub)
+    }
+
     nonisolated private static func fileSize(_ url: URL) -> Int64 {
         let v = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey])
         return Int64(v?.totalFileAllocatedSize ?? 0)
