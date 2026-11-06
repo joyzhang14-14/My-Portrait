@@ -58,6 +58,27 @@ final class UpdaterService: NSObject {
         // config 变化(不会高频,只在用户改 toggle / TextField 时)。
         applyConfig()
         observeConfig()
+        observeAlertCheckbox()
+    }
+
+    private var autoDownloadKVO: NSKeyValueObservation?
+
+    /// Sparkle 更新弹窗里的「Automatically download and install updates in the
+    /// future」勾选框直接改 automaticallyDownloadsUpdates,不经过 config。跟到
+    /// updateMode 上,让它和 General → Update 下拉菜单一致。applyConfig 自己写的
+    /// 值与 config 相同,回调里比对后不会再改。
+    private func observeAlertCheckbox() {
+        autoDownloadKVO = controller.updater.observe(\.automaticallyDownloadsUpdates, options: [.new]) { _, change in
+            guard let on = change.newValue else { return }
+            Task { @MainActor in
+                let mode = ConfigStore.shared.current.general.updateMode
+                if on, mode != .autoInstallRestart {
+                    ConfigStore.shared.mutate { $0.general.updateMode = .autoInstallRestart }
+                } else if !on, mode == .autoInstallRestart {
+                    ConfigStore.shared.mutate { $0.general.updateMode = .autoDetect }
+                }
+            }
+        }
     }
 
     /// 上次应用过的 updateMode 值。@Observable 追踪粒度是整个 `current`,
