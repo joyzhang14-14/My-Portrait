@@ -12,6 +12,18 @@
         -->
 
         <item>
+            <title>1.3.265</title>
+            <pubDate>Sat, 07 Nov 2026 06:10:33 +0000</pubDate>
+            <sparkle:version>186</sparkle:version>
+            <sparkle:shortVersionString>1.3.265</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>Features</h3><ul><li><strong>Workflow is one pipeline</strong> &mdash; Settings → Workflow now follows the pipeline in order: <strong>Event Session</strong>, <strong>Event Merge</strong> and <strong>Portrait Distillation</strong>. Personality is refreshed as part of Portrait Distillation and shares its switch and AI provider. Each page&apos;s <strong>How it works</strong> is a left-to-right chart of every step, marked as data, algorithm or AI &mdash; click a step to see what it does.</li><li><strong>Input calendar shows where your input is</strong> &mdash; in Data → Input, days with no keystrokes or clicks are grayed out in the calendar, just like Timeline.</li></ul><h3>Bug fixes</h3><ul><li>Fixed a crash in Timeline when the day&apos;s frames were reloaded while the bottom strip was on screen.</li><li>Ticking &quot;Automatically download and install updates&quot; in the update window now switches General → Update to Auto-install update &amp; restart, and unticking it switches back.</li><li>Checking the background helper&apos;s status no longer holds up the window.</li><li>The date button in Timeline is now the same size as the one in Data → Input, instead of shrinking with the window.</li></ul>]]></description>
+            <enclosure
+                url="https://github.com/joyzhang14-14/My-Portrait/releases/download/v1.3.265/MyPortrait_1.3.265_arm64.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="L6jq5HgV5HHOqysUEC9Ujo3WOixxbPx9SAiU+BJzQLrKd41DJCrOLd2qM+nz7sac+iKF930LV9k0eDvjYX7jBw==" length="28029922" />
+        </item>
+        <item>
             <title>1.3.259</title>
             <pubDate>Fri, 06 Nov 2026 20:52:26 +0000</pubDate>
             <sparkle:version>184</sparkle:version>
