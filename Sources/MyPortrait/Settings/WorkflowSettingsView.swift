@@ -108,15 +108,15 @@ struct WorkflowSettingsView: View {
     @State private var writingStylePreviewDraft: WritingStyleStagedRow? = nil
     @State private var writingStyleExpandedDrafts: [String: [WritingStyleStagedRow]] = [:]
 
-    /// Memory 区的子板块。由左侧栏选中项决定，不在页内切换。
-    /// 4 个 pipeline 各一页(每页:自动运行开关 + AI provider + Run now + 待审核)
-    /// + Changelog(含 Needs attention)。
+    /// Workflow 区的子板块。由左侧栏选中项决定，不在页内切换。
+    /// 一条流水线的三段各一页 + Changelog(含 Needs attention)。性格刷新在画像
+    /// 这一页:开关和 provider 跟画像一起改(后台仍是画像跑完接着跑性格)。
+    /// writing style 没开放,不单独成页。
     enum Tab: String {
-        case eventsProcessor       = "Events Processor"
-        case portraitsDistiller    = "Portraits Distiller"
-        case personalityRefresher  = "Personality Refresher"
-        case writingStyleDistiller = "Writing Style Distiller"
-        case changelog             = "Changelog"
+        case eventSession         = "Event Session"
+        case eventMerge           = "Event Merge"
+        case portraitDistillation = "Portrait Distillation"
+        case changelog            = "Changelog"
     }
     /// 由 SettingsView 的路由根据侧栏选中的子分区注入。
     let tab: Tab
@@ -136,7 +136,10 @@ struct WorkflowSettingsView: View {
                 header
 
                 switch tab {
-                case .eventsProcessor:
+                case .eventSession:
+                    eventSessionSection
+                    pipelineFlowSection(.eventSession)
+                case .eventMerge:
                     // 手动运行并进同一张卡 —— 自动开关关掉时才伸出来。
                     autoRunSection(
                         nil,
@@ -150,54 +153,23 @@ struct WorkflowSettingsView: View {
                         )
                     )
                     providerSection(\.scheduler.event)
-                    eventSessionSection
                     reviewSectionFor(.eventProcessing)
-                    pipelineFlowSection(.eventsProcessor)
-                case .portraitsDistiller:
-                    autoRunSection(
-                        nil,
-                        config: \.scheduler.portrait,
-                        manual: (
-                            trigger: .distill,
-                            title: "Distill portrait now",
-                            info: "Runs the distiller now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
-                                + ManualTrigger.distill.desc
-                        )
-                    )
-                    providerSection(\.scheduler.portrait, usesLightModel: false)
-                    reviewSectionFor(.distill)
-                    pipelineFlowSection(.portraitsDistiller)
-                case .personalityRefresher:
-                    autoRunSection(
-                        nil,
-                        config: \.scheduler.personality,
-                        manual: (
-                            trigger: .personality,
-                            title: "Refresh personality now",
-                            info: "Runs the refresher now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
-                                + ManualTrigger.personality.desc
-                        )
-                    )
-                    providerSection(\.scheduler.personality)
-                    reviewSectionFor(.personality)
-                    pipelineFlowSection(.personalityRefresher)
-                case .writingStyleDistiller:
-                    // writing style 不走 ManualTrigger(自己一套禁用判据 + 运行
-                    // 态),所以手动那一行是自己写的,但卡片形态跟另外三条一样:
-                    // 并进 Automatic processing,自动开关关掉时才伸出来。
-                    // 没开放时(SchedulerSettings.writingStyleAvailable)只留 Coming soon,已有的风格条目照常在画像里。
-                    if SchedulerSettings.writingStyleAvailable {
-                        autoRunSection(nil, config: \.scheduler.writingStyle,
-                                       hasManual: true) {
-                            writingStyleManualRow
-                        }
-                        providerSection(\.scheduler.writingStyle, usesLightModel: false)
-                    } else {
-                        writingStyleComingSoonSection
+                    pipelineFlowSection(.eventMerge)
+                case .portraitDistillation:
+                    autoRunSection(nil, config: \.scheduler.portrait, hasManual: true) {
+                        manualRunRow(.distill, title: "Distill portrait now",
+                                     info: "Runs the distiller now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                                        + ManualTrigger.distill.desc)
+                        manualRunRow(.personality, title: "Refresh personality now",
+                                     info: "Runs the personality refresh now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
+                                        + ManualTrigger.personality.desc)
+                        actionStatusText
                     }
-                    writingStyleReviewSection
-                    // 流程图讲的是原来从 writing_records 学的那套,开放时换成 EventSession 的流程再放出来。
-                    if SchedulerSettings.writingStyleAvailable { pipelineFlowSection(.writingStyleDistiller) }
+                    // 性格这段用到轻模型(特征聚类),所以这里给出轻模型那一栏。
+                    providerSection(\.scheduler.portrait)
+                    reviewSectionFor(.distill)
+                    reviewSectionFor(.personality)
+                    pipelineFlowSection(.portraitDistillation)
                 case .changelog:
                     attentionSection
                     changelogSection
@@ -215,6 +187,16 @@ struct WorkflowSettingsView: View {
         // 放得下就完全固定,超出才可滚(同 SettingsPage / onboarding)。
         .scrollBounceBehavior(.basedOnSize)
         .task { reload() }
+        // 性格刷新跟画像共用一个开关和 provider:画像这段的设置一变就抄给性格。
+        .onChange(of: cfg.current.scheduler.portrait) { _, p in
+            guard tab == .portraitDistillation else { return }
+            cfg.mutate {
+                $0.scheduler.personality.frequency = p.frequency
+                $0.scheduler.personality.providerId = p.providerId
+                $0.scheduler.personality.model = p.model
+                $0.scheduler.personality.modelLight = p.modelLight
+            }
+        }
         // 调度器实时信号 → 刷新本页缓存。后台(定时)触发的 run 不经过本页
         // 点击路径,没有这组 onChange 时:run 开始 dbInProgress 缓存还是
         // false → 进度条不出现;run 结束 staging/attention/hasWork 全 stale
@@ -539,14 +521,12 @@ struct WorkflowSettingsView: View {
     /// nil = 这一页不要副标题。
     private var headerBlurb: String? {
         switch tab {
-        case .eventsProcessor:
-            return nil
-        case .portraitsDistiller:
-            return nil
-        case .personalityRefresher:
-            return nil
-        case .writingStyleDistiller:
-            return nil
+        case .eventSession:
+            return "Step 1 of 3 · each stretch of work on one screen is summarized on its own."
+        case .eventMerge:
+            return "Step 2 of 3 · sessions are grouped into events, scored and kept up to date."
+        case .portraitDistillation:
+            return "Step 3 of 3 · events are distilled into your portrait and personality."
         case .changelog:
             return nil
         }
@@ -572,26 +552,36 @@ struct WorkflowSettingsView: View {
     ) -> some View {
         autoRunSection(desc, config: kp, hasManual: manual != nil) {
             if let m = manual {
-                HStack(spacing: 0) {
-                    Text(m.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary.opacity(0.92))
-                    SettingsInfoBadge(text: m.info)
-                    Spacer(minLength: 12)
-                    triggerButton(m.trigger)
-                }
-                if triggerActuallyRunning(m.trigger) {
-                    progressIndicator(triggerProgress(m.trigger),
-                                      onStop: { stopTrigger(m.trigger) })
-                }
-                if !actionStatus.isEmpty {
-                    Text(actionStatus)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                manualRunRow(m.trigger, title: m.title, info: m.info)
+                actionStatusText
             }
+        }
+    }
+
+    /// 自动开关关掉时伸出来的一行手动运行:标题 + ⓘ + Run 按钮,跑着时下面挂进度。
+    @ViewBuilder
+    private func manualRunRow(_ t: ManualTrigger, title: String, info: String) -> some View {
+        HStack(spacing: 0) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textPrimary.opacity(0.92))
+            SettingsInfoBadge(text: info)
+            Spacer(minLength: 12)
+            triggerButton(t)
+        }
+        if triggerActuallyRunning(t) {
+            progressIndicator(triggerProgress(t), onStop: { stopTrigger(t) })
+        }
+    }
+
+    @ViewBuilder
+    private var actionStatusText: some View {
+        if !actionStatus.isEmpty {
+            Text(actionStatus)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1033,11 +1023,9 @@ struct WorkflowSettingsView: View {
     private func pipelineFlowSection(_ flow: PipelineFlow) -> some View {
         section(
             title: "How it works",
-            info: "Every step this pipeline runs, in order. Click any box to see what it does.\n\nSolid lines carry data. Dashed lines only mark the next pipeline as pending — no data moves along them."
+            info: "Every step this part of the pipeline runs, left to right. Click any step to see what it does."
         ) {
             PipelineFlowView(flow: flow)
-            PipelineFlowLegend(flow: flow)
-                .padding(.top, 2)
         }
     }
 
@@ -1601,7 +1589,7 @@ struct WorkflowSettingsView: View {
     private var eventSessionSection: some View {
         section(
             title: "EventSession",
-            blurb: "Summarizes each session from everything captured — screen video, focus, keys & mouse, typing and OCR boxes — before events are built. On My Portrait Premium, all of that is sent along with the OCR text.",
+            blurb: "Summarizes each session from everything captured — screen video, focus, keys & mouse, typing and OCR boxes — before events are built. On My Portrait Premium, all of that is sent along with the OCR text.\n\nThis is metadata: all of your private data lives here. We recommend processing it with a local AI model.",
             titleTrailing: {
                 Toggle("", isOn: cfg.binding(\.premium.eventSession)).labelsHidden().toggleStyle(.switch).disabled(true)
             }

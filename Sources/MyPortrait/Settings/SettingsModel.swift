@@ -24,9 +24,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case screen, audio, typing
     }
     enum Workflow: String, Hashable, CaseIterable {
-        // 4 个 pipeline 各一页(provider 配置在各自页面里)+ Changelog(含 Needs attention)。
+        // 一条流水线的三段(事件会话 → 事件合并 → 画像蒸馏,性格刷新算在画像这段里)
+        // + Changelog(含 Needs attention)。
         // 第 1 层 OCR 的设置在 Screen Capture 页的 Screen Text Recognition。
-        case eventsProcessor, portraitsDistiller, personalityRefresher, writingStyleDistiller, changelog
+        case eventSession, eventMerge, portraitDistillation, changelog
     }
     enum DataPrivacy: String, Hashable, CaseIterable {
         // privacy 子项已合并到 Screen Capture 页面尾部,这里不再列。
@@ -61,11 +62,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "Screen Capture"
         case .capture(.audio):         return "Audio Capture"
         case .capture(.typing):        return "Typing Capture"
-        case .workflow(.eventsProcessor):       return "Events Processor"
-        case .workflow(.portraitsDistiller):    return "Portraits Distiller"
-        case .workflow(.personalityRefresher):  return "Personality Refresher"
-        case .workflow(.writingStyleDistiller): return "Writing Style Distiller"
-        case .workflow(.changelog):             return "Changelog"
+        case .workflow(.eventSession):         return "Event Session"
+        case .workflow(.eventMerge):           return "Event Merge"
+        case .workflow(.portraitDistillation): return "Portrait Distillation"
+        case .workflow(.changelog):            return "Changelog"
         case .data(.storage):          return "Storage"
         case .data(.health):           return "Health"
         }
@@ -81,11 +81,10 @@ enum SettingsSubsection: Hashable, Identifiable, CaseIterable {
         case .capture(.screen):        return "display"
         case .capture(.audio):         return "mic"
         case .capture(.typing):        return "keyboard"
-        case .workflow(.eventsProcessor):       return "calendar.badge.clock"
-        case .workflow(.portraitsDistiller):    return "person.text.rectangle"
-        case .workflow(.personalityRefresher):  return "brain.head.profile"
-        case .workflow(.writingStyleDistiller): return "pencil.line"
-        case .workflow(.changelog):             return "list.bullet.rectangle"
+        case .workflow(.eventSession):         return "rectangle.stack"
+        case .workflow(.eventMerge):           return "calendar.badge.clock"
+        case .workflow(.portraitDistillation): return "person.text.rectangle"
+        case .workflow(.changelog):            return "list.bullet.rectangle"
         case .data(.storage):          return "externaldrive"
         case .data(.health):           return "stethoscope"
         }

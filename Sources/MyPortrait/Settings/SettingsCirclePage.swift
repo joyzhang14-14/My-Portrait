@@ -137,10 +137,9 @@ struct SettingsCirclePage: View {
         case .capture(.screen): return c.capture.screen.enabled ? .on : .off
         case .capture(.audio):  return c.capture.audio.enabled ? .on : .off
         case .capture(.typing): return c.capture.typingCaptureEnabled ? .on : .off
-        case .workflow(.eventsProcessor):       return c.scheduler.event.frequency == .off ? .off : .on
-        case .workflow(.portraitsDistiller):    return c.scheduler.portrait.frequency == .off ? .off : .on
-        case .workflow(.personalityRefresher):  return c.scheduler.personality.frequency == .off ? .off : .on
-        case .workflow(.writingStyleDistiller): return c.scheduler.writingStyle.frequency == .off ? .off : .on
+        case .workflow(.eventSession):         return c.premium.eventSession ? .on : .off
+        case .workflow(.eventMerge):           return c.scheduler.event.frequency == .off ? .off : .on
+        case .workflow(.portraitDistillation): return c.scheduler.portrait.frequency == .off ? .off : .on
         case .workflow(.changelog): return attention > 0 ? .warn : nil
         case .data(.health):        return healthIssue == nil ? .on : .warn
         default: return nil
@@ -173,7 +172,7 @@ struct SettingsCirclePage: View {
                 statusRow("Typing", c.typingCaptureEnabled ? .on : .off, c.typingCaptureEnabled ? "On" : "Off", .capture(.typing))
                 sectionTitle("Workflow").padding(.top, 8)
                 statusRow("Last run", lastRunLamp, lastRunText, .workflow(.changelog))
-                statusRow("Next run", nil, nextRunText, .workflow(.eventsProcessor))
+                statusRow("Next run", nil, nextRunText, .workflow(.eventMerge))
                 sectionTitle("Data").padding(.top, 8)
                 statusRow("Storage", nil, usedBytes.map(Self.bytes) ?? "Measuring…", .data(.storage))
                 statusRow("Free", nil, freeBytes.map(Self.bytes) ?? "—", .data(.storage))

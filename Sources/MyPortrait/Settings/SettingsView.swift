@@ -17,11 +17,10 @@ struct SettingsPane: View {
             case .capture(.audio):     AudioCaptureSettingsView()
             case .capture(.typing):    TypingCaptureSettingsView()
             case .data(.health):       CaptureHealthView()
-            case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
-            case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
-            case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
-            case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
-            case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
+            case .workflow(.eventSession):         WorkflowSettingsView(tab: .eventSession)
+            case .workflow(.eventMerge):           WorkflowSettingsView(tab: .eventMerge)
+            case .workflow(.portraitDistillation): WorkflowSettingsView(tab: .portraitDistillation)
+            case .workflow(.changelog):            WorkflowSettingsView(tab: .changelog)
             case .data(.storage):      StorageSettingsView()
             }
         }
@@ -124,11 +123,10 @@ struct SettingsScene: View {
         case .capture(.audio):     AudioCaptureSettingsView()
         case .capture(.typing):    TypingCaptureSettingsView()
         case .data(.health):       CaptureHealthView()
-        case .workflow(.eventsProcessor):       WorkflowSettingsView(tab: .eventsProcessor)
-        case .workflow(.portraitsDistiller):    WorkflowSettingsView(tab: .portraitsDistiller)
-        case .workflow(.personalityRefresher):  WorkflowSettingsView(tab: .personalityRefresher)
-        case .workflow(.writingStyleDistiller): WorkflowSettingsView(tab: .writingStyleDistiller)
-        case .workflow(.changelog):             WorkflowSettingsView(tab: .changelog)
+        case .workflow(.eventSession):         WorkflowSettingsView(tab: .eventSession)
+        case .workflow(.eventMerge):           WorkflowSettingsView(tab: .eventMerge)
+        case .workflow(.portraitDistillation): WorkflowSettingsView(tab: .portraitDistillation)
+        case .workflow(.changelog):            WorkflowSettingsView(tab: .changelog)
         case .data(.storage):      StorageSettingsView()
         }
     }
