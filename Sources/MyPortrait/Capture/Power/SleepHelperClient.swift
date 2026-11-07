@@ -214,11 +214,24 @@ final class SleepHelperClient {
     /// TranscriptionScheduler);这里只 guard helper 已批准(.enabled),否则静默 no-op。
     func setKeepAwake(_ enabled: Bool, owner: String) {
         if enabled { owners.insert(owner) } else { owners.remove(owner) }
+        // 不要、没持有、没连接、没残留时下面哪条分支都不会动作,直接返回,不去问 status。
+        if owners.isEmpty, !holding, connection == nil, !PowerMonitor.systemSleepDisabled { return }
+        let plist = "\(Self.machServiceName).plist"
+        statusQueue.async {
+            let approved = SMAppService.daemon(plistName: plist).status == .enabled
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self.applyKeepAwake(approved: approved) }
+            }
+        }
+    }
+
+    /// status 是同步问系统的 XPC,系统忙时能卡好几秒,所以放到这条串行队列上问。
+    private let statusQueue = DispatchQueue(label: "com.myportrait.sleephelper.status")
+
+    /// 按问回来的批准状态和**此刻**的 owners 动作(排队期间 owners 可能又变过)。
+    private func applyKeepAwake(approved: Bool) {
         let want = !owners.isEmpty
-        // 不要、没持有、没连接、没残留时下面哪条分支都不会动作,直接返回,不去问
-        // status:它是主线程上同步问系统的 XPC,系统忙时能卡住主线程。
-        if !want, !holding, connection == nil, !PowerMonitor.systemSleepDisabled { return }
-        guard service.status == .enabled else {
+        guard approved else {
             if !want { teardownConnection(resetFirst: false) }   // 没批准:别占着 helper
             return
         }
