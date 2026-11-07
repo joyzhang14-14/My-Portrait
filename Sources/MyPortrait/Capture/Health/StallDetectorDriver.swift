@@ -341,9 +341,8 @@ final class RunTerminationTracker {
     }
 }
 
-/// 后台队列每 2 秒 ping 一次主线程。主线程连续 3 秒不响应时,自动用系统
-/// `sample` 抓一份调用栈,写进诊断包,一天最多抓 `maxSamplesPerDay` 份。
-/// (11-05 update:门槛临时从 8 秒降到 3 秒,查 3–7 秒的短延迟,查清后改回)
+/// 后台队列每 2 秒 ping 一次主线程。主线程连续 8 秒不响应时,自动用系统
+/// `sample` 抓一份调用栈,写进诊断包。
 private final class MainThreadHangWatchdog: @unchecked Sendable {
     static let shared = MainThreadHangWatchdog()
 
@@ -351,11 +350,8 @@ private final class MainThreadHangWatchdog: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var pingSentAt: DispatchTime?
     private var sampledCurrentHang = false
-    private let hangThresholdNs: UInt64 = 3_000_000_000
-    private let keepSamples = 10
-    private let maxSamplesPerDay = 6
-    private var sampleDay = ""
-    private var samplesToday = 0
+    private let hangThresholdNs: UInt64 = 8_000_000_000
+    private let keepSamples = 3
 
     func start() {
         queue.async { [weak self] in
@@ -382,12 +378,7 @@ private final class MainThreadHangWatchdog: @unchecked Sendable {
             let stalledNs = DispatchTime.now().uptimeNanoseconds - sent.uptimeNanoseconds
             if stalledNs >= hangThresholdNs, !sampledCurrentHang {
                 sampledCurrentHang = true
-                let day = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
-                if day != sampleDay { sampleDay = day; samplesToday = 0 }
-                if samplesToday < maxSamplesPerDay {
-                    samplesToday += 1
-                    captureSample(stalledMs: stalledNs / 1_000_000)
-                }
+                captureSample(stalledMs: stalledNs / 1_000_000)
             }
             return
         }
