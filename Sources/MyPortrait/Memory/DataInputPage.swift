@@ -257,7 +257,8 @@ struct DataInputPage: View {
             .popover(isPresented: $calendarOpen, arrowEdge: .bottom) {
                 CalendarPopover(selected: Binding(get: { day }, set: { d in
                     day = Calendar.current.startOfDay(for: d); selectedId = nil
-                }), isPresented: $calendarOpen)
+                }), isPresented: $calendarOpen,
+                availability: { days in await WritingCaptureBrowse.daysWithInput(days) })
             }
             Button { step(1) } label: { Image(systemName: "chevron.right") }.disabled(isToday).opacity(isToday ? 0.3 : 1)
         }

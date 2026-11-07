@@ -28,6 +28,30 @@ struct WritingCaptureStore: Sendable {
         }
     }
 
+    /// 这些天里哪些天有击键或点击 —— 日历把没有输入的天灰掉。每天各一次索引命中
+    /// (ts_ms 索引 + LIMIT 1),不按天扫整月。
+    func daysWithInput(_ days: [Date]) throws -> Set<Date> {
+        let cal = Calendar(identifier: .gregorian)
+        return try inputPool.read { db in
+            var hit = Set<Date>()
+            for day in days {
+                let start = cal.startOfDay(for: day)
+                let end = cal.date(byAdding: .day, value: 1, to: start) ?? start
+                let args: StatementArguments = ["s": Int64(start.timeIntervalSince1970 * 1000),
+                                                "e": Int64(end.timeIntervalSince1970 * 1000)]
+                let keys = try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM keystroke_log WHERE ts_ms >= :s AND ts_ms < :e LIMIT 1
+                    """, arguments: args) != nil
+                let clicks = keys ? false : try Row.fetchOne(db, sql: """
+                    SELECT 1 FROM mouse_log
+                    WHERE ts_ms >= :s AND ts_ms < :e AND kind IN ('left_down', 'right_down') LIMIT 1
+                    """, arguments: args) != nil
+                if keys || clicks { hit.insert(day) }
+            }
+            return hit
+        }
+    }
+
     /// 击键里记到过的输入法(输入源 ID),按击键数从多到少;没记输入源的旧行不算。
     func inputSources() throws -> [InputSourceUsage] {
         try inputPool.read { db in

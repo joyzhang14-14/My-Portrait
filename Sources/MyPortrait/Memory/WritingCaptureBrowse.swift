@@ -76,6 +76,19 @@ enum WritingCaptureBrowse {
         }.value
     }
 
+    /// 这些天里哪些天有输入(击键或点击),给日历灰掉空白的天。
+    static func daysWithInput(_ days: [Date]) async -> Set<Date> {
+        if isDemo {
+            let cal = Calendar(identifier: .gregorian)
+            let have = Set(demoKeystrokes.map { cal.startOfDay(for: Date(timeIntervalSince1970: Double($0.tsMs) / 1000)) })
+            return Set(days.filter { have.contains(cal.startOfDay(for: $0)) })
+        }
+        guard let store else { return [] }
+        return await Task.detached(priority: .utility) {
+            (try? store.daysWithInput(days)) ?? []
+        }.value
+    }
+
     /// 击键库里记到过的输入法;演示数据没有,返回空。
     static func inputSources() async -> [InputSourceUsage] {
         guard !isDemo, let store else { return [] }
