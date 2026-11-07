@@ -722,7 +722,8 @@ struct TimelineView: View {
     }
 
     private func datePill(_ g: RingGeo, _ sl: ShotLayout) -> some View {
-        let fk = g.fk
+        // 日期药丸不随窗口缩放,跟 Data → Input 的日期按钮一样大。
+        let fk: CGFloat = 1
         let canNext = (Calendar.current.date(byAdding: .day, value: 1, to: day0) ?? .distantFuture) <= Date()
         let db = services?.db
         return HStack(spacing: 0) {
@@ -752,7 +753,7 @@ struct TimelineView: View {
             }
             .buttonStyle(.plain).foregroundStyle(pal.muted).opacity(canNext ? 1 : 0.25).disabled(!canNext)
         }
-        .frame(height: 34 * g.k)
+        .frame(height: 34)
         .padding(.horizontal, 2)
         .background(Capsule().fill(pal.pill))
         .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
@@ -1019,8 +1020,8 @@ struct TimelineControlsBar: View {
 struct CalendarPopover: View {
     @Binding var selected: Date
     @Binding var isPresented: Bool
-    /// 传了就按月查哪些天有采集:没采集的天灰掉、不可点(Timeline 用);
-    /// nil 时所有过去的天都可点(Input 图谱用)。
+    /// 传了就按月查哪些天有内容:没内容的天灰掉、不可点(Timeline 查帧,Input 查击键和点击);
+    /// nil 时所有过去的天都可点。
     var availability: (([Date]) async -> Set<Date>)? = nil
     @State private var anchor: Date = Date()
     @State private var captured: Set<Date>? = nil
