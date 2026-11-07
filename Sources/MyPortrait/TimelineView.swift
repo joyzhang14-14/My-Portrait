@@ -646,7 +646,7 @@ struct TimelineView: View {
         }
         return ZStack(alignment: .topLeading) {
             ForEach(Array(lo...hi), id: \.self) { i in
-                stripBar(i, f: f, g: g, fm: fm, half: half, icon: icons.contains(i))
+                stripBar(i, app: frames[i].appName, f: f, g: g, fm: fm, half: half, icon: icons.contains(i))
             }
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
@@ -656,8 +656,9 @@ struct TimelineView: View {
     }
 
     @ViewBuilder
-    private func stripBar(_ i: Int, f: Int, g: RingGeo, fm: Bool, half: CGFloat, icon: Bool) -> some View {
-        let app = state.frames[i].appName
+    /// app 名由 stripLayer 从它那份 frames 快照里取好传进来:直接按 i 读 state.frames,
+    /// 列表换成更短的那一刻会越界崩溃。
+    private func stripBar(_ i: Int, app: String, f: Int, g: RingGeo, fm: Bool, half: CGFloat, icon: Bool) -> some View {
         let H = g.size.height, col = Self.stripCol
         let d = abs(i - f), cur = i == f
         let x: CGFloat = g.c.x + CGFloat(i - f) * col
