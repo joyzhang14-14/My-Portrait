@@ -10,7 +10,7 @@ import os.log
 /// HEIC 并登记进 `ocr_pending`。这里在**充电**时按设置里的档位补做(`OCRPowerMode`):
 ///   - Charging:充电就跑;
 ///   - Charging & lid closed:合盖;
-///   - Charging & idle:没人在用(合盖、亮度调到 0 或 5 分钟没有键鼠操作,`PowerMonitor.isIdle`)。
+///   - Charging & idle:没人在用(合盖、亮度调到 0 或锁屏,`PowerMonitor.isIdle`)。
 /// 积压的图超过 5GB 时,后两档也是充电就跑(兜底)。
 /// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
 /// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看内存,马上补完。

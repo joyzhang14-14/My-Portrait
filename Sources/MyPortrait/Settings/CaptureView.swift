@@ -420,7 +420,7 @@ struct AudioCaptureSettingsView: View {
                     }
                         SettingsDivider()
                         SettingsRow("When to transcribe",
-                                    info: "Audio always records; only transcribing waits. \"Charging & idle\" runs while the lid is closed, the screen brightness is at zero, or there's been no keyboard or mouse input for 5 minutes. With the lid shut it keeps running via a background helper — otherwise closing the lid pauses it.",
+                                    info: "Audio always records; only transcribing waits. \"Charging & idle\" runs while the lid is closed, the screen brightness is at zero, or the screen is locked. With the lid shut it keeps running via a background helper — otherwise closing the lid pauses it.",
                                     icon: "powerplug") {
                             Picker("", selection: config.binding(\.capture.audio.transcriptionPowerMode)) {
                                 Text("Always").tag(TranscriptionPowerMode.always)

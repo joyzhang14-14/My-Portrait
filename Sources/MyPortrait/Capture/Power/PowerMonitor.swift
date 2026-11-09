@@ -71,12 +71,10 @@ public enum PowerMonitor {
     /// 按"开盖"(false)最保守 —— 让 helper 宁可不持有 disablesleep。
     public static var isLidClosed: Bool { rootDomainBool("AppleClamshellState") }
 
-    /// 没人在用这台 Mac:合盖、屏幕亮度调到 0,或 5 分钟没有键盘鼠标操作
-    /// (Mac mini 这类没有盖子的机器靠最后一条)。延后 OCR 和转录的 idle 档共用。
+    /// 没人在用这台 Mac:合盖、屏幕亮度调到 0,或处于锁屏界面。延后 OCR 和转录的 idle 档共用。
+    /// 不看键鼠多久没动(11-08 update):看视频时也不碰键鼠,那不算没人在用。
     static var isIdle: Bool {
-        if isLidClosed || DisplayBrightness.isAtMinimum() { return true }
-        let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
-        return idle >= 300
+        isLidClosed || DisplayBrightness.isAtMinimum() || ScreenLockMonitor.queryLocked()
     }
 
     /// 系统当前是否处于 disablesleep(`pmset disablesleep 1`)。读 `SleepDisabled`
