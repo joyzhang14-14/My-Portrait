@@ -1152,6 +1152,8 @@ struct EventSessionConfig: Codable, Equatable {
     var dialMax: Double = 0.5
     /// 开启的时刻(UTC 毫秒),之前的会话不处理;每次打开开关重设。
     var sinceMs: Int64 = 0
+    /// 下发包的根地址(manifest.json 所在目录);空 = 还没设好下载点。
+    var downloadBase: String = ""
 
     static let dialMin = 0.2
 
@@ -1162,6 +1164,7 @@ struct EventSessionConfig: Codable, Equatable {
         case frameBudget = "frame_budget"
         case dialMax = "dial_max"
         case sinceMs = "since_ms"
+        case downloadBase = "download_base"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -1172,6 +1175,7 @@ struct EventSessionConfig: Codable, Equatable {
         frameBudget = c.dflt(Int.self, .frameBudget, frameBudget)
         dialMax = c.dflt(Double.self, .dialMax, dialMax)
         sinceMs = c.dflt(Int64.self, .sinceMs, sinceMs)
+        downloadBase = c.dflt(String.self, .downloadBase, downloadBase)
     }
 }
 
