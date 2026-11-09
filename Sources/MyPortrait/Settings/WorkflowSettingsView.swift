@@ -156,7 +156,9 @@ struct WorkflowSettingsView: View {
                     reviewSectionFor(.eventProcessing)
                     pipelineFlowSection(.eventMerge)
                 case .portraitDistillation:
-                    autoRunSection(nil, config: \.scheduler.portrait, hasManual: true) {
+                    autoRunSection(nil, config: \.scheduler.portrait, hasManual: true,
+                                   requires: cfg.current.scheduler.event.frequency == .off
+                                       ? "Turn on Event Merge first — the portrait is built from merged events." : nil) {
                         manualRunRow(.distill, title: "Distill portrait now",
                                      info: "Runs the distiller now instead of waiting for the schedule. It uses AI, so you'll be asked to confirm first.\n\n"
                                         + ManualTrigger.distill.desc)
@@ -187,6 +189,14 @@ struct WorkflowSettingsView: View {
         // 放得下就完全固定,超出才可滚(同 SettingsPage / onboarding)。
         .scrollBounceBehavior(.basedOnSize)
         .task { reload() }
+        // 关掉 Event Merge 时画像 / 性格跟着关(漏斗依赖,11-08 update)。
+        .onChange(of: cfg.current.scheduler.event.frequency) { _, f in
+            guard f == .off else { return }
+            cfg.mutate {
+                $0.scheduler.portrait.frequency = .off
+                $0.scheduler.personality.frequency = .off
+            }
+        }
         // 性格刷新跟画像共用一个开关和 provider:画像这段的设置一变就抄给性格。
         .onChange(of: cfg.current.scheduler.portrait) { _, p in
             guard tab == .portraitDistillation else { return }
@@ -593,12 +603,14 @@ struct WorkflowSettingsView: View {
         _ desc: String?,
         config kp: WritableKeyPath<MyPortraitConfig, SchedulerConfig>,
         hasManual: Bool,
+        requires: String? = nil,
         @ViewBuilder manual: () -> M
     ) -> some View {
+        // requires 非空 = 上一层没开(漏斗依赖,11-08 update):开关锁成关,并写明先开哪一层。
         let freq = cfg.binding(kp.appending(path: \.frequency))
         let autoRun = Binding<Bool>(
-            get: { freq.wrappedValue != .off },
-            set: { freq.wrappedValue = $0 ? .daily : .off }
+            get: { freq.wrappedValue != .off && requires == nil },
+            set: { freq.wrappedValue = $0 && requires == nil ? .daily : .off }
         )
         // desc == nil:标题行直接带开关,不再单起一行。
         return section(
@@ -606,10 +618,16 @@ struct WorkflowSettingsView: View {
             blurb: desc,
             titleTrailing: {
                 if desc == nil {
-                    Toggle("", isOn: autoRun).labelsHidden().toggleStyle(.switch)
+                    Toggle("", isOn: autoRun).labelsHidden().toggleStyle(.switch).disabled(requires != nil)
                 }
             }
         ) {
+            if let requires {
+                Text(requires)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if desc != nil {
                 HStack(alignment: .top, spacing: 12) {
                     Text(autoRun.wrappedValue

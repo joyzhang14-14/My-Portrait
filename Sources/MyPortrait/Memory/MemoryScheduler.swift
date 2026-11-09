@@ -704,6 +704,8 @@ final class MemoryScheduler {
         // folder classify 已并入上面的 event job，固定在 event / impact 后执行。
 
         // ===== Tier 2 =====
+        // 漏斗依赖(11-08 update):画像 / 性格只吃合并好的事件,Event Merge 没开自动处理就都不自动跑。
+        let mergeOn = s.event.frequency != .off
         // portraitToday 只挡 daily-scheduled trigger,不挡 retry:retry 已被
         // backoffMs(10min→1h→6h→24h)节流,daily 双重 guard 会让失败的 row
         // 白等到第二天才再试。
@@ -714,14 +716,14 @@ final class MemoryScheduler {
             && (portraitNeedsRetry() || portraitJobHasWork())
         let portraitScheduled = portraitToday
             && (Self.shouldTriggerNow(config: s.portrait, now: now) || portraitCatchUp)
-        if Self.runsLocally(s.portrait), portraitScheduled || portraitRetry {
+        if mergeOn, Self.runsLocally(s.portrait), portraitScheduled || portraitRetry {
             if portraitScheduled { setLastRun(kLastPortrait, now) }   // retry 不更新 lastRun
             await runPortraitJob()
         }
 
         // personality:自己的 time_of_day 到点,或本 tick 跑过 event(接力)→ 全部就绪日;
         // 否则只重试失败过且退避到期的本地日。
-        if Self.runsLocally(s.personality) {
+        if mergeOn, Self.runsLocally(s.personality) {
             var scope = Self.localRunScope(config: s.personality, now: now,
                                            ranToday: lastRunDay(kLastPersonality) == localDayString(now),
                                            hasRetry: personalityNeedsRetry())
