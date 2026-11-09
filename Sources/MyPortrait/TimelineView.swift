@@ -1888,9 +1888,16 @@ private struct TimelineCorners: View {
                                 .lineLimit(1)
                         }
                     }
-                    Text("Not summarized yet")
-                        .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
-                        .padding(.top, 10)
+                    if let summary = EventSessionStore.text(start: b.start, end: b.end) {
+                        Text(summary)
+                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.fg)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 10)
+                    } else {
+                        Text("Not summarized yet")
+                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
+                            .padding(.top, 10)
+                    }
                 }
                 .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
                 .frame(maxWidth: .infinity, alignment: .leading)
