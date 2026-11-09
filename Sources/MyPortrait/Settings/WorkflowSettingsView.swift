@@ -1631,6 +1631,7 @@ struct WorkflowSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
+                    eventSessionSetupRow
                     HStack {
                         Text("Model").font(.system(size: 12))
                         Spacer()
@@ -1679,6 +1680,39 @@ struct WorkflowSettingsView: View {
                 }
             }
         }
+    }
+
+    /// 安装状态 + 运行状态(EventSessionInstaller / EventSessionStatus)。
+    private var eventSessionSetupRow: some View {
+        let inst = EventSessionInstaller.shared
+        let st = EventSessionStatus.shared
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                switch inst.phase {
+                case .ready:
+                    Text(st.running ? "Running" : (st.waitingReason.map { "Ready · \($0)" } ?? "Ready"))
+                case .working(let msg):
+                    ProgressView().controlSize(.small)
+                    Text(msg)
+                case .failed(let msg):
+                    Text("Setup failed: \(msg)").foregroundStyle(.red)
+                case .idle:
+                    Text("Needs setup: downloads Python, the engine and the EventSession model (about 6 GB).")
+                }
+                Spacer()
+                if inst.phase != .ready, !{ if case .working = inst.phase { return true }; return false }() {
+                    Button("Set up") { Task { await inst.install() } }
+                }
+            }
+            .font(.system(size: 12))
+            if inst.phase == .ready, st.pendingFrames > 0 {
+                Text("Waiting: \(st.pendingDays) day\(st.pendingDays == 1 ? "" : "s"), \(st.pendingFrames) screenshots"
+                     + (st.shedSessions > 0 ? " · \(st.shedSessions) short sessions skipped, \(Int((st.dial * 100).rounded()))% of screenshots per session" : ""))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { inst.refresh() }
     }
 
     private var budgetSection: some View {
