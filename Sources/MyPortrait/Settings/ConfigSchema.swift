@@ -1152,8 +1152,8 @@ struct EventSessionConfig: Codable, Equatable {
     var dialMax: Double = 0.5
     /// 开启的时刻(UTC 毫秒),之前的会话不处理;每次打开开关重设。
     var sinceMs: Int64 = 0
-    /// 下发包的根地址(manifest.json 所在目录);空 = 还没设好下载点。
-    var downloadBase: String = ""
+    /// 下发包的根地址(manifest.json 所在目录)。
+    var downloadBase: String = "https://models.joyzhang14.com/eventsession"
 
     static let dialMin = 0.2
 
