@@ -749,12 +749,10 @@ struct RecordingConfig: Codable, Equatable {
 }
 
 /// 转录电源门槛(逐档收紧)。always=除电池合盖(机器本就睡)都跑;
-/// pluggedIn=需插电(默认);pluggedInLidClosed=只在插电+合盖跑;
-/// pluggedInIdle=插电且没人在用(`PowerMonitor.isIdle`)。
+/// pluggedIn=需插电(默认);pluggedInIdle=插电且没人在用(`PowerMonitor.isIdle`,含合盖)。
 enum TranscriptionPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
     case always
     case pluggedIn          = "plugged_in"
-    case pluggedInLidClosed = "plugged_in_lid_closed"
     case pluggedInIdle      = "plugged_in_idle"
 }
 
@@ -868,8 +866,10 @@ struct AudioConfig: Codable, Equatable {
         // keep_awake_while_transcribing 合并进各档隐含防睡,舍弃。新 key 缺省时用迁移值。
         transcribeOnACOnly     = c.dflt(Bool.self,     .transcribeOnACOnly, transcribeOnACOnly)
         let migrated: TranscriptionPowerMode = transcribeOnACOnly ? .pluggedIn : .always
+        // 合盖档并进 idle 档(11-08 update:idle 本来就含合盖),存着旧值的按 idle 读。
+        let rawMode = c.dflt(String.self, .transcriptionPowerMode, migrated.rawValue)
         transcriptionPowerMode = TranscriptionPowerMode(rawValue:
-            c.dflt(String.self, .transcriptionPowerMode, migrated.rawValue)) ?? migrated
+            rawMode == "plugged_in_lid_closed" ? TranscriptionPowerMode.pluggedInIdle.rawValue : rawMode) ?? migrated
         customVocabulary       = c.dflt([String].self, .customVocabulary, customVocabulary)
         preferredInputDeviceUID = c.dflt(String.self,  .preferredInputDeviceUID, preferredInputDeviceUID)
     }
@@ -1154,10 +1154,10 @@ struct LocalModelConfig: Codable, Equatable {
     }
 }
 
-/// 延后 OCR 什么时候补做。三档都要充电;idle 见 `PowerMonitor.isIdle`。
+/// 延后 OCR 什么时候补做。两档都要充电;idle 见 `PowerMonitor.isIdle`(含合盖)。
+/// 存着旧值 charging_lid_closed 的解不出来,落回默认 chargingIdle(11-08 update:合盖档并进 idle 档)。
 enum OCRPowerMode: String, Codable, CaseIterable, Equatable, Sendable {
     case charging
-    case chargingLidClosed = "charging_lid_closed"
     case chargingIdle      = "charging_idle"
 }
 

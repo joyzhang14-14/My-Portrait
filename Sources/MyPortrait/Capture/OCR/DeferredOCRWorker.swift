@@ -9,9 +9,8 @@ import os.log
 /// 采集时不做 OCR(全分辨率 OCR 的工作内存是常驻 300–600MB 的大头),帧存全分辨率
 /// HEIC 并登记进 `ocr_pending`。这里在**充电**时按设置里的档位补做(`OCRPowerMode`):
 ///   - Charging:充电就跑;
-///   - Charging & lid closed:合盖;
 ///   - Charging & idle:没人在用(合盖、亮度调到 0 或锁屏,`PowerMonitor.isIdle`)。
-/// 积压的图超过 5GB 时,后两档也是充电就跑(兜底)。
+/// 积压的图超过 5GB 时,idle 档也是充电就跑(兜底)。
 /// 另外内存要够:系统内存压力正常,且能立刻让出来的内存不低于 1.5GB
 /// (`SystemMemory`)。设置里关掉延后 OCR 后,剩下的积压只看内存,马上补完。
 ///
@@ -206,11 +205,10 @@ actor DeferredOCRWorker {
         guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
         switch settings.ocrPowerMode {
         case .charging: return nil
-        case .chargingLidClosed: if PowerMonitor.isLidClosed { return nil }
         case .chargingIdle: if PowerMonitor.isIdle { return nil }
         }
         if backlogBytes > Self.backlogFallbackBytes { return nil }
-        return settings.ocrPowerMode == .chargingIdle ? "Waiting until the screen isn't in use" : "Waiting for the lid to close"
+        return "Waiting until the screen isn't in use"
     }
 
     private func refreshSummary(force: Bool) async -> (count: Int, bytes: Int64) {

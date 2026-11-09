@@ -425,7 +425,6 @@ struct AudioCaptureSettingsView: View {
                             Picker("", selection: config.binding(\.capture.audio.transcriptionPowerMode)) {
                                 Text("Always").tag(TranscriptionPowerMode.always)
                                 Text("Only while charging").tag(TranscriptionPowerMode.pluggedIn)
-                                Text("Only while charging & lid closed").tag(TranscriptionPowerMode.pluggedInLidClosed)
                                 Text("Only while charging & idle").tag(TranscriptionPowerMode.pluggedInIdle)
                             }
                             .pickerStyle(.menu).labelsHidden().frame(width: 240)
