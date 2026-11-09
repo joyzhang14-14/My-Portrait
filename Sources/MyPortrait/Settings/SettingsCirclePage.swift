@@ -137,7 +137,7 @@ struct SettingsCirclePage: View {
         case .capture(.screen): return c.capture.screen.enabled ? .on : .off
         case .capture(.audio):  return c.capture.audio.enabled ? .on : .off
         case .capture(.typing): return c.capture.typingCaptureEnabled ? .on : .off
-        case .workflow(.eventSession):         return c.premium.eventSession ? .on : .off
+        case .workflow(.eventSession):         return c.eventSession.enabled ? .on : .off
         case .workflow(.eventMerge):           return c.scheduler.event.frequency == .off ? .off : .on
         case .workflow(.portraitDistillation): return c.scheduler.portrait.frequency == .off ? .off : .on
         case .workflow(.changelog): return attention > 0 ? .warn : nil

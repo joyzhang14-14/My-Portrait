@@ -31,6 +31,7 @@ struct MyPortraitConfig: Codable, Equatable {
     var personalInfo:  PersonalInfoConfig  = .init()
     var premium:  PremiumConfig  = .init()
     var localModel:    LocalModelConfig    = .init()
+    var eventSession:  EventSessionConfig  = .init()
 
     init() {}
 
@@ -41,6 +42,7 @@ struct MyPortraitConfig: Codable, Equatable {
         case personalInfo = "personal_info"
         case premium = "premium"
         case localModel = "local_model"
+        case eventSession = "event_session"
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +61,7 @@ struct MyPortraitConfig: Codable, Equatable {
         personalInfo  = c.dflt(PersonalInfoConfig.self, .personalInfo, personalInfo)
         premium  = c.dflt(PremiumConfig.self, .premium, premium)
         localModel    = c.dflt(LocalModelConfig.self, .localModel, localModel)
+        eventSession  = c.dflt(EventSessionConfig.self, .eventSession, eventSession)
         migrateLegacyMemoryProvider(from: c)
         migrateWallpaperToggle(from: c)
         migrateSingleModelPipelines()
@@ -1129,6 +1132,57 @@ struct PremiumConfig: Codable, Equatable {
         serverURL = c.dflt(String.self, .serverURL, serverURL)
         previousProviders = c.dflt([String: ChainProviderChoice].self, .previousProviders, previousProviders)
         eventSession = c.dflt(Bool.self, .eventSession, eventSession)
+    }
+}
+
+// MARK: - EventSession
+
+/// EventSession(workflow 第 1 层:每个会话先总结)在本机跑的设置(Settings ▸ Workflow ▸ Event Session)。
+/// 只处理开启之后的会话(`sinceMs`);积压按帧数减负(`frameBudget`,先扔单帧会话、再把每个会话的挑帧比例
+/// 从 `dialMax` 往下降,最低 0.2)。能不能开、能选哪些运行时间看物理内存(`EventSessionEligibility`)。
+struct EventSessionConfig: Codable, Equatable {
+    var enabled: Bool = false
+    /// 模型来源:local = EventSession 模型(本机下载)/ own = 用户自己的本地模型 / cloud = 云端 API / premium。
+    var source: String = "local"
+    /// 什么时候跑:charging / charging_idle(两档都要插电;idle 见 `PowerMonitor.isIdle`)。
+    var powerMode: OCRPowerMode = .chargingIdle
+    /// 待看帧数上限,超了就减负。
+    var frameBudget: Int = 2000
+    /// 每个会话挑帧比例的上限(下限固定 0.2)。
+    var dialMax: Double = 0.5
+    /// 开启的时刻(UTC 毫秒),之前的会话不处理;每次打开开关重设。
+    var sinceMs: Int64 = 0
+
+    static let dialMin = 0.2
+
+    init() {}
+    enum CodingKeys: String, CodingKey {
+        case enabled, source
+        case powerMode = "power_mode"
+        case frameBudget = "frame_budget"
+        case dialMax = "dial_max"
+        case sinceMs = "since_ms"
+    }
+    init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = c.dflt(Bool.self, .enabled, enabled)
+        source = c.dflt(String.self, .source, source)
+        powerMode = c.dflt(OCRPowerMode.self, .powerMode, powerMode)
+        frameBudget = c.dflt(Int.self, .frameBudget, frameBudget)
+        dialMax = c.dflt(Double.self, .dialMax, dialMax)
+        sinceMs = c.dflt(Int64.self, .sinceMs, sinceMs)
+    }
+}
+
+/// 这台 Mac 能不能跑本地 EventSession:只看物理内存。< 14 GB 不能开;< 20 GB 只能在空闲时跑
+/// (14 而不是 16:16 GB 机器报出来的数有误差)。设置页每次打开都重算。
+enum EventSessionEligibility: Equatable {
+    case notEligible, idleOnly, full
+
+    static var current: EventSessionEligibility {
+        let gb = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        return gb < 14 ? .notEligible : gb < 20 ? .idleOnly : .full
     }
 }
 

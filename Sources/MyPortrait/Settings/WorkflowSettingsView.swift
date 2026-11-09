@@ -1602,19 +1602,82 @@ struct WorkflowSettingsView: View {
         }
     }
 
-    /// EventSession(事件下面那层:一个个会话先总结)交给 Premium 时,包里除了 OCR 文字再带全部元数据
-    /// (`PremiumRemote.contents`)。还没做好,开关先打不开。
+    /// EventSession(workflow 第 1 层:每个会话先总结)。能不能开只看物理内存,每次打开本页重算
+    /// (`EventSessionEligibility`);只处理开启之后的会话。模型来源现在只有本机 EventSession 模型能用。
     private var eventSessionSection: some View {
-        section(
+        let elig = EventSessionEligibility.current
+        let es = cfg.current.eventSession
+        let gb = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+        let enabled = Binding<Bool>(
+            get: { cfg.current.eventSession.enabled && elig != .notEligible },
+            set: { on in
+                cfg.mutate {
+                    $0.eventSession.enabled = on && elig != .notEligible
+                    if on { $0.eventSession.sinceMs = Int64(Date().timeIntervalSince1970 * 1000) }
+                    if elig == .idleOnly { $0.eventSession.powerMode = .chargingIdle }
+                }
+            })
+        return section(
             title: "EventSession",
-            blurb: "Summarizes each session from everything captured — screen video, focus, keys & mouse, typing and OCR boxes — before events are built. On My Portrait Premium, all of that is sent along with the OCR text.\n\nThis is metadata: all of your private data lives here. We recommend processing it with a local AI model.",
+            blurb: "Summarizes each session from everything captured — screen, focus, keys & mouse and screen text — before events are built. Only sessions after you turn this on are processed.\n\nThis is metadata: all of your private data lives here. We recommend processing it with a local AI model.",
             titleTrailing: {
-                Toggle("", isOn: cfg.binding(\.premium.eventSession)).labelsHidden().toggleStyle(.switch).disabled(true)
+                Toggle("", isOn: enabled).labelsHidden().toggleStyle(.switch).disabled(elig == .notEligible)
             }
         ) {
-            Text("Coming soon.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+            if elig == .notEligible {
+                Text("Not eligible for this feature — this Mac has \(gb) GB of memory, and EventSession needs at least 14 GB.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Model").font(.system(size: 12))
+                        Spacer()
+                        Picker("", selection: cfg.binding(\.eventSession.source)) {
+                            Text("EventSession-v1 (on this Mac)").tag("local")
+                            Text("Your own local model (coming soon)").tag("own").disabled(true)
+                            Text("Cloud model (coming soon)").tag("cloud").disabled(true)
+                            Text("My Portrait Premium (coming soon)").tag("premium").disabled(true)
+                        }
+                        .pickerStyle(.menu).labelsHidden().frame(width: 260)
+                    }
+                    HStack {
+                        Text("When to run").font(.system(size: 12))
+                        Spacer()
+                        Picker("", selection: cfg.binding(\.eventSession.powerMode)) {
+                            if elig == .full {
+                                Text("Only while charging").tag(OCRPowerMode.charging)
+                            }
+                            Text("Only while charging & idle").tag(OCRPowerMode.chargingIdle)
+                        }
+                        .pickerStyle(.menu).labelsHidden().frame(width: 260)
+                    }
+                    if elig == .idleOnly {
+                        Text("This Mac has \(gb) GB of memory, so EventSession only runs while it's idle: the lid is closed, the screen brightness is at zero, or the screen is locked.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack {
+                        Text("Backlog limit").font(.system(size: 12))
+                        Spacer()
+                        Stepper("\(es.frameBudget) frames", value: cfg.binding(\.eventSession.frameBudget), in: 500...10000, step: 250)
+                            .font(.system(size: 12))
+                    }
+                    HStack {
+                        Text("Frames looked at per session").font(.system(size: 12))
+                        Spacer()
+                        Slider(value: cfg.binding(\.eventSession.dialMax), in: EventSessionConfig.dialMin...1.0, step: 0.05)
+                            .frame(width: 180)
+                        Text("\(Int((es.dialMax * 100).rounded()))%").font(.system(size: 12)).monospacedDigit().frame(width: 40, alignment: .trailing)
+                    }
+                    Text("When more than the backlog limit is waiting, the shortest single-screenshot sessions with no typing are skipped first (kept as app, title and time only), then fewer screenshots are looked at per session, down to 20%.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 
