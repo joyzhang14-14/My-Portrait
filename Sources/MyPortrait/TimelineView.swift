@@ -1626,7 +1626,10 @@ private struct TimelineCorners: View {
     @State private var appsOpen = false
     @State private var todayOpen = false
     @State private var appHeights: [String: CGFloat] = [:]
-    @State private var esCardH: CGFloat = 96
+    /// Event session 四张卡(Activity / Background / Social / Who)内容的自然高度,量出来排阶梯用。
+    @State private var esNat: [CGFloat] = [0, 0, 0, 0]
+    @State private var esOpen: Int?
+    @State private var esHover: Int?
     @State private var audioContentH: CGFloat = 0
     @State private var audioScrollToken = 0
     @State private var audioScrollAnimated = false
@@ -1683,28 +1686,34 @@ private struct TimelineCorners: View {
         return Fold(listH: lh, label: "+\(hs.count - n) more", scroll: false, bottom: listTop + lh + gap + foldH)
     }
 
-    /// Today:默认跟在 EventSession 下面,放得下几行显示几行;展开时往上长,
-    /// 最多长到 EventSession 卡片下面,再放不下就在框里滚。
-    private var todayLayout: (top: CGFloat, fold: Fold) {
+    /// Today:默认跟在 EventSession 下面,放得下几行显示几行;EventSession 有卡展开时跟着往下让。
+    /// 展开时往上长、把 EventSession 阶梯整体往上压(最少留 340pt),再放不下就在框里滚。
+    private func rightLayout(_ es: ESInfo) -> (es: ESLayout, today: (top: CGFloat, fold: Fold)) {
+        var lay = esBaseLayout(es, bottomY: g.c.y - 8)
+        if let i = esOpen, es.staircase, lay.cards.indices.contains(i) { lay = esOpenLayout(lay, i) }
         let n = model.totals.count
         func st(_ k: Int) -> CGFloat { k == 0 ? 0 : CGFloat(k) * todayRowH + gap * CGFloat(k - 1) }
-        let esBottom = top + hd + 2 + esCardH
-        var tTop = max(bottomRow, esBottom + 24)
+        var tTop = max(bottomRow, lay.bottom + 24)
         if todayOpen {
             let need = hd + st(n) + gap + foldH
-            tTop = min(tTop, max(esBottom + 24, H - 20 - need))
+            if es.staircase, esOpen == nil, !hideToday {
+                let want = min(tTop, max(esTop + 340 * g.k, H - 20 - need))
+                if want < tTop { tTop = want; lay = esBaseLayout(es, bottomY: want - 24) }
+            } else {
+                tTop = min(tTop, max(lay.bottom + 24, H - 20 - need))
+            }
             let listTop = tTop + hd
             let lh = max(0, min(st(n), H - 20 - foldH - gap - listTop))
-            return (tTop, Fold(listH: lh, label: "Show less", scroll: true, bottom: listTop + lh + gap + foldH))
+            return (lay, (tTop, Fold(listH: lh, label: "Show less", scroll: true, bottom: listTop + lh + gap + foldH)))
         }
         let listTop = tTop + hd
         if listTop + st(n) <= H - 20 {
-            return (tTop, Fold(listH: st(n), label: nil, scroll: false, bottom: listTop + st(n)))
+            return (lay, (tTop, Fold(listH: st(n), label: nil, scroll: false, bottom: listTop + st(n))))
         }
         var k = n
         while k > 0, listTop + st(k) + gap + foldH > H - 20 { k -= 1 }
-        return (tTop, Fold(listH: st(k), label: "+\(n - k) more apps", scroll: false,
-                           bottom: listTop + st(k) + gap + foldH))
+        return (lay, (tTop, Fold(listH: st(k), label: "+\(n - k) more apps", scroll: false,
+                                 bottom: listTop + st(k) + gap + foldH)))
     }
 
     /// 当前那条转录:离焦点 8 秒内的(高亮);没有就取时间上最近的。
@@ -1723,7 +1732,9 @@ private struct TimelineCorners: View {
         let audioTop = hideToday ? H * 0.50 : max(bottomRow, af.bottom + 24)
         let audioAvail = max(40, (hideToday ? H * 0.80 : H - 20) - (audioTop + hd))
         let audioH = audioContentH > 0 ? min(audioContentH, audioAvail) : audioAvail
-        let tl = todayLayout
+        let es = esInfo
+        let rl = rightLayout(es)
+        let tl = rl.today
         let w = g.sideW, lw = leftW
         ZStack(alignment: .topLeading) {
             // ── Active Apps ──
@@ -1758,7 +1769,7 @@ private struct TimelineCorners: View {
             .place(leftX, audioTop + hd, lw)
 
             // ── Event Session ──
-            eventSession.place(esX, esTop, esW)
+            eventSession(es, rl.es)
 
             // ── Today ──
             ZStack(alignment: .topLeading) {
@@ -1769,7 +1780,10 @@ private struct TimelineCorners: View {
                 }
                 .place(rightX, tl.top + hd, w)
                 if let l = tl.fold.label {
-                    FoldRow(pal: pal, label: l, open: todayOpen) { withAnimation(anim) { todayOpen.toggle() } }
+                    FoldRow(pal: pal, label: l, open: todayOpen) {
+                        // 展开 Today 时把展开着的 EventSession 卡收回
+                        withAnimation(anim) { todayOpen.toggle(); if todayOpen { esOpen = nil } }
+                    }
                         .place(rightX, tl.top + hd + tl.fold.listH + gap, w)
                 }
             }
@@ -1779,6 +1793,7 @@ private struct TimelineCorners: View {
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
         .onChange(of: audio) { scrollAudio(animated: false, after: 0) }
+        .onChange(of: model.blockIndex(ofFrame: focusIndex)) { esOpen = nil }
         .onAppear { scrollAudio(animated: false, after: 0.05) }
     }
 
@@ -1791,7 +1806,7 @@ private struct TimelineCorners: View {
 
     /// 点四个角任意一个标题:所有展开收回,Audio 平滑转回当前这条。
     private func reset() {
-        withAnimation(anim) { appsOpen = false; todayOpen = false }
+        withAnimation(anim) { appsOpen = false; todayOpen = false; esOpen = nil }
         scrollAudio(animated: true, after: 0.05)
     }
 
@@ -1863,12 +1878,110 @@ private struct TimelineCorners: View {
         }
     }
 
-    private var eventSession: some View {
+    // MARK: Event session
+
+    /// 当前帧所在的 session 和它的 EventSession 结果(一次 body 只读一次库)。
+    private struct ESInfo {
+        var si: Int
+        var n: Int
+        var block: RingBlock?
+        var entry: EventSessionStore.Entry?
+        var staircase: Bool { block != nil && entry?.summarized == true }
+    }
+
+    private var esInfo: ESInfo {
         let n = model.blocks.count
         let si = model.blockIndex(ofFrame: focusIndex) ?? 0
-        let entry = model.blocks.indices.contains(si)
-            ? EventSessionStore.entry(start: model.blocks[si].start, end: model.blocks[si].end) : nil
-        return VStack(alignment: .leading, spacing: 2) {
+        guard model.blocks.indices.contains(si) else { return ESInfo(si: si, n: n) }
+        let b = model.blocks[si]
+        return ESInfo(si: si, n: n, block: b, entry: EventSessionStore.entry(start: b.start, end: b.end))
+    }
+
+    /// 标题行左边 + 各张卡的位置(整页坐标);bottom = 最后一张卡的底边,Today 跟在它下面。
+    private struct ESLayout {
+        var left: CGFloat
+        var cards: [CGRect]
+        var bottom: CGFloat
+    }
+
+    private let esStep: CGFloat = 26
+    private let esAnim = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)
+    private var esLine: CGFloat { 13.5 * panelFont * 1.45 }
+    private var esRight: CGFloat { g.size.width - RingGeo.edge }
+
+    /// 第一象限里卡片左边能贴到哪:躲开外圈刻度(442k),离圆 12pt;聚焦视图里钉在 esX。
+    private func esEdge(_ y: CGFloat) -> CGFloat {
+        if hideToday { return esX }
+        let rs = 442 * g.k, dy = g.c.y - y
+        let x = dy < rs ? g.c.x + sqrt(rs * rs - dy * dy) : g.c.x
+        return min(x + 12, esRight - 160)
+    }
+
+    /// 小卡高度:收起时正文最多两行(多了卡里滚),展开时全文。
+    private func esSmallH(_ i: Int, full: Bool) -> CGFloat {
+        let nat = esNat[i] > 0 ? esNat[i] : esLine
+        return (full ? nat : min(nat, 2 * esLine + 2)) + 15
+    }
+
+    /// 默认排版:Background / Social / Who 三张小卡贴着 bottomY 往上排,每张往右错开 esStep、
+    /// 左边按自己离圆心最近的底边躲开外圈;Activity 是小卡上方剩下的矩形,左边由它的底边决定
+    /// (第一象限里能放最多字的矩形),写不下在卡里滚。聚焦视图里四张卡竖排、Activity 按内容高。
+    private func esBaseLayout(_ es: ESInfo, bottomY: CGFloat) -> ESLayout {
+        let aTop = esTop + 26
+        guard es.block != nil else {
+            let l = esEdge(aTop + 160)
+            return ESLayout(left: l, cards: [], bottom: esTop + hd)
+        }
+        guard es.staircase else {
+            // 还没跑过 EventSession:一张普通卡,按内容高
+            let l = esEdge(aTop + 160)
+            let f = CGRect(x: l, y: aTop, width: esRight - l, height: esNat[0] > 0 ? esNat[0] : 90)
+            return ESLayout(left: l, cards: [f], bottom: f.maxY)
+        }
+        let hs = (1...3).map { esSmallH($0, full: false) }
+        let smalls = hs.reduce(0, +) + gap * 2
+        let y0: CGFloat
+        if hideToday {
+            let aH = min(esNat[0] > 0 ? esNat[0] : 120, H * 0.75 - smalls - 10 - aTop)
+            y0 = aTop + max(60, aH) + 10
+        } else {
+            y0 = max(aTop + 70, bottomY - smalls)
+        }
+        let aLeft = esEdge(y0 - 10)
+        var cards = [CGRect(x: aLeft, y: aTop, width: esRight - aLeft, height: y0 - 10 - aTop)]
+        var y = y0, prev = aLeft
+        for h in hs {
+            let l = hideToday ? esX : min(max(esEdge(min(y + h, g.c.y)), prev + esStep), esRight - 160)
+            cards.append(CGRect(x: l, y: y, width: esRight - l, height: h))
+            y += h + gap
+            prev = l
+        }
+        return ESLayout(left: aLeft, cards: cards, bottom: y - gap)
+    }
+
+    /// 点开一张卡:上面的卡不动;被点的卡原地往下长到全文(底边到窗口底还放不下就卡里滚),
+    /// 下面的卡整体往下挪同样的高度差;左边只在会压到外圈时才往右让。
+    private func esOpenLayout(_ base: ESLayout, _ i: Int) -> ESLayout {
+        var cards = base.cards
+        let limit = hideToday ? H * 0.75 : H - 20
+        let below = cards[(i + 1)...].reduce(0) { $0 + $1.height + gap }
+        let full = i == 0 ? esNat[0] : esSmallH(i, full: true)
+        let h = max(cards[i].height, min(full, limit - below - cards[i].minY))
+        let delta = h - cards[i].height
+        for j in i..<cards.count {
+            var f = cards[j]
+            if j == i { f.size.height = h } else { f.origin.y += delta }
+            let near = f.minY <= g.c.y && f.maxY >= g.c.y ? g.c.y : min(f.maxY, g.c.y)
+            f.origin.x = max(base.cards[j].minX, esEdge(near))
+            f.size.width = esRight - f.minX
+            cards[j] = f
+        }
+        return ESLayout(left: base.left, cards: cards, bottom: cards[cards.count - 1].maxY)
+    }
+
+    private func eventSession(_ es: ESInfo, _ lay: ESLayout) -> some View {
+        let si = es.si, n = es.n
+        return Group {
             SectionTitle(pal: pal, title: "Event session", count: nil, action: reset) {
                 HStack(spacing: 2) {
                     navButton("chevron.left", enabled: si > 0) { jumpToFrame(model.blocks[si - 1].f0) }
@@ -1876,97 +1989,160 @@ private struct TimelineCorners: View {
                     navButton("chevron.right", enabled: si + 1 < n) { jumpToFrame(model.blocks[si + 1].f0) }
                 }
             }
-            if model.blocks.indices.contains(si) {
-                let b = model.blocks[si]
-                VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 10) {
-                        RealAppIcon(appName: b.app, size: 30)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(b.app.isEmpty ? "(unknown app)" : b.app)
-                                .font(.system(size: 16 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
-                                .lineLimit(1)
-                            Text("\(Fmt.hms(b.start)) – \(Fmt.hms(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
-                                .font(.system(size: 12.5 * panelFont, design: .monospaced)).foregroundStyle(pal.faint)
-                                .lineLimit(1)
-                        }
-                    }
-                    if let e = entry, e.summarized {
-                        if !e.context.isEmpty {
-                            Text(e.context)
-                                .font(.system(size: 13 * panelFont)).foregroundStyle(pal.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.top, 10)
-                        }
-                        esField("Activity", e.activity, nil).padding(.top, 8)
-                    } else if let e = entry {
-                        Text(e.activity)
-                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 10)
-                    } else {
-                        Text("Not summarized yet")
-                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
-                            .padding(.top, 10)
-                    }
+            .place(lay.left, esTop, esRight - lay.left)
+            if let b = es.block, let f = lay.cards.first {
+                if let e = es.entry, e.summarized, lay.cards.count == 4 {
+                    esCard(0, lay.cards[0]) { esActivity(b, e) }
+                    esCard(1, lay.cards[1]) { esKV("Background", e.background, "Nothing else on screen") }
+                    esCard(2, lay.cards[2]) { esKV("Social", e.social, "None") }
+                    esCard(3, lay.cards[3]) { esWho(e.who, width: lay.cards[3].width - 28, full: esOpen == 3) }
+                } else {
+                    esWaitCard(b, es.entry?.activity ?? "Not summarized yet")
+                        .frame(width: f.width, alignment: .topLeading)
+                        .offset(x: f.minX, y: f.minY)
                 }
-                .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(pal.row))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(pal.rowb, lineWidth: 1))
-                if let e = entry, e.summarized {
-                    esSmallCard { esField("Background", e.background, "Nothing else on screen") }
-                    esSmallCard { esField("Social", e.social, "None") }
-                    esSmallCard {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("Who").font(.system(size: 13 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
-                            if e.who.isEmpty {
-                                Text("No one else").font(.system(size: 13 * panelFont)).foregroundStyle(pal.faint)
-                            } else {
-                                esChips(e.who)
-                            }
-                        }
-                    }
-                }
-                }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { esCardH = $0 }
             }
         }
     }
 
-    /// Event session 卡里的一项:粗体标题 + 内容;内容空就显示 `empty`(灰字)。
-    private func esField(_ title: String, _ text: String, _ empty: String?) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.system(size: 13 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
-            Text(text.isEmpty ? (empty ?? "") : text)
-                .font(.system(size: 14 * panelFont)).foregroundStyle(text.isEmpty ? pal.faint : pal.fg)
+    /// 一张阶梯卡:hover 整块高亮,点一下原地展开 / 再点收回(展开时 Today 自动收回);
+    /// 放不下的正文在卡里滚。
+    private func esCard<C: View>(_ i: Int, _ f: CGRect, @ViewBuilder _ content: () -> C) -> some View {
+        let full = esOpen == i, hot = esHover == i
+        let shape = RoundedRectangle(cornerRadius: i == 0 ? 18 : 16, style: .continuous)
+        let inner = i == 0 ? f.height : f.height - 15
+        let body = content().padding(i == 0 ? 16 : 0)
+        return SideScroll(height: inner, enabled: esNat[i] > inner + 1, pal: pal, contentHeight: $esNat[i]) { body }
+        .padding(i == 0 ? EdgeInsets() : EdgeInsets(top: 7, leading: 14, bottom: 8, trailing: 14))
+        .frame(width: f.width, height: f.height, alignment: .topLeading)
+        .background(shape.fill(hot ? pal.accentbg : pal.row))
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(hot || full ? pal.accentb : pal.rowb, lineWidth: full ? 1.5 : 1))
+        .contentShape(shape)
+        .onHover { on in
+            if on { esHover = i } else if esHover == i { esHover = nil }
+        }
+        .onTapGesture {
+            withAnimation(esAnim) {
+                esOpen = full ? nil : i
+                if esOpen != nil { todayOpen = false }
+            }
+        }
+        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.15), value: hot)
+        .offset(x: f.minX, y: f.minY)
+    }
+
+    /// Activity 卡:app + 时段一行,context 一枚强调色胶囊,下面 Activity 正文。
+    private func esActivity(_ b: RingBlock, _ e: EventSessionStore.Entry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                RealAppIcon(appName: b.app, size: 22)
+                Text(b.app.isEmpty ? "(unknown app)" : b.app)
+                    .font(.system(size: 16 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
+                    .lineLimit(1).layoutPriority(1)
+                Text("\(Fmt.hm(b.start))–\(Fmt.hm(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
+                    .font(.system(size: 12.5 * panelFont, design: .monospaced)).foregroundStyle(pal.faint)
+                    .lineLimit(1)
+            }
+            if !e.context.isEmpty {
+                Text(e.context)
+                    .font(.system(size: 13 * panelFont)).foregroundStyle(pal.accent)
+                    .lineLimit(1).truncationMode(.tail)
+                    .padding(.horizontal, 11).padding(.vertical, 3)
+                    .background(Capsule().fill(pal.accentbg))
+                    .padding(.top, 6)
+            }
+            (Text("Activity").font(.system(size: 11.5 * panelFont, weight: .semibold)).foregroundStyle(pal.faint)
+                + Text("  ") + Text(e.activity).foregroundStyle(pal.fg))
+                .font(.system(size: 14 * panelFont))
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
         }
     }
 
-    /// Who 的名字小标签,每行最多 4 个。
-    private func esChips(_ names: [String]) -> some View {
-        let rows = stride(from: 0, to: names.count, by: 4).map { Array(names[$0..<min($0 + 4, names.count)]) }
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 4) {
-                    ForEach(row, id: \.self) { name in
-                        Text(name).font(.system(size: 12.5 * panelFont)).foregroundStyle(pal.fg).lineLimit(1)
-                            .padding(.horizontal, 8).padding(.vertical, 1)
-                            .background(Capsule().fill(pal.pill))
-                            .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+    /// 小卡的一项:标题和正文同一行起排;内容空就显示 `empty`(灰色斜体)。
+    private func esKV(_ title: String, _ text: String, _ empty: String) -> some View {
+        (Text(title).font(.system(size: 11.5 * panelFont, weight: .semibold)).foregroundStyle(pal.faint)
+            + Text("  ")
+            + (text.isEmpty ? Text(empty).italic().foregroundStyle(pal.faint) : Text(text).foregroundStyle(pal.muted)))
+            .font(.system(size: 13.5 * panelFont))
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Who:收起时名字排一行,放不下的折成 “+N”;展开时按宽度换行全部列出。
+    private func esWho(_ names: [String], width: CGFloat, full: Bool) -> some View {
+        let label = 11.5 * panelFont, fs = 12.5 * panelFont
+        let avail = max(40, width - esTextW("Who", label, .semibold) - 6)
+        let ws = names.map { esTextW($0, fs) + 16 }
+        var rows: [[String]] = [], row: [String] = [], x: CGFloat = 0
+        for (name, w) in zip(names, ws) {
+            if !row.isEmpty, x + w > avail { rows.append(row); row = []; x = 0 }
+            row.append(name); x += w + 4
+        }
+        if !row.isEmpty { rows.append(row) }
+        var plus = 0
+        if !full, rows.count > 1 {
+            var k = rows[0].count
+            while k > 1, ws.prefix(k).reduce(0, +) + 4 * CGFloat(k) + esTextW("+\(names.count - k)", fs) + 16 > avail { k -= 1 }
+            rows = [Array(names.prefix(k))]
+            plus = names.count - k
+        }
+        return HStack(alignment: .top, spacing: 6) {
+            Text("Who").font(.system(size: label, weight: .semibold)).foregroundStyle(pal.faint)
+                .padding(.top, 2)
+            if names.isEmpty {
+                Text("No one else").font(.system(size: 13.5 * panelFont)).italic().foregroundStyle(pal.faint)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { r, names in
+                        HStack(spacing: 4) {
+                            ForEach(Array(names.enumerated()), id: \.offset) { _, name in esChip(name) }
+                            if r == 0, plus > 0 { esChip("+\(plus)") }
+                        }
                     }
                 }
             }
+            Spacer(minLength: 0)
         }
     }
 
-    private func esSmallCard<C: View>(@ViewBuilder _ content: () -> C) -> some View {
-        content()
-            .padding(EdgeInsets(top: 10, leading: 15, bottom: 11, trailing: 15))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(pal.row))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(pal.rowb, lineWidth: 1))
+    private func esChip(_ s: String) -> some View {
+        Text(s).font(.system(size: 12.5 * panelFont)).foregroundStyle(pal.muted).lineLimit(1)
+            .padding(.horizontal, 8).padding(.vertical, 1)
+            .background(Capsule().fill(pal.pill))
+    }
+
+    private func esTextW(_ s: String, _ size: CGFloat, _ weight: NSFont.Weight = .regular) -> CGFloat {
+        ceil((s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight)]).width)
+    }
+
+    /// 还没跑过 EventSession 的 session:一张普通卡(app + 时段 + 一句状态),不能点开。
+    private func esWaitCard(_ b: RingBlock, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                RealAppIcon(appName: b.app, size: 30)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(b.app.isEmpty ? "(unknown app)" : b.app)
+                        .font(.system(size: 16 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
+                        .lineLimit(1)
+                    Text("\(Fmt.hms(b.start)) – \(Fmt.hms(b.end)) · \(Fmt.dur(b.end.timeIntervalSince(b.start)))")
+                        .font(.system(size: 12.5 * panelFont, design: .monospaced)).foregroundStyle(pal.faint)
+                        .lineLimit(1)
+                }
+            }
+            Text(text)
+                .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+        }
+        .padding(EdgeInsets(top: 13, leading: 15, bottom: 14, trailing: 15))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(pal.row))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(pal.rowb, lineWidth: 1))
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { esNat[0] = $0 }
     }
 
     private func navButton(_ symbol: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
