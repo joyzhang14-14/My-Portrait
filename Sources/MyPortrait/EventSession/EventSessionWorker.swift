@@ -160,6 +160,15 @@ actor EventSessionWorker {
             ?? (model.flatMap { try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json"))) }
                 as? [String: Any])?["name"] as? String ?? model?.lastPathComponent ?? ""
         var last = Date()
+        // 关掉开关或换了 provider:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做)
+        let startSource = es.source
+        let cfgWatch = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+                let now = await MainActor.run { ConfigStore.shared.current.eventSession }
+                if !now.enabled || now.source != startSource, p.isRunning { p.terminate(); break }
+            }
+        }
         let dog = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
@@ -210,6 +219,7 @@ actor EventSessionWorker {
             }
         }
         dog.cancel()
+        cfgWatch.cancel()
         await MainActor.run { EventSessionStatus.shared.stage = nil }
         p.waitUntilExit()
     }

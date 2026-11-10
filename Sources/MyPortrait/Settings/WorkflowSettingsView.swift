@@ -1683,12 +1683,12 @@ struct WorkflowSettingsView: View {
                 eventSessionProviderRows(elig: elig, clouds: clouds)
                 eventSessionWhenRow(elig: elig, ready: ready && !premium)
                 levelRow("Daily limit",
-                         info: "How many screenshots EventSession looks at for one day. When a day has more than this, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but each day takes longer.",
+                         info: "How many screenshots EventSession looks at for one day. When a day has more than this, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but each day takes longer.\n\nThis is applied when a day is prepared, so days that are already prepared keep the setting they were prepared with.",
                          low: "Less", high: "More",
                          index: Self.nearest(Double(es.frameBudget), EventSessionConfig.budgetLevels.map(Double.init)),
                          set: { i in cfg.mutate { $0.eventSession.frameBudget = EventSessionConfig.budgetLevels[i] } })
                 levelRow("Detail",
-                         info: "How closely each session is looked at. Higher reads more screenshots per session — better summaries, slower.\n\nWhen a lot is waiting, detail is lowered automatically, but never below level 1.",
+                         info: "How closely each session is looked at. Higher reads more screenshots per session — better summaries, slower.\n\nWhen a lot is waiting, detail is lowered automatically, but never below level 1.\n\nThis is applied when a day is prepared, so days that are already prepared keep the setting they were prepared with.",
                          low: "Quick", high: "Thorough",
                          index: Self.nearest(es.dialMax, EventSessionConfig.detailLevels),
                          set: { i in cfg.mutate { $0.eventSession.dialMax = EventSessionConfig.detailLevels[i] } })

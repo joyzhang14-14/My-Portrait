@@ -167,12 +167,17 @@ struct SettingsCirclePage: View {
             box {
                 sectionTitle("Capture")
                 let c = config.current.capture
+                let s = config.current.scheduler
                 statusRow("Screen", c.screen.enabled ? .on : .off, c.screen.enabled ? "On" : "Off", .capture(.screen))
                 statusRow("Audio", c.audio.enabled ? .on : .off, c.audio.enabled ? "On" : "Off", .capture(.audio))
                 statusRow("Typing", c.typingCaptureEnabled ? .on : .off, c.typingCaptureEnabled ? "On" : "Off", .capture(.typing))
                 sectionTitle("Workflow").padding(.top, 8)
-                statusRow("Last run", lastRunLamp, lastRunText, .workflow(.changelog))
-                statusRow("Next run", nil, nextRunText, .workflow(.eventMerge))
+                statusRow("Event Session", eventSessionLamp, eventSessionText, .workflow(.eventSession))
+                statusRow("Event Merge", s.event.frequency == .off ? .off : lastRunLamp,
+                          pipelineText(s.event, running: MemoryScheduler.shared.eventRunning), .workflow(.eventMerge))
+                statusRow("Portrait", s.portrait.frequency == .off ? .off : .on,
+                          pipelineText(s.portrait, running: MemoryScheduler.shared.distillRunning
+                                                   || MemoryScheduler.shared.personalityRunning), .workflow(.portraitDistillation))
                 sectionTitle("Data").padding(.top, 8)
                 statusRow("Storage", nil, usedBytes.map(Self.bytes) ?? "Measuring…", .data(.storage))
                 statusRow("Free", nil, freeBytes.map(Self.bytes) ?? "—", .data(.storage))
@@ -193,28 +198,22 @@ struct SettingsCirclePage: View {
         return r.outcome == "failure" || r.outcome == "auto-recovering" || attention > 0 ? .warn : .on
     }
 
-    private var lastRunText: String {
-        guard let r = lastRun else { return "Never" }
-        let d = Date(timeIntervalSince1970: Double(r.timestampMs) / 1000)
-        let cal = Calendar.current
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
-        if r.outcome == "failure" {
-            f.dateFormat = cal.isDateInToday(d) ? "HH:mm" : "MMM d"
-            return "Failed \(f.string(from: d))"
-        }
-        if cal.isDateInToday(d) { f.dateFormat = "HH:mm"; return "Today \(f.string(from: d))" }
-        if cal.isDateInYesterday(d) { return "Yesterday" }
-        f.dateFormat = "MMM d"
-        return f.string(from: d)
+    /// EventSession:关 / 在跑 / 还有天没做完(第几天 / 共几天)/ 都做完了。
+    private var eventSessionLamp: LampState { config.current.eventSession.enabled ? .on : .off }
+    private var eventSessionText: String {
+        guard config.current.eventSession.enabled else { return "Off" }
+        let st = EventSessionStatus.shared
+        if st.running { return "Running" }
+        if let p = st.progress { return "Day \(p.dayIndex)/\(p.days)" }
+        return "Ready"
     }
 
-    /// 下次运行:所有开着自动运行的流水线里最早的那次。
-    private var nextRunText: String {
-        let s = config.current.scheduler
+    /// Event Merge / Portrait:关 / 在跑 / 下次运行的时刻(24 小时内只写钟点,列窄;再远带星期)。
+    private func pipelineText(_ c: SchedulerConfig, running: Bool) -> String {
+        guard c.frequency != .off else { return "Off" }
+        if running { return "Running" }
         let now = Date()
-        guard let next = [s.event, s.portrait, s.personality, s.writingStyle]
-            .compactMap({ Self.nextRun($0, after: now) }).min() else { return "Off" }
-        // 24 小时内只写钟点(列窄,"Tomorrow 03:00" 放不下),再远带星期
+        guard let next = Self.nextRun(c, after: now) else { return "On" }
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = next.timeIntervalSince(now) < 86_400 ? "HH:mm" : "EEE HH:mm"
         return f.string(from: next)
