@@ -23,6 +23,7 @@ actor EventSessionWorker {
     private var loop: Task<Void, Never>?
     private var awake = false
     private var idleUntil = Date.distantPast
+    private var nextUpdateCheck = Date.distantPast
 
     func start() {
         guard loop == nil else { return }
@@ -45,6 +46,11 @@ actor EventSessionWorker {
             guard Date() >= idleUntil, Self.hasPendingDay(sinceMs: since) else {
                 await setStatus(running: false, waiting: "Up to date")
                 return
+            }
+            if Date() >= nextUpdateCheck {                      // 开跑前每 6 小时查一次引擎 / 运行环境有没有新版
+                nextUpdateCheck = Date().addingTimeInterval(6 * 3600)
+                let local = await MainActor.run { ConfigStore.shared.current.eventSession.isLocal }
+                await EventSessionInstaller.shared.update(local: local)
             }
             await setStatus(running: true, waiting: nil)
             await holdAwake(true)
@@ -108,7 +114,7 @@ actor EventSessionWorker {
         let inPipe = Pipe(), outPipe = Pipe()
         p.standardInput = inPipe
         p.standardOutput = outPipe
-        p.standardError = FileHandle(forWritingAtPath: "/dev/null")
+        p.standardError = Self.engineLog(in: work)
         do { try p.run() } catch {
             log.error("engine launch failed: \(error.localizedDescription, privacy: .public)")
             return
@@ -208,6 +214,19 @@ actor EventSessionWorker {
             d = cal.date(byAdding: .day, value: 1, to: d) ?? today
         }
         return false
+    }
+
+    /// 引擎的标准错误(管线自己的进度输出、报错)接到 <工作目录>/engine.log;超过 20 MB 就从头写。
+    private static func engineLog(in work: URL) -> FileHandle? {
+        let url = work.appendingPathComponent("engine.log")
+        let fm = FileManager.default
+        try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+        let size = ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int) ?? 0
+        if size > 20 << 20 || !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
+        let h = FileHandle(forWritingAtPath: url.path)
+        _ = try? h?.seekToEnd()
+        h?.write(Data("\n=== \(Date()) engine start ===\n".utf8))
+        return h
     }
 
     /// 起引擎用的解释器:python3 复制成「MyPortrait EventSession」,活动监视器里显示这个名字而不是 python。

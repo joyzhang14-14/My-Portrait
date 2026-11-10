@@ -131,7 +131,17 @@ final class EventSessionInstaller {
         expected = 0
     }
 
-    private func install(local: Bool, gen: Int) async {
+    /// 已装好时的更新检查(worker 定时调):运行环境(python / 引擎 / 词库)有新版就就地换上;模型已经在就不动,不在才下。
+    /// 连不上下载点就保持现状。
+    func update(local: Bool) async {
+        guard phase != .working, Self.isReady(local: local) else { return }
+        phase = .working
+        generation += 1
+        await install(local: local, gen: generation, keepModel: true)
+        if Self.isReady(local: local) { phase = .ready }
+    }
+
+    private func install(local: Bool, gen: Int, keepModel: Bool = false) async {
         let base = ConfigStore.shared.current.eventSession.downloadBase.trimmingCharacters(in: .whitespaces)
         guard !base.isEmpty, let murl = URL(string: base.hasSuffix("/") ? base + "manifest.json" : base + "/manifest.json") else {
             phase = .failed("The download location isn't set up yet.")
@@ -161,7 +171,7 @@ final class EventSessionInstaller {
             if let c = m.components["rime"], try await off({ try Self.needsRime() }) {
                 try await component("rime", c, step: 3, label: "the input-method dictionary", gen: gen)
             }
-            if local {
+            if local, !(keepModel && Self.modelDir != nil) {
                 guard let c = m.components["model"] else { throw Failure("The download list has no model.") }
                 try await component("model", c, step: 4, label: "the model", gen: gen)
             }
