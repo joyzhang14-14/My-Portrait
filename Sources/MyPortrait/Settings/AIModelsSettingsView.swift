@@ -78,6 +78,13 @@ struct AIModelsSettingsView: View {
                     localModelRow("Silero VAD", detail: "~2 MB",
                                   ready: SpeakerModelStore.isOnDisk(.vadSilero), model: .vadSilero)
                 }
+                SettingsDivider()
+
+                // EventSession 本机模型(连同运行环境),和 Workflow ▸ Event Session 的 Set up 是同一份下载。
+                modelSection("Event Session", icon: "square.stack.3d.up",
+                             installed: EventSessionInstaller.isReady(local: true) ? 1 : 0, total: 1) {
+                    eventSessionRow
+                }
             }
             .id(localModelTick)   // 强制重渲染,反映新的 isOnDisk 结果
             // 分区默认收起时一行 row 都不渲染,原来挂在 row 上的 onAppear
@@ -235,6 +242,54 @@ struct AIModelsSettingsView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .onAppear { startLocalModelPolling() }
+    }
+
+    // MARK: - EventSession
+
+    /// EventSession-v1:没装 → Download;下载中 → 进度条 + Stop;停了 → Resume;装好 → Ready + Uninstall。内存不够的 Mac 写明不支持。
+    private var eventSessionRow: some View {
+        let inst = EventSessionInstaller.shared
+        let eligible = EventSessionEligibility.current != .notEligible
+        let ready = EventSessionInstaller.isReady(local: true)
+        let pct = inst.expected > 0 ? Int(Double(inst.received) / Double(inst.expected) * 100) : 0
+        return HStack(spacing: 12) {
+            Image(systemName: ready ? "checkmark.circle.fill" : inst.phase == .paused ? "pause.circle" : "arrow.down.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(ready ? Color.green.opacity(0.85) : eligible ? Color.orange.opacity(0.85) : Theme.textPrimary.opacity(0.35))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("EventSession-v1" + (inst.phase == .working ? " · \(inst.stepText.lowercased()) · \(pct)%"
+                                          : inst.phase == .paused ? " · paused · \(pct)%" : ""))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.95))
+                if inst.phase == .working || inst.phase == .paused {
+                    ProgressView(value: Double(inst.received), total: Double(max(inst.expected, 1)))
+                        .progressViewStyle(.linear)
+                        .tint(inst.phase == .paused ? .gray : .accentColor)
+                } else {
+                    Text(eligible ? "Model 6.0 GB + runtime 1.1 GB" : "Not supported on this Mac (needs 14 GB of memory)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.55))
+                }
+            }
+            Spacer(minLength: 8)
+            if ready {
+                readyWithUninstall {
+                    pendingUninstall = PendingUninstall(label: "EventSession-v1") { inst.uninstall() }
+                }
+            } else if eligible {
+                switch inst.phase {
+                case .working:
+                    Button("Stop") { inst.stop() }.font(.system(size: 11, weight: .medium)).buttonStyle(.borderless)
+                case .paused:
+                    Button("Resume") { inst.start(local: true) }.font(.system(size: 11, weight: .medium)).buttonStyle(.borderless)
+                default:
+                    Button("Download") { inst.start(local: true) }.font(.system(size: 11, weight: .medium)).buttonStyle(.borderless)
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .onAppear { inst.refresh(local: true) }
     }
 
     // MARK: - 说话人识别声纹模型(下载行 —— 选用在 Audio Capture)

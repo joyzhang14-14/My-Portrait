@@ -6,6 +6,7 @@ import SwiftUI
 /// archive run.
 struct WorkflowSettingsView: View {
     private let cfg = ConfigStore.shared
+    @Environment(AppState.self) private var appState
     // provider/model 选择器已抽到 PipelineProviderPicker(自带 AppState /
     // OllamaModelStore),本 View 不再直接持有。
 
@@ -1602,117 +1603,221 @@ struct WorkflowSettingsView: View {
         }
     }
 
-    /// EventSession(workflow 第 1 层:每个会话先总结)。能不能开只看物理内存,每次打开本页重算
-    /// (`EventSessionEligibility`);只处理开启之后的会话。模型来源现在只有本机 EventSession 模型能用。
+    /// EventSession(workflow 第 1 层:每个会话先总结)。只处理开启之后的会话。Provider = 本机模型(内存够才列出)
+    /// 或 Connections 里连好的服务;本机模型能不能用每次打开本页按物理内存重算(`EventSessionEligibility`)。
+    /// 选 Premium 时 `PremiumConfig.eventSession` 跟着开(包里带全部元数据,本机不跑)。
     private var eventSessionSection: some View {
         let elig = EventSessionEligibility.current
         let es = cfg.current.eventSession
         let gb = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+        let clouds = Provider.allCases.filter { appState.isConnected($0.integrationId) }
         let enabled = Binding<Bool>(
-            get: { cfg.current.eventSession.enabled && elig != .notEligible },
+            get: { cfg.current.eventSession.enabled },
             set: { on in
                 cfg.mutate {
-                    $0.eventSession.enabled = on && elig != .notEligible
+                    $0.eventSession.enabled = on
                     if on { $0.eventSession.sinceMs = Int64(Date().timeIntervalSince1970 * 1000) }
-                    if elig == .idleOnly { $0.eventSession.powerMode = .chargingIdle }
+                    if on, elig == .notEligible, $0.eventSession.isLocal {
+                        $0.eventSession.source = clouds.first?.rawValue ?? ""
+                    }
+                    $0.premium.eventSession = on && $0.eventSession.source == Provider.premium.rawValue
                 }
             })
+        let local = es.isLocal && elig != .notEligible
+        let installer = EventSessionInstaller.shared
+        let ready = EventSessionInstaller.isReady(local: es.isLocal)
+        let premium = es.source == Provider.premium.rawValue
         return section(
             title: "EventSession",
-            blurb: "Summarizes each session from everything captured — screen, focus, keys & mouse and screen text — before events are built. Only sessions after you turn this on are processed.\n\nThis is metadata: all of your private data lives here. We recommend processing it with a local AI model.",
+            info: "Summarizes each session from everything captured — screen, focus, keys & mouse and screen text — before events are built.\n\nOnly sessions after you turn this on are processed.",
             titleTrailing: {
-                Toggle("", isOn: enabled).labelsHidden().toggleStyle(.switch).disabled(elig == .notEligible)
+                Toggle("", isOn: enabled).labelsHidden().toggleStyle(.switch)
             }
         ) {
-            if elig == .notEligible {
-                Text("Not eligible for this feature — this Mac has \(gb) GB of memory, and EventSession needs at least 14 GB.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                VStack(alignment: .leading, spacing: 12) {
-                    eventSessionSetupRow
-                    HStack {
-                        Text("Model").font(.system(size: 12))
-                        Spacer()
-                        Picker("", selection: cfg.binding(\.eventSession.source)) {
-                            Text("EventSession-v1 (on this Mac)").tag("local")
-                            Text("Your own local model (coming soon)").tag("own").disabled(true)
-                            Text("Cloud model (coming soon)").tag("cloud").disabled(true)
-                            Text("My Portrait Premium (coming soon)").tag("premium").disabled(true)
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 260)
-                    }
-                    HStack {
-                        Text("When to run").font(.system(size: 12))
-                        Spacer()
-                        Picker("", selection: cfg.binding(\.eventSession.powerMode)) {
-                            if elig == .full {
-                                Text("Only while charging").tag(OCRPowerMode.charging)
-                            }
-                            Text("Only while charging & idle").tag(OCRPowerMode.chargingIdle)
-                        }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 260)
-                    }
-                    if elig == .idleOnly {
-                        Text("This Mac has \(gb) GB of memory, so EventSession only runs while it's idle: the lid is closed, the screen brightness is at zero, or the screen is locked.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack {
-                        Text("Backlog limit").font(.system(size: 12))
-                        Spacer()
-                        Stepper("\(es.frameBudget) frames", value: cfg.binding(\.eventSession.frameBudget), in: 500...10000, step: 250)
-                            .font(.system(size: 12))
-                    }
-                    HStack {
-                        Text("Frames looked at per session").font(.system(size: 12))
-                        Spacer()
-                        Slider(value: cfg.binding(\.eventSession.dialMax), in: EventSessionConfig.dialMin...1.0, step: 0.05)
-                            .frame(width: 180)
-                        Text("\(Int((es.dialMax * 100).rounded()))%").font(.system(size: 12)).monospacedDigit().frame(width: 40, alignment: .trailing)
-                    }
-                    Text("When more than the backlog limit is waiting, the shortest single-screenshot sessions with no typing are skipped first (kept as app, title and time only), then fewer screenshots are looked at per session, down to 20%.")
-                        .font(.system(size: 11))
+            (Text("This is ") + Text("metadata").bold() + Text(": all of your ") + Text("private").bold()
+             + Text(" data lives here." + (elig == .notEligible ? "" : " We recommend processing it with a local AI model.")))
+                .font(.system(size: 12))
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 12) {
+                if elig == .notEligible {
+                    Text("This Mac doesn't support the local model — it has \(gb) GB of memory, and the local model needs at least 14 GB. You can use a cloud provider instead.")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if !premium, !ready, es.isLocal ? local : true {
+                    eventSessionSetupRow(local: es.isLocal, eligibleNote: local
+                        ? "✓ This Mac is eligible · \(gb) GB of memory" + (elig == .idleOnly ? ", runs only while idle" : "") : nil)
+                }
+                eventSessionProviderRows(elig: elig, clouds: clouds)
+                eventSessionWhenRow(elig: elig, ready: ready && !premium)
+                levelRow("Catch-up size",
+                         info: "How much waiting work EventSession takes on at once. When more than this is waiting, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but takes longer to catch up.",
+                         low: "Less", high: "More",
+                         index: Self.nearest(Double(es.frameBudget), EventSessionConfig.budgetLevels.map(Double.init)),
+                         set: { i in cfg.mutate { $0.eventSession.frameBudget = EventSessionConfig.budgetLevels[i] } })
+                levelRow("Detail",
+                         info: "How closely each session is looked at. Higher reads more screenshots per session — better summaries, slower.\n\nWhen a lot is waiting, detail is lowered automatically, but never below level 1.",
+                         low: "Quick", high: "Thorough",
+                         index: Self.nearest(es.dialMax, EventSessionConfig.detailLevels),
+                         set: { i in cfg.mutate { $0.eventSession.dialMax = EventSessionConfig.detailLevels[i] } })
+            }
+            .onAppear { installer.refresh(local: es.isLocal) }
+        }
+    }
+
+    private static func nearest(_ v: Double, _ levels: [Double]) -> Int {
+        levels.indices.min { abs(levels[$0] - v) < abs(levels[$1] - v) } ?? 2
+    }
+
+    /// Provider + Model 两行(同其他流水线的 PipelineProviderPicker):本机模型只在内存够时列出;Premium 不显示模型行。
+    @ViewBuilder
+    private func eventSessionProviderRows(elig: EventSessionEligibility, clouds: [Provider]) -> some View {
+        let es = cfg.current.eventSession
+        let provider = Binding<String>(
+            get: { cfg.current.eventSession.source },
+            set: { v in
+                cfg.mutate {
+                    $0.eventSession.source = v
+                    $0.eventSession.model = ""
+                    $0.eventSession.powerMode = v == "local" ? .chargingIdle : .packed
+                    $0.premium.eventSession = $0.eventSession.enabled && v == Provider.premium.rawValue
+                }
+                EventSessionInstaller.shared.refresh(local: v == "local")
+            })
+        HStack(spacing: 0) {
+            Text("Provider").font(.system(size: 12))
+            SettingsInfoBadge(text: "Which AI summarizes your sessions. The local model runs on this Mac; services you connect in Settings → Provider show up here too.")
+            Spacer()
+            Picker("", selection: provider) {
+                if elig != .notEligible { Text("On this Mac").tag("local") }
+                ForEach(clouds, id: \.rawValue) { p in Text(PipelineProviderPicker.providerDisplayName(p)).tag(p.rawValue) }
+            }
+            .pickerStyle(.menu).labelsHidden().frame(width: 260)
+        }
+        if clouds.isEmpty, elig == .notEligible {
+            Text("No AI providers connected. Open Settings → Provider to add one.")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+        }
+        if es.isLocal {
+            HStack {
+                Text("Model").font(.system(size: 12))
+                Spacer()
+                Picker("", selection: .constant("EventSession-v1")) { Text("EventSession-v1").tag("EventSession-v1") }
+                    .pickerStyle(.menu).labelsHidden().frame(width: 260)
+            }
+        } else if let p = Provider(rawValue: es.source), p != .premium {
+            let models = p == .ollama ? OllamaModelStore.shared.models : p.availableModels
+            HStack {
+                Text("Model").font(.system(size: 12))
+                Spacer()
+                Picker("", selection: Binding(get: { cfg.current.eventSession.model.isEmpty ? p.defaultModel : cfg.current.eventSession.model },
+                                              set: { m in cfg.mutate { $0.eventSession.model = m } })) {
+                    ForEach(models, id: \.self) { m in Text(m).tag(m) }
+                }
+                .pickerStyle(.menu).labelsHidden().frame(width: 260)
+            }
+        }
+    }
+
+    /// When to run:本机模型 = charging(内存 ≥ 20 GB 才有)/ charging & idle;云端和 Premium 多一档 packed。装好后状态显示在这一行。
+    private func eventSessionWhenRow(elig: EventSessionEligibility, ready: Bool) -> some View {
+        let es = cfg.current.eventSession
+        let st = EventSessionStatus.shared
+        let premium = es.source == Provider.premium.rawValue
+        let info = (es.isLocal ? "" : "Packed: once a day is over, it's packed up and sent to " + (premium ? "My Portrait Premium" : "your cloud provider")
+                    + " whenever this Mac is awake — no charger needed.\n\n")
+            + (es.isLocal && elig == .idleOnly ? "This Mac has less than 20 GB of memory, so the local model only runs while it's idle.\n\n" : "")
+            + "Idle means the lid is closed, the screen brightness is at zero, or the screen is locked."
+        let status: String? = !ready ? nil : st.running ? "Running" : st.waitingReason
+        return HStack(spacing: 0) {
+            Text("When to run").font(.system(size: 12))
+            SettingsInfoBadge(text: info)
+            Spacer()
+            if let status {
+                (Text("Ready").foregroundColor(.green) + Text(" · \(status)"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).padding(.trailing, 10)
+            }
+            Picker("", selection: cfg.binding(\.eventSession.powerMode)) {
+                if !es.isLocal { Text("Packed").tag(EventSessionRunMode.packed) }
+                if !es.isLocal || elig == .full { Text("Only while charging").tag(EventSessionRunMode.charging) }
+                Text("Only while charging & idle").tag(EventSessionRunMode.chargingIdle)
+            }
+            .pickerStyle(.menu).labelsHidden().frame(width: 260)
+        }
+    }
+
+    /// 5 档的一行:左右两头写意思,中间 1–5。
+    private func levelRow(_ title: String, info: String, low: String, high: String,
+                          index: Int, set: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 0) {
+            Text(title).font(.system(size: 12))
+            SettingsInfoBadge(text: info)
+            Spacer()
+            Text(low).font(.system(size: 11)).foregroundStyle(.secondary).padding(.trailing, 8)
+            Picker("", selection: Binding(get: { index }, set: set)) {
+                ForEach(0..<5, id: \.self) { i in Text("\(i + 1)").tag(i) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 170)
+            Text(high).font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 8)
+        }
+    }
+
+    /// 安装:资格绿字(本机模型)+ 步骤、进度条、Set up / Stop / Resume。装好后整块不显示。
+    private func eventSessionSetupRow(local: Bool, eligibleNote: String?) -> some View {
+        let inst = EventSessionInstaller.shared
+        let gbs = { (b: Int64) in ByteCountFormatter.string(fromByteCount: b, countStyle: .file) }
+        return VStack(alignment: .leading, spacing: 6) {
+            if let eligibleNote {
+                Text(eligibleNote).font(.system(size: 12)).foregroundStyle(.green)
+            }
+            HStack {
+                switch inst.phase {
+                case .working:
+                    Text(inst.expected > 0
+                         ? "\(inst.stepText) · \(gbs(inst.received)) of \(gbs(inst.expected))"
+                         : "\(inst.stepText)…")
+                    if let r = inst.remaining, r > 5 {
+                        Text("about \(Self.duration(r)) left").foregroundStyle(.secondary)
+                    }
+                case .paused:
+                    Text(inst.expected > 0 ? "Paused · \(gbs(inst.received)) of \(gbs(inst.expected)) downloaded" : "Paused")
+                case .failed(let msg):
+                    Text("Setup failed: \(msg)").foregroundStyle(.red)
+                default:
+                    Text(local ? "Needs setup · about 7 GB to download" : "Needs setup · about 1 GB to download")
+                }
+                Spacer()
+                switch inst.phase {
+                case .working: Button("Stop") { inst.stop() }
+                case .paused: Button("Resume") { inst.start(local: local) }
+                default: Button("Set up") { inst.start(local: local) }
+                }
+            }
+            .font(.system(size: 12))
+            if inst.phase == .working || inst.phase == .paused {
+                ProgressView(value: Double(inst.received), total: Double(max(inst.expected, 1)))
+                    .progressViewStyle(.linear)
+                    .tint(inst.phase == .paused ? .gray : .accentColor)
+                HStack(spacing: 6) {
+                    ForEach(Array(EventSessionInstaller.steps.enumerated()), id: \.offset) { i, name in
+                        if local || i < 4 {
+                            Text((i < inst.stepIndex ? "✓ " : "") + name)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(i < inst.stepIndex ? Color.green : i == inst.stepIndex ? Color.accentColor : Color.secondary)
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
                 }
             }
         }
     }
 
-    /// 安装状态 + 运行状态(EventSessionInstaller / EventSessionStatus)。
-    private var eventSessionSetupRow: some View {
-        let inst = EventSessionInstaller.shared
-        let st = EventSessionStatus.shared
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                switch inst.phase {
-                case .ready:
-                    Text(st.running ? "Running" : (st.waitingReason.map { "Ready · \($0)" } ?? "Ready"))
-                case .working(let msg):
-                    ProgressView().controlSize(.small)
-                    Text(msg)
-                case .failed(let msg):
-                    Text("Setup failed: \(msg)").foregroundStyle(.red)
-                case .idle:
-                    Text("Needs setup: downloads Python, the engine and the EventSession model (about 6 GB).")
-                }
-                Spacer()
-                if inst.phase != .ready, !{ if case .working = inst.phase { return true }; return false }() {
-                    Button("Set up") { Task { await inst.install() } }
-                }
-            }
-            .font(.system(size: 12))
-            if inst.phase == .ready, st.pendingFrames > 0 {
-                Text("Waiting: \(st.pendingDays) day\(st.pendingDays == 1 ? "" : "s"), \(st.pendingFrames) screenshots"
-                     + (st.shedSessions > 0 ? " · \(st.shedSessions) short sessions skipped, \(Int((st.dial * 100).rounded()))% of screenshots per session" : ""))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .onAppear { inst.refresh() }
+    private static func duration(_ s: TimeInterval) -> String {
+        s < 90 ? "\(Int(s)) s" : s < 5400 ? "\(Int(s / 60)) min" : String(format: "%.1f h", s / 3600)
     }
 
     private var budgetSection: some View {
