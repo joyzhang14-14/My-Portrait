@@ -844,7 +844,8 @@ struct TimelineView: View {
             .buttonStyle(.plain)
             .popover(isPresented: $ui.calendarOpen, arrowEdge: .bottom) {
                 CalendarPopover(selected: dayBinding, isPresented: $ui.calendarOpen,
-                                availability: db.map { db in { days in await TimelineFeed.daysWithFrames(days, db: db) } })
+                                availability: db.map { db in { days in await TimelineFeed.daysWithFrames(days, db: db) } },
+                                sessionDots: true)
             }
             Button { shiftDay(1) } label: {
                 Image(systemName: "chevron.right").font(.system(size: 14 * fk, weight: .medium))
@@ -1122,16 +1123,20 @@ struct CalendarPopover: View {
     /// 传了就按月查哪些天有内容:没内容的天灰掉、不可点(Timeline 查帧,Input 查击键和点击);
     /// nil 时所有过去的天都可点。
     var availability: (([Date]) async -> Set<Date>)? = nil
+    /// Timeline 用:整天都有 EventSession 总结的日子,数字下面画一个蓝点。
+    var sessionDots = false
     @State private var anchor: Date = Date()
     @State private var captured: Set<Date>? = nil
+    @State private var sessionDays: Set<String> = []
     @Environment(\.colorScheme) private var colorScheme
     private let cal = Calendar(identifier: .gregorian)
 
     init(selected: Binding<Date>, isPresented: Binding<Bool>,
-         availability: (([Date]) async -> Set<Date>)? = nil) {
+         availability: (([Date]) async -> Set<Date>)? = nil, sessionDots: Bool = false) {
         self._selected = selected
         self._isPresented = isPresented
         self.availability = availability
+        self.sessionDots = sessionDots
         self._anchor = State(initialValue: selected.wrappedValue)
     }
 
@@ -1175,7 +1180,8 @@ struct CalendarPopover: View {
                                 let isFuture = date > Date()
                                 let noCapture = captured.map { !$0.contains(cal.startOfDay(for: date)) } ?? false
                                 DayCell(date: date, inMonth: inMonth, isSelected: isSel, isFuture: isFuture,
-                                        noCapture: noCapture) {
+                                        noCapture: noCapture,
+                                        sessionDone: sessionDots && sessionDays.contains(Self.dayKey(date))) {
                                     if !isFuture && !noCapture {
                                         selected = date
                                         isPresented = false
@@ -1192,10 +1198,18 @@ struct CalendarPopover: View {
         .frame(width: 280)
         .background(Color(NSColor.windowBackgroundColor).opacity(0.98))
         .task(id: monthTitle(anchor)) {
+            if sessionDots { sessionDays = EventSessionStore.daysDone() }
             guard let availability else { return }
             let days = monthGrid(anchor).compactMap { $0 }.map { cal.startOfDay(for: $0) }
             captured = await availability(days)
         }
+    }
+
+    private static func dayKey(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: d)
     }
 
     private func shiftMonth(_ delta: Int) {
@@ -1230,6 +1244,8 @@ struct DayCell: View {
     let isSelected: Bool
     let isFuture: Bool
     var noCapture: Bool = false
+    /// 整天都有 EventSession 总结:数字下面一个蓝点。
+    var sessionDone: Bool = false
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     var body: some View {
@@ -1257,6 +1273,11 @@ struct DayCell: View {
                     ? AnyView(RoundedRectangle(cornerRadius: 5).fill(selectedFill))
                     : AnyView(Color.clear)
                 )
+                .overlay(alignment: .bottom) {
+                    if sessionDone {
+                        Circle().fill(Color.blue).frame(width: 4, height: 4).padding(.bottom, 3)
+                    }
+                }
                 .contentShape(Rectangle())   // 整格可点,不只数字字形
         }
         .buttonStyle(.bouncyIcon)

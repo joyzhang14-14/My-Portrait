@@ -489,6 +489,13 @@ enum EventSessionStore {
         var who: [String] = []
     }
 
+    /// 整天都做完了的本地日(引擎记的 days_done:引擎跑完的天 + 导入的整天总结),"yyyy-MM-dd"。
+    static func daysDone() -> Set<String> {
+        let url = Storage.pipelineDir.appendingPathComponent("eventsession/engine_state.json")
+        let st = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [String: Any]
+        return Set(st?["days_done"] as? [String] ?? [])
+    }
+
     static func entry(frameId: Int64, start: Date, end: Date, app: String) -> Entry? {
         let path = Storage.eventSessionDBPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
