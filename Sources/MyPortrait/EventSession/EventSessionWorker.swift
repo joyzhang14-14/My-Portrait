@@ -6,7 +6,8 @@ import os.log
 /// EventSession 运行(workflow 第 1 层):每分钟查一次闸,能跑就拉起引擎子进程(Python,`engine.py`),
 /// 一批最多 `chunkSessions` 个会话就让它退出、下一批重拉(本机 MLX 长跑会触发显卡驱动 panic)。
 /// 本机模型的闸:开关开着、东西装齐;插电,且按运行时间档(charging / charging_idle,内存 < 20 GB 的机器只有后者);
-/// 内存压力正常、可回收内存 ≥ `needBytes`;温度没到 serious、不在低电量模式;延后 OCR 不在跑(一次只跑一个重活)。
+/// 内存压力不是「严重」(「警告」照跑:开着一堆网页时很多 Mac 长期在警告档,模型加载时系统会压缩 / 换出闲着的内存)、
+/// 能立刻让出来的内存 ≥ `SystemMemory.minFreeBytes`;跑的过程中每做完一个会话重查一次,变成「严重」就停在这个会话之后;温度没到 serious、不在低电量模式;延后 OCR 不在跑(一次只跑一个重活)。
 /// 云端 provider:引擎每要调一次模型就发 `llm` 请求,这里用 Connections 里连好的服务调(`EventSessionCloud`),
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
 /// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
@@ -17,7 +18,6 @@ actor EventSessionWorker {
 
     private let log = Logger(subsystem: "com.myportrait.eventsession", category: "worker")
     private let chunkSessions = 10
-    private let needBytes: UInt64 = 10 * 1024 * 1024 * 1024
     private let watchdog: TimeInterval = 1800
     private var pool: DatabasePool?
     private var loop: Task<Void, Never>?
@@ -57,8 +57,8 @@ actor EventSessionWorker {
         await setStatus(running: false, waiting: reason)
     }
 
-    /// 能跑回 nil,不能跑回原因(给设置页看)。
-    private func gate() async -> String? {
+    /// 能跑回 nil,不能跑回原因(给设置页看)。`running` = 跑到一半的复查:模型自己占着内存,只看压力,不看余量。
+    private func gate(running: Bool = false) async -> String? {
         let es = await MainActor.run { ConfigStore.shared.current.eventSession }
         guard es.enabled else { return "Off" }
         if es.source == Provider.premium.rawValue { return "Handled by My Portrait Premium" }
@@ -74,8 +74,10 @@ actor EventSessionWorker {
         if es.isLocal, snap.isLowPowerMode { return "Low Power Mode is on" }
         if snap.thermalState == .serious || snap.thermalState == .critical { return "The Mac is too hot" }
         if es.isLocal {
-            if let level = SystemMemory.pressureLevel(), level > 1 { return "Memory pressure is high" }
-            guard let avail = SystemMemory.availableBytes(), avail >= needBytes else { return "Not enough free memory" }
+            if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
+            if !running {
+                guard let avail = SystemMemory.availableBytes(), avail >= SystemMemory.minFreeBytes else { return "Not enough free memory" }
+            }
         }
         if await MainActor.run(body: { DeferredOCRStatus.shared.running }) { return "Waiting for screen text recognition" }
         return nil
@@ -160,7 +162,7 @@ actor EventSessionWorker {
             default:
                 break
             }
-            if await gate() != nil, ["progress"].contains(ev) {
+            if ev == "progress", await gate(running: true) != nil {
                 inPipe.fileHandleForWriting.write(Data("{\"cmd\": \"stop\"}\n".utf8))   // 用户回来了:手上这个会话做完就停
             }
         }
