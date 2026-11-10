@@ -84,7 +84,7 @@ enum PremiumExchangeExporter {
         let r = await sealThenExport(
             seal: { try EventIntervalStore(pools: pools).sealCheck() },
             due: isDue,
-            offloaded: !offloaded.isEmpty,
+            offloaded: !offloaded.isEmpty && ConfigStore.shared.current.eventSession.premiumMayPack,
             unreachable: {
                 switch await PremiumRemote.check(cfg) {
                 case .success(let a): ask = a; return nil

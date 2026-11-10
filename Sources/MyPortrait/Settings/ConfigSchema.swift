@@ -1137,15 +1137,18 @@ struct PremiumConfig: Codable, Equatable {
 
 // MARK: - EventSession
 
-/// EventSession(workflow 第 1 层:每个会话先总结)在本机跑的设置(Settings ▸ Workflow ▸ Event Session)。
+/// EventSession(workflow 第 1 层:每个会话先总结)的设置(Settings ▸ Workflow ▸ Event Session)。
 /// 只处理开启之后的会话(`sinceMs`);积压按帧数减负(`frameBudget`,先扔单帧会话、再把每个会话的挑帧比例
-/// 从 `dialMax` 往下降,最低 0.2)。能不能开、能选哪些运行时间看物理内存(`EventSessionEligibility`)。
+/// 从 `dialMax` 往下降,最低 0.2)。本机模型能不能用、能选哪些运行时间看物理内存(`EventSessionEligibility`);
+/// 云端 provider 不看内存。两个减负参数界面上只露 5 档(`budgetLevels` / `detailLevels`)。
 struct EventSessionConfig: Codable, Equatable {
     var enabled: Bool = false
-    /// 模型来源:local = EventSession 模型(本机下载)/ own = 用户自己的本地模型 / cloud = 云端 API / premium。
+    /// 模型来源:local = 本机 EventSession 模型;其余是 `Provider` 的 rawValue(在 Connections 连好的服务,premium = 交给 Premium)。
     var source: String = "local"
-    /// 什么时候跑:charging / charging_idle(两档都要插电;idle 见 `PowerMonitor.isIdle`)。
-    var powerMode: OCRPowerMode = .chargingIdle
+    /// 云端 provider 用的模型(空 = provider 的默认模型)。
+    var model: String = ""
+    /// 什么时候跑,见 `EventSessionRunMode`。
+    var powerMode: EventSessionRunMode = .chargingIdle
     /// 待看帧数上限,超了就减负。
     var frameBudget: Int = 2000
     /// 每个会话挑帧比例的上限(下限固定 0.2)。
@@ -1156,10 +1159,15 @@ struct EventSessionConfig: Codable, Equatable {
     var downloadBase: String = "https://models.joyzhang14.com/eventsession"
 
     static let dialMin = 0.2
+    /// 「Catch-up size」5 档对应的待看帧数上限;「Detail」5 档对应的挑帧比例上限。默认都是第 3 档。
+    static let budgetLevels = [1000, 1500, 2000, 3000, 5000]
+    static let detailLevels = [0.2, 0.35, 0.5, 0.75, 1.0]
+
+    var isLocal: Bool { source == "local" }
 
     init() {}
     enum CodingKeys: String, CodingKey {
-        case enabled, source
+        case enabled, source, model
         case powerMode = "power_mode"
         case frameBudget = "frame_budget"
         case dialMax = "dial_max"
@@ -1171,12 +1179,21 @@ struct EventSessionConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         enabled = c.dflt(Bool.self, .enabled, enabled)
         source = c.dflt(String.self, .source, source)
-        powerMode = c.dflt(OCRPowerMode.self, .powerMode, powerMode)
+        model = c.dflt(String.self, .model, model)
+        powerMode = c.dflt(EventSessionRunMode.self, .powerMode, powerMode)
         frameBudget = c.dflt(Int.self, .frameBudget, frameBudget)
         dialMax = c.dflt(Double.self, .dialMax, dialMax)
         sinceMs = c.dflt(Int64.self, .sinceMs, sinceMs)
         downloadBase = c.dflt(String.self, .downloadBase, downloadBase)
     }
+}
+
+/// EventSession 什么时候跑。charging / charging_idle 都要插电(idle 见 `PowerMonitor.isIdle`);
+/// packed 只给云端 provider:一天过完,电脑醒着就打包发出去,不看电源。
+enum EventSessionRunMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case charging
+    case chargingIdle = "charging_idle"
+    case packed
 }
 
 /// 这台 Mac 能不能跑本地 EventSession:只看物理内存。< 14 GB 不能开;< 20 GB 只能在空闲时跑
