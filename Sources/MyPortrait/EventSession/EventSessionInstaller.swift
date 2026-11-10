@@ -3,8 +3,9 @@ import Observation
 
 /// EventSession 运行要的东西(下发清单 manifest.json 列出),装在 ~/.portrait/runtime/eventsession/:
 /// python(独立 CPython)→ engine(管线代码 + 题面 + requirements.lock,依赖按锁定版本装进 python)→
-/// rime(librime 桥 + 词库,只在用户的输入法对得上时才装)→ models(EventSession 模型,只有本机模型要)。
-/// 每样装好在目录里留 `.installed`(记下包的 sha256),再点 Set up 时装好的跳过。
+/// rime(librime 桥 + 词库,只在用户的输入法对得上时才装);EventSession 模型(只有本机模型要)和其他本机模型一样
+/// 放 ~/.portrait/models/<模型名>/。每样装好在自己的目录里留 `.installed`(记下包的 sha256),再点 Set up 时装好的跳过。
+/// 一次只有一轮安装在跑:Resume 先等上一轮(哪怕正在后台算校验和、解包)彻底结束,Stop 之后旧的那轮不再动文件。
 /// 下载边下边存 downloads/<名>.part,Stop 或 app 中途退出后再点 Resume,用 HTTP Range 从已下的字节接着下。
 /// 解包用系统 tar,不按名字结束任何进程。
 @MainActor @Observable
@@ -33,13 +34,15 @@ final class EventSessionInstaller {
     private(set) var remaining: TimeInterval?
 
     private var job: Task<Void, Never>?
+    /// 每次 start / stop 加一;旧的一轮看到对不上就停手,不再改文件和状态。
+    private var generation = 0
     private var download: RangeDownload?
 
     nonisolated static var root: URL { Storage.rootURL.appendingPathComponent("runtime/eventsession", isDirectory: true) }
     nonisolated static var python: URL { root.appendingPathComponent("python/bin/python3") }
     nonisolated static var engineDir: URL { root.appendingPathComponent("engine/event-local-lab/pipeline", isDirectory: true) }
     nonisolated static var rimeDir: URL { root.appendingPathComponent("rime/rime", isDirectory: true) }
-    nonisolated static var modelsDir: URL { root.appendingPathComponent("models", isDirectory: true) }
+    nonisolated static var modelsDir: URL { Storage.rootURL.appendingPathComponent("models", isDirectory: true) }
     nonisolated static var partsDir: URL { root.appendingPathComponent("downloads", isDirectory: true) }
 
     /// 已装好的模型目录(有 eventsession.json 的第一个)。
@@ -71,6 +74,8 @@ final class EventSessionInstaller {
             let size: Int64?
             let dest: String
             let strip: Int?
+            /// 包里最外层的目录名(模型):只替换这一个目录,不清空共用的 models/。
+            let name: String?
         }
         let components: [String: Component]
     }
@@ -93,12 +98,23 @@ final class EventSessionInstaller {
         guard phase != .working else { return }
         phase = .working
         remaining = nil
-        job = Task { await self.install(local: local) }
+        generation += 1
+        let gen = generation, prev = job
+        job = Task {
+            await prev?.value                                  // 上一轮可能还在后台校验 / 解包,等它停手
+            await self.install(local: local, gen: gen)
+        }
+    }
+
+    /// 这一轮还算数吗:被 Stop / 新一轮取代就抛出,别再动文件。
+    private func alive(_ gen: Int) throws {
+        if gen != generation || Task.isCancelled { throw CancellationError() }
     }
 
     /// Stop:停掉当前下载(已下的字节留在 .part 里),Resume 时接着下。
     func stop() {
         guard phase == .working else { return }
+        generation += 1
         job?.cancel()
         download?.cancel()
         phase = .paused
@@ -109,12 +125,13 @@ final class EventSessionInstaller {
     func uninstall() {
         stop()
         try? FileManager.default.removeItem(at: Self.root)
+        if let m = Self.modelDir { try? FileManager.default.removeItem(at: m) }
         phase = .idle
         received = 0
         expected = 0
     }
 
-    private func install(local: Bool) async {
+    private func install(local: Bool, gen: Int) async {
         let base = ConfigStore.shared.current.eventSession.downloadBase.trimmingCharacters(in: .whitespaces)
         guard !base.isEmpty, let murl = URL(string: base.hasSuffix("/") ? base + "manifest.json" : base + "/manifest.json") else {
             phase = .failed("The download location isn't set up yet.")
@@ -129,31 +146,34 @@ final class EventSessionInstaller {
             guard let py = m.components["python"], let engine = m.components["engine"] else {
                 throw Failure("The download list is incomplete.")
             }
-            try await component("python", py, step: 0, label: "Python")
-            let engineChanged = try await component("engine", engine, step: 2, label: "the engine")
+            try alive(gen)
+            try await component("python", py, step: 0, label: "Python", gen: gen)
+            let engineChanged = try await component("engine", engine, step: 2, label: "the engine", gen: gen)
             let pipMark = Self.root.appendingPathComponent("engine/.pip-installed")
             if engineChanged || !FileManager.default.fileExists(atPath: pipMark.path) {
                 set(1, "Installing packages")
                 let lock = Self.root.appendingPathComponent("engine/requirements.lock").path
                 try await off { try Self.run(Self.python.path, ["-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "-r", lock]) }
+                try alive(gen)
                 FileManager.default.createFile(atPath: pipMark.path, contents: Data())
             }
-            try Task.checkCancellation()
+            try alive(gen)
             if let c = m.components["rime"], try await off({ try Self.needsRime() }) {
-                try await component("rime", c, step: 3, label: "the input-method dictionary")
+                try await component("rime", c, step: 3, label: "the input-method dictionary", gen: gen)
             }
             if local {
                 guard let c = m.components["model"] else { throw Failure("The download list has no model.") }
-                try await component("model", c, step: 4, label: "the model")
+                try await component("model", c, step: 4, label: "the model", gen: gen)
             }
+            try alive(gen)
             expected = 0
             phase = Self.isReady(local: local) ? .ready : .failed("Setup finished, but something is missing.")
-        } catch is CancellationError {
-            phase = .paused
-        } catch let e as URLError where e.code == .cancelled {
-            phase = .paused
         } catch {
-            if phase == .paused { return }                     // Stop 之后下载报的错不算失败
+            guard gen == generation else { return }            // 被 Stop / 新一轮取代:状态归新的那轮管
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                phase = .paused
+                return
+            }
             phase = .failed((error as? Failure)?.message ?? error.localizedDescription)
         }
     }
@@ -165,13 +185,15 @@ final class EventSessionInstaller {
 
     /// 一个包:装过同一份(.installed 里的 sha 对得上)就跳过,回 false;否则下载 → 校验 → 解包,回 true。
     @discardableResult
-    private func component(_ name: String, _ c: Manifest.Component, step: Int, label: String) async throws -> Bool {
-        let dest = Self.root.appendingPathComponent(c.dest, isDirectory: true)
-        let mark = dest.appendingPathComponent(".installed")
+    private func component(_ name: String, _ c: Manifest.Component, step: Int, label: String, gen: Int) async throws -> Bool {
+        // 解到哪:模型解进共用的 models/,其余解进 runtime 下各自的目录;unit = 这个包自己的目录(装前只删它)
+        let dest = name == "model" ? Self.modelsDir : Self.root.appendingPathComponent(c.dest, isDirectory: true)
+        let unit = c.name.map { dest.appendingPathComponent($0, isDirectory: true) } ?? dest
+        let mark = unit.appendingPathComponent(".installed")
         let want = c.sha256 ?? c.url
         if (try? String(contentsOf: mark, encoding: .utf8)) == want { return false }
         // 早先装的没有 .installed:Python / 词库 / 模型已经能用就认下,不重下(引擎每版都换,照常更新)
-        if !FileManager.default.fileExists(atPath: mark.path), Self.looksInstalled(name) {
+        if !FileManager.default.fileExists(atPath: mark.path), FileManager.default.fileExists(atPath: unit.path), Self.looksInstalled(name) {
             try want.write(to: mark, atomically: true, encoding: .utf8)
             return false
         }
@@ -201,21 +223,25 @@ final class EventSessionInstaller {
         }
         download = nil
         remaining = nil
+        try alive(gen)
 
         if let sha = c.sha256 {
             set(step, "Checking \(label)")
-            guard try await off({ try Self.sha256(part) }) == sha else {
+            let got = try await off({ try Self.sha256(part) })
+            try alive(gen)
+            guard got == sha else {
                 try? FileManager.default.removeItem(at: part)
                 throw Failure("The \(name) download is damaged. Try again.")
             }
         }
         set(step, "Unpacking \(label)")
-        try? FileManager.default.removeItem(at: dest)
+        try? FileManager.default.removeItem(at: unit)
         try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
         var args = ["-xf", part.path, "-C", dest.path]
         if let s = c.strip, s > 0 { args.append("--strip-components=\(s)") }
         let tarArgs = args
         try await off { try Self.run("/usr/bin/tar", tarArgs) }
+        try alive(gen)
         try want.write(to: mark, atomically: true, encoding: .utf8)
         try? FileManager.default.removeItem(at: part)
         try? FileManager.default.removeItem(at: Self.partsDir.appendingPathComponent("\(name).json"))
