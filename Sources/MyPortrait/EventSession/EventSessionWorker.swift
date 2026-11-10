@@ -11,7 +11,7 @@ import os.log
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
 /// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
 /// 没有过完、还没做的天就不起引擎;引擎回 idle(那天 OCR 还没补完)后 15 分钟内不再起。
-/// 结果写 `~/.portrait/eventsession/eventsession.sqlite` 的 event_sessions。引擎卡住 `watchdog` 秒没出声就结束它(按 Process 句柄,不按名字)。
+/// 结果写 `~/.portrait/eventsession/session.sqlite3` 的 event_sessions。引擎卡住 `watchdog` 秒没出声就结束它(按 Process 句柄,不按名字)。
 actor EventSessionWorker {
     static let shared = EventSessionWorker()
 
