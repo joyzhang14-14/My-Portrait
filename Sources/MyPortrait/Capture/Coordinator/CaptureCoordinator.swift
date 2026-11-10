@@ -181,10 +181,13 @@ actor CaptureCoordinator {
 
     /// 停止采集流水线。释放 SCStream 缓存、注销通知、关闭 events 流。
     func stop() async {
+        let inFlight = [captureTask, settleTask]
         captureTask?.cancel()
         drmTask?.cancel()
         sleepWakeTask?.cancel()
         settleTask?.cancel()
+        // 等手上那一帧入库再往下拆。
+        for task in inFlight { await task?.value }
         captureTask = nil
         drmTask = nil
         sleepWakeTask = nil
@@ -425,8 +428,13 @@ actor CaptureCoordinator {
         )
 
         do {
-            _ = deferred ? try await db.insertFramePendingOCR(record)
+            // 入库放进 detached task:退出时采集任务被取消,已经截好的这帧照样写完
+            // (stop() 会等它)。
+            let db = self.db
+            _ = try await Task.detached {
+                deferred ? try await db.insertFramePendingOCR(record)
                          : try await db.insertFrameWithOCR(record, ocr: ocrResult)
+            }.value
         } catch {
             // DB 写失败 → 这帧不入库。
             // JPG 已经落盘了，可以通过 compactor / 手动 SQL 回补。
