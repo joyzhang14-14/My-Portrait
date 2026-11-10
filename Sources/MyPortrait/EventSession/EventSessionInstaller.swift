@@ -170,6 +170,11 @@ final class EventSessionInstaller {
         let mark = dest.appendingPathComponent(".installed")
         let want = c.sha256 ?? c.url
         if (try? String(contentsOf: mark, encoding: .utf8)) == want { return false }
+        // 早先装的没有 .installed:Python / 词库 / 模型已经能用就认下,不重下(引擎每版都换,照常更新)
+        if !FileManager.default.fileExists(atPath: mark.path), Self.looksInstalled(name) {
+            try want.write(to: mark, atomically: true, encoding: .utf8)
+            return false
+        }
         guard let url = URL(string: c.url) else { throw Failure("Bad download address for \(name).") }
 
         set(step, "Downloading \(label)")
@@ -218,6 +223,16 @@ final class EventSessionInstaller {
     }
 
     private struct PartInfo: Codable { let sha: String; let size: Int64 }
+
+    nonisolated private static func looksInstalled(_ name: String) -> Bool {
+        let fm = FileManager.default
+        switch name {
+        case "python": return fm.isExecutableFile(atPath: python.path)
+        case "rime": return fm.isExecutableFile(atPath: rimeDir.appendingPathComponent("cands").path)
+        case "model": return modelDir != nil
+        default: return false
+        }
+    }
 
     /// 留下的半截:已下字节 / 总大小(取最大的那个,一般就是模型)。
     nonisolated private static func partialProgress() -> (Int64, Int64)? {
