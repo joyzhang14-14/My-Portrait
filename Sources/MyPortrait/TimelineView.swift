@@ -419,8 +419,9 @@ struct TimelineView: View {
                 state.snapFocus(to: target)   // 最近帧;空帧内部 guard
                 state.pendingSeek = nil        // 清掉,免得后续同天 reload 又吸到旧目标
             } else if let keep, !fetched.isEmpty {
-                state.stepHint = 0             // 还是同一帧,只是下标换了:帧条不做过渡
+                let before = state.focusIndex
                 state.snapFocus(to: keep)      // 后台刷新 / 跨天补齐:吸附回原来那一帧
+                if state.focusIndex != before { state.stepHint = 0 }   // 还是同一帧,只是下标换了:帧条不做过渡
             } else {
                 state.focusIndex = max(fetched.count - 1, 0)
             }
