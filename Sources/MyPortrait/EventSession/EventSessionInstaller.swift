@@ -42,7 +42,7 @@ final class EventSessionInstaller {
     nonisolated static var python: URL { root.appendingPathComponent("python/bin/python3") }
     nonisolated static var engineDir: URL { root.appendingPathComponent("engine/event-local-lab/pipeline", isDirectory: true) }
     nonisolated static var rimeDir: URL { root.appendingPathComponent("rime/rime", isDirectory: true) }
-    nonisolated static var modelsDir: URL { Storage.rootURL.appendingPathComponent("models", isDirectory: true) }
+    nonisolated static var modelsDir: URL { Storage.modelsDir }
     nonisolated static var partsDir: URL { root.appendingPathComponent("downloads", isDirectory: true) }
 
     /// 已装好的模型目录(有 eventsession.json 的第一个)。
