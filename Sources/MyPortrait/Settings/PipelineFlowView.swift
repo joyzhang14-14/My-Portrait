@@ -49,6 +49,8 @@ struct PipelineFlow {
 
 struct PipelineFlowView: View {
     let flow: PipelineFlow
+    /// 正在跑的那一格(step id):高亮边框 + 呼吸 + 右上角 running 小标。只有 EventSession 那张图传。
+    var active: String? = nil
 
     @State private var selected: String? = nil
 
@@ -81,6 +83,7 @@ struct PipelineFlowView: View {
     private func stepBox(_ s: PipelineFlow.Step) -> some View {
         let st = Self.style(for: s.kind)
         let on = selected == s.id
+        let running = active == s.id
         return Button {
             selected = on ? nil : s.id
         } label: {
@@ -115,8 +118,17 @@ struct PipelineFlowView: View {
                                   style: StrokeStyle(lineWidth: on ? 1.6 : 1,
                                                      dash: st.dashed && !on ? [3.5, 3] : []))
             )
+            .overlay { if running { RunningBorder() } }
             .overlay(alignment: .topTrailing) {
-                if let loop = s.loop {
+                if running {
+                    Text("running")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor))
+                        .offset(x: 4, y: -7)
+                } else if let loop = s.loop {
                     Text(loop)
                         .font(.system(size: 8.5))
                         .foregroundStyle(Theme.textPrimary.opacity(0.6))
@@ -321,4 +333,18 @@ extension PipelineFlow {
                  detail: "Decisions are written to `portrait/personality/`: new traits are created, existing ones get the day's evidence. The day is marked done."),
         ]),
     ])
+}
+
+/// 正在跑的那一格的边框:出现就开始一明一暗。
+private struct RunningBorder: View {
+    @State private var bright = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(Color.accentColor, lineWidth: 2)
+            .opacity(bright ? 1 : 0.35)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { bright = true }
+            }
+    }
 }

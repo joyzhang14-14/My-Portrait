@@ -1044,7 +1044,8 @@ struct WorkflowSettingsView: View {
             title: "How it works",
             info: "Every step this part of the pipeline runs, left to right. Click any step to see what it does."
         ) {
-            PipelineFlowView(flow: flow)
+            PipelineFlowView(flow: flow, active: flow.lanes.first?.steps.first?.id == "input"
+                             ? EventSessionStatus.shared.stage : nil)
         }
     }
 
@@ -1737,14 +1738,16 @@ struct WorkflowSettingsView: View {
                     + " whenever this Mac is awake — no charger needed.\n\n")
             + (es.isLocal && elig == .idleOnly ? "This Mac has less than 20 GB of memory, so the local model only runs while it's idle.\n\n" : "")
             + "Idle means the lid is closed, the screen brightness is at zero, or the screen is locked."
-        let status: String? = !ready ? nil : st.running ? "Running" : st.waitingReason
+        let status: String? = !ready ? nil : st.running ? "Running" : "Ready"
         return HStack(spacing: 0) {
             Text("When to run").font(.system(size: 12))
             SettingsInfoBadge(text: info)
             Spacer()
             if let status {
-                (Text("Ready").foregroundColor(.green) + Text(" · \(status)"))
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).padding(.trailing, 10)
+                Text(status)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(status == "Running" ? Color.accentColor : .green)
+                    .lineLimit(1).padding(.trailing, 10)
             }
             Picker("", selection: cfg.binding(\.eventSession.powerMode)) {
                 if !es.isLocal { Text("Packed").tag(EventSessionRunMode.packed) }

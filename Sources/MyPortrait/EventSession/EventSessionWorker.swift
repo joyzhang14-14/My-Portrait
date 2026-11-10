@@ -58,7 +58,7 @@ actor EventSessionWorker {
         }
         if await prepareGate(), Date() >= prepIdleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done", "days_prepared"]) {
             await checkForUpdate()
-            await setStatus(running: false, waiting: "Preparing sessions")
+            await setStatus(running: true, waiting: nil)
             await runChunk(prepareOnly: true)
             MemoryTrim.ifHidden()
         }
@@ -167,6 +167,9 @@ actor EventSessionWorker {
             switch ev {
             case "session":
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
+            case "stage":
+                let step = Self.flowStep(obj["stage"] as? String)
+                await MainActor.run { EventSessionStatus.shared.stage = step }
             case "plan", "day_plan":
                 await setPlan(obj)
             case "llm":
@@ -197,6 +200,7 @@ actor EventSessionWorker {
             }
         }
         dog.cancel()
+        await MainActor.run { EventSessionStatus.shared.stage = nil }
         p.waitUntilExit()
     }
 
@@ -275,6 +279,17 @@ actor EventSessionWorker {
         return h
     }
 
+    /// 引擎的阶段 → How it works 图里的那一格(PipelineFlow.eventSession 的 step id)。
+    private static func flowStep(_ stage: String?) -> String? {
+        switch stage {
+        case "ingest": return "cut"
+        case "select", "pack": return "pick"
+        case "observe": return "observe"
+        case "merge", "synth", "finalize": return "summarize"
+        default: return nil
+        }
+    }
+
     /// 起引擎用的解释器:python3 复制成「MyPortrait EventSession」,活动监视器里显示这个名字而不是 python。
     private static func launcher() -> URL {
         let py = EventSessionInstaller.python
@@ -341,6 +356,8 @@ final class EventSessionStatus {
     var pendingFrames = 0
     var shedSessions = 0
     var dial = 0.5
+    /// 正在跑的那一步(How it works 图的 step id);没在跑 = nil。
+    var stage: String?
 }
 
 /// Timeline 的 Event session 卡读结果:先用当前这一帧查它属于哪个会话(`session_frames`);
