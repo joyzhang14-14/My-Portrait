@@ -149,7 +149,8 @@ final class EventSessionInstaller {
         }
         do {
             set(0, "Reading the download list")
-            let (mdata, _) = try await URLSession.shared.data(from: murl)
+            // 清单不走缓存:同一个地址,内容随新版变
+            let (mdata, _) = try await URLSession.shared.data(for: URLRequest(url: murl, cachePolicy: .reloadIgnoringLocalCacheData))
             let m = try JSONDecoder().decode(Manifest.self, from: mdata)
             try FileManager.default.createDirectory(at: Self.partsDir, withIntermediateDirectories: true)
 
