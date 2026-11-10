@@ -111,6 +111,11 @@ enum Storage {
     /// workflow 的台账和结果:事件区间、性格日、处理台账、写作风格。
     static var workflowDBPath: String { pipelineDir.appendingPathComponent("workflow.sqlite").path }
 
+    /// `~/.portrait/eventsession/` —— EventSession(workflow 第 1 层)的结果:每个会话一份总结。
+    static var eventSessionDir: URL { rootURL.appendingPathComponent("eventsession", isDirectory: true) }
+    /// EventSession 结果库;Timeline 的 Event session 卡也读这里。
+    static var eventSessionDBPath: String { eventSessionDir.appendingPathComponent("eventsession.sqlite").path }
+
     /// 拆库之前的单库和剪贴板库,只给一次性拆库迁移(`DBSplitMigration`)用。
     static var legacyPortraitDBPath: String { rootURL.appendingPathComponent("portrait.sqlite").path }
     static var legacyClipboardDBPath: String { rootURL.appendingPathComponent("clipboard.sqlite").path }

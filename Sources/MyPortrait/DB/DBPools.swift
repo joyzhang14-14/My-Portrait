@@ -40,6 +40,8 @@ struct DBPools: Sendable {
 
     enum Kind {
         case screen, audio, input, workflow
+        /// EventSession 结果库(不在这四个里,`EventSessionWorker` 自己开)。
+        case eventSession
 
         var migrator: DatabaseMigrator {
             switch self {
@@ -47,6 +49,7 @@ struct DBPools: Sendable {
             case .audio: DBSchema.audioMigrator()
             case .input: DBSchema.inputMigrator()
             case .workflow: DBSchema.workflowMigrator()
+            case .eventSession: DBSchema.eventSessionMigrator()
             }
         }
         /// 帧库几个 GB、转录要全文搜,给大的 mmap 和页缓存;input、workflow 用默认值,

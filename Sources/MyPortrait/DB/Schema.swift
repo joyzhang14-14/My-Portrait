@@ -188,17 +188,24 @@ enum DBSchema {
         m.registerMigration("workflow_v1", foreignKeyChecks: .immediate) { db in
             for sql in workflowBaseline { try db.execute(sql: sql) }
         }
-        // EventSession 的结果(11-08):一行一个会话,kind = summary(模型总结)/ blocked(屏蔽 app 段)/
-        // shed(积压减负扔掉、只留确定性记录)。day 是跑批时按本机时区算的本地日;record 是引擎给的整条 JSON。
-        m.registerMigration("workflow_event_sessions", foreignKeyChecks: .immediate) { db in
+        return m
+    }
+
+    // MARK: - eventsession.sqlite
+
+    /// EventSession 的结果(`~/.portrait/eventsession/`):一行一个会话,kind = summary(模型总结)/ blocked(屏蔽 app 段)/
+    /// shed(减负扔掉、只留确定性记录)。day 是跑批时按本机时区算的本地日;record 是引擎给的整条 JSON。
+    static func eventSessionMigrator() -> DatabaseMigrator {
+        var m = DatabaseMigrator()
+        m.registerMigration("eventsession_v1", foreignKeyChecks: .immediate) { db in
             try db.execute(sql: """
-                CREATE TABLE IF NOT EXISTS event_sessions (
-                    day TEXT NOT NULL, session_key INTEGER NOT NULL, kind TEXT NOT NULL,
-                    app TEXT, start_ms INTEGER, end_ms INTEGER, activity TEXT, record TEXT NOT NULL,
-                    model TEXT, created_at_ms INTEGER NOT NULL,
-                    PRIMARY KEY (day, session_key, kind))
+                CREATE TABLE "event_sessions" (
+                    "day" TEXT NOT NULL, "session_key" INTEGER NOT NULL, "kind" TEXT NOT NULL,
+                    "app" TEXT, "start_ms" INTEGER, "end_ms" INTEGER, "activity" TEXT, "record" TEXT NOT NULL,
+                    "model" TEXT, "created_at_ms" INTEGER NOT NULL,
+                    PRIMARY KEY ("day", "session_key", "kind"))
                 """)
-            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_event_sessions_time ON event_sessions(start_ms)")
+            try db.execute(sql: "CREATE INDEX idx_event_sessions_time ON event_sessions(start_ms)")
         }
         return m
     }

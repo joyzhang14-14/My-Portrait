@@ -78,7 +78,7 @@ final class Services {
         MemoryScheduler.useDBPools(pools)
         MemoryTrim.dbPools = pools.all
         // EventSession 本机运行(workflow 第 1 层):自己每分钟查闸,没开就什么都不做。
-        Task { await EventSessionWorker.shared.start(workflow: pools.workflow) }
+        Task { await EventSessionWorker.shared.start() }
         // 旧帧词框小数截到 5 位,后台一次性跑完(进度在库里,中途退出下次接着跑)。
         Task.detached(priority: .background) { await OCRWordsSlimmer.run(dbPool: pools.screen) }
         let ftsEngine = FTSSearchEngine(screenPool: pools.screen, audioPool: pools.audio)

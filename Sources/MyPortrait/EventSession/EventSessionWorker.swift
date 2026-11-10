@@ -11,7 +11,7 @@ import os.log
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
 /// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
 /// 没有过完、还没做的天就不起引擎;引擎回 idle(那天 OCR 还没补完)后 15 分钟内不再起。
-/// 结果写 workflow.sqlite 的 event_sessions。引擎卡住 `watchdog` 秒没出声就结束它(按 Process 句柄,不按名字)。
+/// 结果写 `~/.portrait/eventsession/eventsession.sqlite` 的 event_sessions。引擎卡住 `watchdog` 秒没出声就结束它(按 Process 句柄,不按名字)。
 actor EventSessionWorker {
     static let shared = EventSessionWorker()
 
@@ -24,9 +24,13 @@ actor EventSessionWorker {
     private var awake = false
     private var idleUntil = Date.distantPast
 
-    func start(workflow: DatabasePool) {
-        pool = workflow
+    func start() {
         guard loop == nil else { return }
+        do {
+            pool = try DBPools.openPool(path: Storage.eventSessionDBPath, kind: .eventSession)
+        } catch {
+            log.error("eventsession db open failed: \(error.localizedDescription, privacy: .public)")
+        }
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.tick()
@@ -275,7 +279,7 @@ final class EventSessionStatus {
 /// Timeline 的 Event session 卡读结果:和 [start, end] 重叠、最早开始的那条(总结优先,其次减负记录)。
 enum EventSessionStore {
     static func text(start: Date, end: Date) -> String? {
-        let path = Storage.workflowDBPath
+        let path = Storage.eventSessionDBPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         var cfg = Configuration()
         cfg.readonly = true
