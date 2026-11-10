@@ -105,7 +105,11 @@ actor EventSessionWorker {
         env["PORTRAIT_ROOT"] = Storage.rootURL.path
         env["PORTRAIT_KEYS_OUT"] = work.appendingPathComponent("keys").path
         env["PORTRAIT_DB_DIR"] = EventSessionInstaller.root.appendingPathComponent("engine").path
-        env["MP_FRAME_EXTRACTOR"] = Bundle.main.executablePath ?? ""
+        guard let extractor = Self.frameExtractor() else {
+            log.error("frame extractor script could not be written")
+            return
+        }
+        env["MP_FRAME_EXTRACTOR"] = extractor.path
         env["PYTHONNOUSERSITE"] = "1"
         if FileManager.default.fileExists(atPath: EventSessionInstaller.rimeDir.path) {
             env["PORTRAIT_RIME_DIR"] = EventSessionInstaller.rimeDir.path
@@ -214,6 +218,21 @@ actor EventSessionWorker {
             d = cal.date(byAdding: .day, value: 1, to: d) ?? today
         }
         return false
+    }
+
+    /// 引擎的抽帧命令:一个小脚本,调本 app 时带上 `--extract-frame`(引擎按「mp4 偏移秒 输出 jpg」传参)。
+    /// 不带这个参数调 app 会起一整个 app 实例(它会按单实例规则把正在跑的这份请退出)。
+    private static func frameExtractor() -> URL? {
+        guard let exe = Bundle.main.executablePath, !exe.contains("\"") else { return nil }
+        let url = EventSessionInstaller.root.appendingPathComponent("extract-frame")
+        let body = "#!/bin/sh\nexec \"\(exe)\" \(FrameExtractor.flag) \"$@\"\n"
+        do {
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        } catch {
+            return nil
+        }
+        return url
     }
 
     /// 引擎的标准错误(管线自己的进度输出、报错)接到 <工作目录>/engine.log;超过 20 MB 就从头写。
