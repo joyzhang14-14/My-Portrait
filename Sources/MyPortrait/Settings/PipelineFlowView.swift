@@ -51,6 +51,8 @@ struct PipelineFlowView: View {
     let flow: PipelineFlow
     /// 正在跑的那一格(step id):高亮边框 + 呼吸 + 右上角 running 小标。只有 EventSession 那张图传。
     var active: String? = nil
+    /// 没在跑、停在这一格(step id):右上角灰色 paused 小标。
+    var paused: String? = nil
 
     @State private var selected: String? = nil
 
@@ -127,6 +129,14 @@ struct PipelineFlowView: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.accentColor))
+                        .offset(x: 4, y: -7)
+                } else if paused == s.id {
+                    Text("paused")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary.opacity(0.75))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Theme.textPrimary.opacity(0.18)))
                         .offset(x: 4, y: -7)
                 } else if let loop = s.loop {
                     Text(loop)

@@ -64,6 +64,12 @@ actor EventSessionWorker {
         }
         let pending = Self.hasPendingDay(sinceMs: since, skip: ["days_done"])
         await setStatus(running: false, waiting: reason ?? (pending ? "Waiting" : "Up to date"))
+        let paused = pending ? Self.pausedStep(sinceMs: since) : nil
+        let prog = Self.progress(sinceMs: since)
+        await MainActor.run {
+            EventSessionStatus.shared.pausedAt = paused
+            EventSessionStatus.shared.progress = prog
+        }
     }
 
     /// 开跑前每 6 小时查一次引擎 / 运行环境有没有新版。
@@ -167,6 +173,10 @@ actor EventSessionWorker {
             switch ev {
             case "session":
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
+            case "progress", "day_done":
+                let since = es.sinceMs
+                let prog = Self.progress(sinceMs: since)
+                await MainActor.run { EventSessionStatus.shared.progress = prog }
             case "stage":
                 let step = Self.flowStep(obj["stage"] as? String)
                 await MainActor.run { EventSessionStatus.shared.stage = step }
@@ -279,6 +289,80 @@ actor EventSessionWorker {
         return h
     }
 
+    /// 引擎要跑的天(起点到昨天里没做完的,加上它自己准备过的)的进度:正在做 / 停在第几天、那天的会话数、
+    /// 已准备好的天合计的帧数,最近 40 帧的平均秒数。没有要跑的天回 nil。
+    private static func progress(sinceMs: Int64) -> EventSessionProgress? {
+        let work = Storage.pipelineDir.appendingPathComponent("eventsession", isDirectory: true)
+        let st = (try? JSONSerialization.jsonObject(with: Data(contentsOf: work.appendingPathComponent("engine_state.json")))) as? [String: Any] ?? [:]
+        let done = Set(st["days_done"] as? [String] ?? []), prepared = Set(st["days_prepared"] as? [String] ?? [])
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        fmt.calendar = cal
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        var days: [String] = []
+        var d = cal.startOfDay(for: Date(timeIntervalSince1970: Double(sinceMs) / 1000))
+        let today = cal.startOfDay(for: Date())
+        while d < today {
+            let day = fmt.string(from: d)
+            if !done.contains(day) || prepared.contains(day) { days.append(day) }
+            d = cal.date(byAdding: .day, value: 1, to: d) ?? today
+        }
+        guard !days.isEmpty else { return nil }
+        var p = EventSessionProgress()
+        p.days = days.count
+        let fm = FileManager.default
+        for (i, day) in days.enumerated() {
+            let dir = work.appendingPathComponent("runs/day_\(day)")
+            let sel = (try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("select.json")))) as? [String: Any]
+            let fids = sel?["fids"] as? [String: [Int]] ?? [:]
+            let obs = Set(((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+                .filter { $0.hasPrefix("obs_s") && $0.hasSuffix(".json") }
+                .map { String($0.dropFirst(5).dropLast(5)) })
+            p.frames += fids.values.reduce(0) { $0 + $1.count }
+            p.framesDone += done.contains(day) ? fids.values.reduce(0) { $0 + $1.count }
+                                               : fids.filter { obs.contains($0.key) }.values.reduce(0) { $0 + $1.count }
+            if p.day.isEmpty, !done.contains(day) {
+                p.day = day
+                p.dayIndex = i + 1
+                p.sessions = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("manifest.json")))) as? [Any])?.count ?? 0
+                p.sessionsDone = obs.count
+                let log = (try? String(contentsOf: dir.appendingPathComponent("infer_log.jsonl"), encoding: .utf8)) ?? ""
+                let secs = log.split(separator: "\n").suffix(80).compactMap {
+                    (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+                }.filter { $0["stage"] as? String == "observe" }.compactMap { $0["sec"] as? Double }.suffix(40)
+                if !secs.isEmpty { p.secPerFrame = secs.reduce(0, +) / Double(secs.count) }
+            }
+        }
+        return p.day.isEmpty ? nil : p
+    }
+
+    /// 没在跑、还有没做完的天时,停在哪一格:最早那个没做完的天还没准备 → cut;观察没看完 → observe;看完了 → summarize。
+    private static func pausedStep(sinceMs: Int64) -> String? {
+        let work = Storage.pipelineDir.appendingPathComponent("eventsession", isDirectory: true)
+        let st = (try? JSONSerialization.jsonObject(with: Data(contentsOf: work.appendingPathComponent("engine_state.json")))) as? [String: Any] ?? [:]
+        let done = Set(st["days_done"] as? [String] ?? []), prepared = Set(st["days_prepared"] as? [String] ?? [])
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        fmt.calendar = cal
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        var d = cal.startOfDay(for: Date(timeIntervalSince1970: Double(sinceMs) / 1000))
+        let today = cal.startOfDay(for: Date())
+        while d < today {
+            let day = fmt.string(from: d)
+            if !done.contains(day) {
+                guard prepared.contains(day) else { return "cut" }
+                let dir = work.appendingPathComponent("runs/day_\(day)")
+                let n = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("manifest.json")))) as? [Any])?.count ?? 0
+                let obs = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("obs_s") }.count
+                return obs < n ? "observe" : "summarize"
+            }
+            d = cal.date(byAdding: .day, value: 1, to: d) ?? today
+        }
+        return nil
+    }
+
     /// 引擎的阶段 → How it works 图里的那一格(PipelineFlow.eventSession 的 step id)。
     private static func flowStep(_ stage: String?) -> String? {
         switch stage {
@@ -346,6 +430,22 @@ actor EventSessionWorker {
     }
 }
 
+/// 引擎要跑的天的进度(设置页 How it works 上面那一行和进度条)。
+struct EventSessionProgress: Equatable {
+    /// 正在做 / 停在的那天、它是第几天(1 起)、一共几天。
+    var day = ""
+    var dayIndex = 0
+    var days = 0
+    /// 那天看完的会话 / 会话总数。
+    var sessionsDone = 0
+    var sessions = 0
+    /// 已准备好的天合计:看完的帧 / 要看的帧。
+    var framesDone = 0
+    var frames = 0
+    /// 最近 40 帧平均每帧秒数(还没看过就是 nil)。
+    var secPerFrame: Double?
+}
+
 /// EventSession 的运行状态,给设置页读。
 @MainActor @Observable
 final class EventSessionStatus {
@@ -358,6 +458,9 @@ final class EventSessionStatus {
     var dial = 0.5
     /// 正在跑的那一步(How it works 图的 step id);没在跑 = nil。
     var stage: String?
+    /// 没在跑、还有活时停在哪一步(同上的 step id)。
+    var pausedAt: String?
+    var progress: EventSessionProgress?
 }
 
 /// Timeline 的 Event session 卡读结果:先用当前这一帧查它属于哪个会话(`session_frames`);

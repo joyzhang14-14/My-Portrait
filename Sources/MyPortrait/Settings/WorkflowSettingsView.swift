@@ -1044,9 +1044,38 @@ struct WorkflowSettingsView: View {
             title: "How it works",
             info: "Every step this part of the pipeline runs, left to right. Click any step to see what it does."
         ) {
-            PipelineFlowView(flow: flow, active: flow.lanes.first?.steps.first?.id == "input"
-                             ? EventSessionStatus.shared.stage : nil)
+            let es = flow.lanes.first?.steps.first?.id == "input"
+            if es, let p = EventSessionStatus.shared.progress { eventSessionProgress(p) }
+            PipelineFlowView(flow: flow, active: es ? EventSessionStatus.shared.stage : nil,
+                             paused: es && EventSessionStatus.shared.stage == nil ? EventSessionStatus.shared.pausedAt : nil)
         }
+    }
+
+    /// 第几天 / 共几天 · 那天的会话进度,下面一条总进度条(按帧),右边剩余帧数和按最近速度估的时间。
+    private func eventSessionProgress(_ p: EventSessionProgress) -> some View {
+        let dayLabel: String = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd"
+            guard let d = f.date(from: p.day) else { return p.day }
+            f.dateFormat = "MMM d"
+            return f.string(from: d)
+        }()
+        let left = max(0, p.frames - p.framesDone)
+        let eta = p.secPerFrame.map { Double(left) * $0 / 3600 }.map { $0 >= 1 ? "about \(Int($0.rounded())) h left" : "about \(max(1, Int(($0 * 60).rounded()))) min left" }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 0) {
+                Text("Day \(p.dayIndex) of \(p.days)").font(.system(size: 12, weight: .semibold))
+                Text(" · \(dayLabel) · \(p.sessionsDone) of \(p.sessions) sessions")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(p.framesDone.formatted()) of \(p.frames.formatted()) frames" + (eta.map { " · \($0)" } ?? ""))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            ProgressView(value: Double(p.framesDone), total: Double(max(p.frames, 1)))
+                .progressViewStyle(.linear)
+        }
+        .padding(.bottom, 4)
     }
 
     // MARK: - 事件待审核:按 folder 分组
