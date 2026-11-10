@@ -24,6 +24,12 @@ final class TimelineState {
     var prevTail: [TimelineFrame] = []
     var nextHead: [TimelineFrame] = []
     static let edgeFrames = 150
+    /// 跨天时先用手上已有的那段接过去(cross),整天的帧随后由 reload 补齐;补齐时焦点停在那一刻正看的帧上。
+    var keepFocus = false
+    /// 下一次焦点变化按这个步数做帧条过渡:跨天那一步下标大跳,画面上只走了几帧。
+    var stepHint: Int?
+    /// 当天的帧被整段换成跨天接上的那段时 +1,界面据此重算圆盘 / 统计。
+    var framesVersion = 0
 
     /// 连贯下标:0..<frames.count 是当天;负数落在前一天末尾,≥ count 落在后一天开头。
     var lowIndex: Int { -prevTail.count }
@@ -45,9 +51,31 @@ final class TimelineState {
             focusIndex = j
             return true
         }
-        guard let f = frame(at: j) else { return false }
-        seek(to: f.timestamp)
+        guard frame(at: j) != nil else { return false }
+        cross(to: j)
         return true
+    }
+
+    /// 拨过午夜:相邻那天已取好的一段直接换成当天的帧,刚离开的那天留在帧条另一头;选中的天跟着换,
+    /// reload 随后补齐整天(keepFocus),中间不停顿、不闪。
+    private func cross(to j: Int) {
+        let forward = j >= frames.count
+        let part = forward ? nextHead : prevTail
+        let k = forward ? j - frames.count : prevTail.count + j
+        guard part.indices.contains(k) else { return }
+        stepHint = j - focusIndex
+        if forward {
+            prevTail = Array(frames.suffix(Self.edgeFrames))
+            nextHead = []
+        } else {
+            nextHead = Array(frames.prefix(Self.edgeFrames))
+            prevTail = []
+        }
+        keepFocus = true
+        frames = part
+        focusIndex = k
+        framesVersion &+= 1
+        selectedDay = Calendar.current.startOfDay(for: part[k].timestamp)
     }
 
     /// 手动换天(日历 / 日期两边的箭头):落在那天第一帧。
@@ -197,9 +225,12 @@ struct TimelineView: View {
         .onReceive(NotificationCenter.default.publisher(for: .rightArrowPressed)) { arrow(1, $0) }
         // focusIndex 一变:选帧竖线做一段转动过渡。
         .onChange(of: state.focusIndex) { old, new in
-            animateTicks(new - old)
+            animateTicks(state.stepHint ?? (new - old))
+            state.stepHint = nil
             warmPreviews()
         }
+        // 跨天先接上的那段:圆盘 / 统计 / Event session 卡先按它算,整天补齐后 reload 再算一遍
+        .onChange(of: state.framesVersion) { model = DayModel(frames: state.frames, moments: []) }
         // 换天时保持当前视图(聚焦视图换天后停在那天的帧上;那天没有帧时按圆盘画,见 isFocused)
         .task(id: state.selectedDay) { ui.calendarOpen = false; reload() }
         // 焦点停稳 180ms 才做旁路活:预取前后各 5 帧 + 四周列表取数。拨帧时每步
@@ -367,23 +398,34 @@ struct TimelineView: View {
             // 已有更新的 reload(快速切天),丢弃这次旧天结果 —— 否则慢的旧天
             // 查询迟到会盖掉新天 frames,日期栏显示新天、画面却是旧天。
             guard token == state.reloadToken else { return }
+            // 跨天接上来的:焦点停在补齐这一刻正看的帧(换 frames 之前读)
+            let keep = state.keepFocus ? currentFrame?.timestamp : keepTimestamp
+            state.keepFocus = false
+            let cal = Calendar.current
+            // 两头那段还是相邻那天的就留着(跨天时刚离开的那天),不先清空再取回来
+            if let last = state.prevTail.last,
+               !cal.isDate(last.timestamp, inSameDayAs: cal.date(byAdding: .day, value: -1, to: day) ?? day) {
+                state.prevTail = []
+            }
+            if let first = state.nextHead.first,
+               !cal.isDate(first.timestamp, inSameDayAs: cal.date(byAdding: .day, value: 1, to: day) ?? day) {
+                state.nextHead = []
+            }
             model = DayModel(frames: fetched, moments: moments)
             audioMoments = moments
-            state.prevTail = []
-            state.nextHead = []
             state.frames = fetched
             // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
             if let target = state.pendingSeek {
                 state.snapFocus(to: target)   // 最近帧;空帧内部 guard
                 state.pendingSeek = nil        // 清掉,免得后续同天 reload 又吸到旧目标
-            } else if let keep = keepTimestamp, !fetched.isEmpty {
-                state.snapFocus(to: keep)      // 后台刷新:吸附回原来那一帧
+            } else if let keep, !fetched.isEmpty {
+                state.stepHint = 0             // 还是同一帧,只是下标换了:帧条不做过渡
+                state.snapFocus(to: keep)      // 后台刷新 / 跨天补齐:吸附回原来那一帧
             } else {
                 state.focusIndex = max(fetched.count - 1, 0)
             }
             state.loading = false
             // 前一天末尾 / 后一天开头接在帧条两头(主帧先出来,这两段随后补上)
-            let cal = Calendar.current
             guard let prevDay = cal.date(byAdding: .day, value: -1, to: day),
                   let nextDay = cal.date(byAdding: .day, value: 1, to: day) else { return }
             let prev = await TimelineFeed.framesForDay(prevDay, db: db)
