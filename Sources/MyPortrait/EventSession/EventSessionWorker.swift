@@ -160,13 +160,16 @@ actor EventSessionWorker {
             ?? (model.flatMap { try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json"))) }
                 as? [String: Any])?["name"] as? String ?? model?.lastPathComponent ?? ""
         var last = Date()
-        // 关掉开关或换了 provider:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做)
-        let startSource = es.source
+        // 关掉开关,或换了 provider / 模型 / 运行时间档:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做),
+        // 下一轮按新设置重新过闸。Daily limit / Detail 只管还没准备的天,改了不停。
+        let started = es
         let cfgWatch = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                 let now = await MainActor.run { ConfigStore.shared.current.eventSession }
-                if !now.enabled || now.source != startSource, p.isRunning { p.terminate(); break }
+                let changed = !now.enabled || now.source != started.source || now.model != started.model
+                    || now.powerMode != started.powerMode
+                if changed, p.isRunning { p.terminate(); break }
             }
         }
         let dog = Task {
