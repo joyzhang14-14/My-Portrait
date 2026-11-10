@@ -20,6 +20,43 @@ final class TimelineState {
     /// 旧天慢查询可能晚于新天空查询返回,把 frames 盖成旧天的 —— 取数前 +1
     /// 记 token,回来对不上就丢弃。
     var reloadToken = 0
+    /// 跨天连贯(11-10):前一天最后 / 后一天最前 `edgeFrames` 帧,接在帧条两头;拨过午夜就切到那一天。
+    var prevTail: [TimelineFrame] = []
+    var nextHead: [TimelineFrame] = []
+    static let edgeFrames = 150
+
+    /// 连贯下标:0..<frames.count 是当天;负数落在前一天末尾,≥ count 落在后一天开头。
+    var lowIndex: Int { -prevTail.count }
+    var highIndex: Int { frames.count - 1 + nextHead.count }
+    func frame(at i: Int) -> TimelineFrame? {
+        if frames.indices.contains(i) { return frames[i] }
+        if i < 0, prevTail.indices.contains(prevTail.count + i) { return prevTail[prevTail.count + i] }
+        if i >= frames.count, nextHead.indices.contains(i - frames.count) { return nextHead[i - frames.count] }
+        return nil
+    }
+
+    /// 拨到连贯下标 i:当天内直接换焦点;落到相邻那天就切过去,停在那一帧。换天还没加载完时不再动。
+    @discardableResult
+    func move(to i: Int) -> Bool {
+        guard pendingSeek == nil, !frames.isEmpty else { return false }
+        let j = max(lowIndex, min(highIndex, i))
+        if frames.indices.contains(j) {
+            guard j != focusIndex else { return false }
+            focusIndex = j
+            return true
+        }
+        guard let f = frame(at: j) else { return false }
+        seek(to: f.timestamp)
+        return true
+    }
+
+    /// 手动换天(日历 / 日期两边的箭头):落在那天第一帧。
+    func showDay(_ d: Date) {
+        let day = Calendar.current.startOfDay(for: d)
+        guard !Calendar.current.isDate(day, inSameDayAs: selectedDay) else { return }
+        selectedDay = day
+        pendingSeek = day
+    }
 
     /// Navigate the Timeline to the moment `t`. If we're already on the right
     /// day, snap focusIndex to the nearest frame; otherwise switch days and
@@ -207,20 +244,22 @@ struct TimelineView: View {
         let state = self.state, px = shotPx
         let step: @MainActor () -> Bool = {
             let old = state.focusIndex
-            let new = dir < 0
-                ? (alt ? Self.previousAppBoundary(in: state.frames, from: old) : max(0, old - 1))
-                : (alt ? Self.nextAppBoundary(in: state.frames, from: old) : min(state.frames.count - 1, old + 1))
-            state.focusIndex = new
-            // 顺着方向预解后面 8 帧清晰图(在解的/已缓存的跳过),播放时每帧都是清晰图
-            if !alt, new != old {
-                for i in 1...8 {
-                    let j = new + dir * i
-                    guard state.frames.indices.contains(j) else { break }
-                    ImageThumbnailCache.shared.prefetch(state.frames[j], targetPixelSize: px,
-                                                        priority: .userInitiated)
-                }
+            if alt {
+                let new = dir < 0 ? Self.previousAppBoundary(in: state.frames, from: old)
+                                  : Self.nextAppBoundary(in: state.frames, from: old)
+                state.focusIndex = new
+                return new != old
             }
-            return new != old
+            // 一帧一帧走可以拨过午夜(move 会切到相邻那天)
+            guard state.move(to: old + dir) else { return false }
+            // 顺着方向预解后面 8 帧清晰图(在解的/已缓存的跳过),播放时每帧都是清晰图
+            for i in 1...8 {
+                let j = state.focusIndex + dir * i
+                guard state.frames.indices.contains(j) else { break }
+                ImageThumbnailCache.shared.prefetch(state.frames[j], targetPixelSize: px,
+                                                    priority: .userInitiated)
+            }
+            return true
         }
         _ = step()
         ui.play(key: dir < 0 ? 123 : 124, step: step)
@@ -230,9 +269,9 @@ struct TimelineView: View {
         (note.userInfo?["isRepeat"] as? Bool) ?? false
     }
 
+    /// 连贯下标(见 TimelineState.move):帧条上点到相邻那天的帧也能过去。
     private func setFocus(_ i: Int) {
-        guard !state.frames.isEmpty else { return }
-        state.focusIndex = max(0, min(state.frames.count - 1, i))
+        state.move(to: i)
     }
 
     private func seek(_ t: Date) {
@@ -304,14 +343,17 @@ struct TimelineView: View {
     }
 
     /// `preserveFocus`:后台 compaction 顺带触发的刷新传 true —— 保住正看的
-    /// 那一帧(按时间戳吸附回最近帧),不甩到最新帧。主动切天传 false(默认),
-    /// 落到当天最后一帧。
+    /// 那一帧(按时间戳吸附回最近帧),不甩到最新帧。手动换天走 pendingSeek 落到当天第一帧
+    /// (TimelineState.showDay);刚打开时没有目标,落到最后一帧。
     private func reload(preserveFocus: Bool = false) {
         state.loading = true
         let day = state.selectedDay
         // 异步 fetch 前先记下当前帧时间戳(读的是旧 frames/focusIndex)。
         let keepTimestamp: Date? = preserveFocus ? currentFrame?.timestamp : nil
         guard let db = services?.db else {
+            state.pendingSeek = nil
+            state.prevTail = []
+            state.nextHead = []
             state.frames = []
             model = DayModel()
             state.loading = false
@@ -327,6 +369,8 @@ struct TimelineView: View {
             guard token == state.reloadToken else { return }
             model = DayModel(frames: fetched, moments: moments)
             audioMoments = moments
+            state.prevTail = []
+            state.nextHead = []
             state.frames = fetched
             // 优先级:跨天 seek > 后台刷新保焦点 > 默认落最后一帧。
             if let target = state.pendingSeek {
@@ -338,6 +382,15 @@ struct TimelineView: View {
                 state.focusIndex = max(fetched.count - 1, 0)
             }
             state.loading = false
+            // 前一天末尾 / 后一天开头接在帧条两头(主帧先出来,这两段随后补上)
+            let cal = Calendar.current
+            guard let prevDay = cal.date(byAdding: .day, value: -1, to: day),
+                  let nextDay = cal.date(byAdding: .day, value: 1, to: day) else { return }
+            let prev = await TimelineFeed.framesForDay(prevDay, db: db)
+            let next = cal.startOfDay(for: nextDay) <= Date() ? await TimelineFeed.framesForDay(nextDay, db: db) : []
+            guard token == state.reloadToken else { return }
+            state.prevTail = Array(prev.suffix(TimelineState.edgeFrames))
+            state.nextHead = Array(next.prefix(TimelineState.edgeFrames))
         }
     }
 
@@ -389,7 +442,7 @@ struct TimelineView: View {
             let dir = ui.wheelAcc > 0 ? 1 : -1
             ui.wheelAcc = 0
             if ui.canStep() {
-                state.focusIndex = max(0, min(state.frames.count - 1, state.focusIndex + dir))
+                state.move(to: state.focusIndex + dir)
             }
             return nil
         }
@@ -634,19 +687,22 @@ struct TimelineView: View {
     /// 这样进出只是同一批视图的高度动画,没有插入 / 移除。整层 drawingGroup 合成、
     /// 不接点击,点击由 stripHitArea 按横坐标换算成帧号。
     private func stripLayer(_ g: RingGeo, fm: Bool) -> some View {
-        let frames = state.frames, col = Self.stripCol
-        let f = min(max(0, state.focusIndex), frames.count - 1)
+        // 连贯下标:两头接着前一天末尾 / 后一天开头(TimelineState.frame(at:)),午夜不断开
+        let state = self.state, col = Self.stripCol
+        let f = min(max(0, state.focusIndex), state.frames.count - 1)
         let half = g.stripW / 2
         let span = Int(half / col) + 2
-        let lo = max(0, f - span), hi = min(frames.count - 1, f + span)
+        let lo = max(state.lowIndex, f - span), hi = min(state.highIndex, f + span)
+        var apps: [Int: String] = [:]
+        for i in lo...hi { apps[i] = state.frame(at: i)?.appName ?? "" }
         var icons = Set<Int>()
         var lastIcon = -99
-        for i in lo...hi where (i == 0 || frames[i - 1].appName != frames[i].appName) && i - lastIcon >= 2 {
+        for i in lo...hi where (i == lo || apps[i - 1] != apps[i]) && i - lastIcon >= 2 {
             icons.insert(i); lastIcon = i
         }
         return ZStack(alignment: .topLeading) {
             ForEach(Array(lo...hi), id: \.self) { i in
-                stripBar(i, app: frames[i].appName, f: f, g: g, fm: fm, half: half, icon: icons.contains(i))
+                stripBar(i, app: apps[i] ?? "", f: f, g: g, fm: fm, half: half, icon: icons.contains(i))
             }
         }
         .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
@@ -666,7 +722,7 @@ struct TimelineView: View {
         let delay: Double = fm ? min(0.12, Double(d) * 0.004) : 0.03
         // 往窗口底边下多伸 6pt,藏掉竖条底下的圆角
         let boxH: CGFloat = RingGeo.stripH + 6
-        let barH: CGFloat = fm ? (cur ? 106 : 62) : 0
+        let barH: CGFloat = fm ? (cur ? 94 : 55) : 0
         let glow = cur && fm
         ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -712,13 +768,13 @@ struct TimelineView: View {
     // MARK: Inside the circle
 
     private var dayBinding: Binding<Date> {
-        Binding(get: { state.selectedDay }, set: { state.selectedDay = $0 })
+        Binding(get: { state.selectedDay }, set: { state.showDay($0) })
     }
 
     private func shiftDay(_ n: Int) {
         guard let d = Calendar.current.date(byAdding: .day, value: n, to: state.selectedDay),
               d <= Date() else { return }
-        state.selectedDay = d
+        state.showDay(d)
     }
 
     private func datePill(_ g: RingGeo, _ sl: ShotLayout) -> some View {
@@ -1325,12 +1381,12 @@ struct RingGeo {
     }
     func dist(_ p: CGPoint) -> CGFloat { hypot(p.x - c.x, p.y - c.y) }
 
-    /// 聚焦条带高度(图标槽 32 + 竖条最高 100 + 余量)。
-    static let stripH: CGFloat = 140
+    /// 聚焦条带高度(图标槽 32 + 竖条最高 88 + 余量)。
+    static let stripH: CGFloat = 124
 
     /// 聚焦视图左列右沿 / 右列左沿(占窗口宽的比例)。
-    static let focusLeftR: CGFloat = 0.21
-    static let focusRightL: CGFloat = 0.785
+    static let focusLeftR: CGFloat = 0.19
+    static let focusRightL: CGFloat = 0.81
     /// 聚焦视图里左右两列之间的空地(两侧各留 16pt),截图放在这一段。
     var midL: CGFloat { size.width * Self.focusLeftR + 16 }
     var midR: CGFloat { size.width * Self.focusRightL - 16 }
@@ -1348,7 +1404,7 @@ struct RingGeo {
                               infoY: c.y - h / 2 - 11 * fk - 10 * k,
                               urlY: c.y - 262 * k, pillY: c.y - 312 * k)
         }
-        let infoGap = 11 * fk + 10 * k, urlGap = 36 * k, pillGap = 44 * k
+        let infoGap = 11 * fk + 10 * k, urlGap = 30 * k, pillGap = 36 * k
         let top = 50 + 17 * k + pillGap + urlGap + infoGap
         let bottom = size.height - Self.stripH - 12
         let cy = min(c.y - 12 * k, (top + bottom) / 2)
