@@ -131,7 +131,7 @@ actor EventSessionWorker {
             switch ev {
             case "session":
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
-            case "plan":
+            case "plan", "day_plan":
                 await setPlan(obj)
             case "llm":
                 guard let cloud, let id = obj["id"] as? Int else { break }
@@ -243,14 +243,19 @@ actor EventSessionWorker {
         }
     }
 
+    /// plan = 待处理的天;day_plan = 正在做的这天的减负方案(待看帧数 / 扔掉的会话 / 挑帧比例)。
     private func setPlan(_ obj: [String: Any]) async {
+        let days = (obj["days"] as? [String])?.count
+        let dayPlan = obj["event"] as? String == "day_plan"
         let frames = obj["frames"] as? Int ?? 0, shed = obj["shed"] as? Int ?? 0, dial = obj["dial"] as? Double ?? 0.5
-        let days = (obj["days"] as? [String])?.count ?? 0
         await MainActor.run {
-            EventSessionStatus.shared.pendingDays = days
-            EventSessionStatus.shared.pendingFrames = frames
-            EventSessionStatus.shared.shedSessions = shed
-            EventSessionStatus.shared.dial = dial
+            let st = EventSessionStatus.shared
+            if let days { st.pendingDays = days }
+            if dayPlan {
+                st.pendingFrames = frames
+                st.shedSessions = shed
+                st.dial = dial
+            }
         }
     }
 }

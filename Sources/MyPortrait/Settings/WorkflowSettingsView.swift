@@ -1616,7 +1616,7 @@ struct WorkflowSettingsView: View {
             set: { on in
                 cfg.mutate {
                     $0.eventSession.enabled = on
-                    if on { $0.eventSession.sinceMs = Int64(Date().timeIntervalSince1970 * 1000) }
+                    if on { $0.eventSession.sinceMs = Self.eventSessionStart() }
                     if on, elig == .notEligible, $0.eventSession.isLocal {
                         $0.eventSession.source = clouds.first?.rawValue ?? ""
                     }
@@ -1629,7 +1629,7 @@ struct WorkflowSettingsView: View {
         let premium = es.source == Provider.premium.rawValue
         return section(
             title: "EventSession",
-            info: "Summarizes each session from everything captured — screen, focus, keys & mouse and screen text — before events are built.\n\nOnly sessions after you turn this on are processed.",
+            info: "Summarizes each session from everything captured — screen, focus, keys & mouse and screen text — before events are built.\n\nWhen you turn this on, it picks up right after the last day Event Merge has already processed.",
             titleTrailing: {
                 Toggle("", isOn: enabled).labelsHidden().toggleStyle(.switch)
             }
@@ -1652,8 +1652,8 @@ struct WorkflowSettingsView: View {
                 }
                 eventSessionProviderRows(elig: elig, clouds: clouds)
                 eventSessionWhenRow(elig: elig, ready: ready && !premium)
-                levelRow("Catch-up size",
-                         info: "How much waiting work EventSession takes on at once. When more than this is waiting, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but takes longer to catch up.",
+                levelRow("Daily limit",
+                         info: "How many screenshots EventSession looks at for one day. When a day has more than this, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but each day takes longer.",
                          low: "Less", high: "More",
                          index: Self.nearest(Double(es.frameBudget), EventSessionConfig.budgetLevels.map(Double.init)),
                          set: { i in cfg.mutate { $0.eventSession.frameBudget = EventSessionConfig.budgetLevels[i] } })
@@ -1665,6 +1665,12 @@ struct WorkflowSettingsView: View {
             }
             .onAppear { installer.refresh(local: es.isLocal) }
         }
+    }
+
+    /// 开启时的起点:Event Merge 已处理到的料的截止时刻;还没处理过任何料就从现在起。
+    private static func eventSessionStart() -> Int64 {
+        let settled = PipelineSettle.events
+        return Int64((settled.timeIntervalSince1970 > 0 ? settled : Date()).timeIntervalSince1970 * 1000)
     }
 
     private static func nearest(_ v: Double, _ levels: [Double]) -> Int {

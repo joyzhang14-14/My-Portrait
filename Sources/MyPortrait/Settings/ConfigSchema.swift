@@ -1138,8 +1138,8 @@ struct PremiumConfig: Codable, Equatable {
 // MARK: - EventSession
 
 /// EventSession(workflow 第 1 层:每个会话先总结)的设置(Settings ▸ Workflow ▸ Event Session)。
-/// 只处理开启之后的会话(`sinceMs`);积压按帧数减负(`frameBudget`,先扔单帧会话、再把每个会话的挑帧比例
-/// 从 `dialMax` 往下降,最低 0.2)。本机模型能不能用、能选哪些运行时间看物理内存(`EventSessionEligibility`);
+/// 从 `sinceMs` 起处理(开启时设成 Event Merge 已处理到的时刻,`PipelineSettle.events`);一天的待看帧数超过
+/// `frameBudget` 就减负(只看这一天:先扔单帧会话、再把每个会话的挑帧比例从 `dialMax` 往下降,最低 0.2)。本机模型能不能用、能选哪些运行时间看物理内存(`EventSessionEligibility`);
 /// 云端 provider 不看内存。两个减负参数界面上只露 5 档(`budgetLevels` / `detailLevels`)。
 struct EventSessionConfig: Codable, Equatable {
     var enabled: Bool = false
@@ -1149,18 +1149,18 @@ struct EventSessionConfig: Codable, Equatable {
     var model: String = ""
     /// 什么时候跑,见 `EventSessionRunMode`。
     var powerMode: EventSessionRunMode = .chargingIdle
-    /// 待看帧数上限,超了就减负。
-    var frameBudget: Int = 2000
+    /// 一天的待看帧数上限,超了就减负。
+    var frameBudget: Int = 1500
     /// 每个会话挑帧比例的上限(下限固定 0.2)。
     var dialMax: Double = 0.5
-    /// 开启的时刻(UTC 毫秒),之前的会话不处理;每次打开开关重设。
+    /// 起点(UTC 毫秒),之前的会话不处理;每次打开开关重设成 Event Merge 已处理到的时刻。
     var sinceMs: Int64 = 0
     /// 下发包的根地址(manifest.json 所在目录)。
     var downloadBase: String = "https://models.joyzhang14.com/eventsession"
 
     static let dialMin = 0.2
-    /// 「Catch-up size」5 档对应的待看帧数上限;「Detail」5 档对应的挑帧比例上限。默认都是第 3 档。
-    static let budgetLevels = [1000, 1500, 2000, 3000, 5000]
+    /// 「Daily limit」5 档对应的一天待看帧数上限;「Detail」5 档对应的挑帧比例上限。默认都是第 3 档。
+    static let budgetLevels = [750, 1000, 1500, 2000, 3000]
     static let detailLevels = [0.2, 0.35, 0.5, 0.75, 1.0]
 
     var isLocal: Bool { source == "local" }
