@@ -191,7 +191,7 @@ enum DBSchema {
         return m
     }
 
-    // MARK: - eventsession/session.sqlite3
+    // MARK: - eventsession/session.sqlite
 
     /// EventSession 的结果(`~/.portrait/eventsession/`):一行一个会话,kind = summary(模型总结)/ blocked(屏蔽 app 段)/
     /// shed(减负扔掉、只留确定性记录)。day 是跑批时按本机时区算的本地日;record 是引擎给的整条 JSON。
