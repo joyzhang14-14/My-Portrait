@@ -11,6 +11,8 @@ import os.log
 /// 云端 provider:引擎每要调一次模型就发 `llm` 请求,这里用 Connections 里连好的服务调(`EventSessionCloud`),
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
 /// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
+/// 不用模型的几步(入库分会话 / 键鼠 / 选帧 / 打包)单独做(11-10 update):天一过完、电脑醒着就用引擎的 prepare 命令做掉,
+/// 不看电源和内存;模型的闸一开,run 直接从观察开始。
 /// 没有过完、还没做的天就不起引擎;引擎回 idle(那天 OCR 还没补完)后 15 分钟内不再起。
 /// 结果写 `~/.portrait/eventsession/session.sqlite` 的 event_sessions。引擎卡住 `watchdog` 秒没出声就结束它(按 Process 句柄,不按名字)。
 actor EventSessionWorker {
@@ -23,6 +25,7 @@ actor EventSessionWorker {
     private var loop: Task<Void, Never>?
     private var awake = false
     private var idleUntil = Date.distantPast
+    private var prepIdleUntil = Date.distantPast
     private var nextUpdateCheck = Date.distantPast
 
     func start() {
@@ -41,17 +44,10 @@ actor EventSessionWorker {
     }
 
     private func tick() async {
-        guard let reason = await gate() else {
-            let since = await MainActor.run { ConfigStore.shared.current.eventSession.sinceMs }
-            guard Date() >= idleUntil, Self.hasPendingDay(sinceMs: since) else {
-                await setStatus(running: false, waiting: "Up to date")
-                return
-            }
-            if Date() >= nextUpdateCheck {                      // 开跑前每 6 小时查一次引擎 / 运行环境有没有新版
-                nextUpdateCheck = Date().addingTimeInterval(6 * 3600)
-                let local = await MainActor.run { ConfigStore.shared.current.eventSession.isLocal }
-                await EventSessionInstaller.shared.update(local: local)
-            }
+        let since = await MainActor.run { ConfigStore.shared.current.eventSession.sinceMs }
+        let reason = await gate()
+        if reason == nil, Date() >= idleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done"]) {
+            await checkForUpdate()
             await setStatus(running: true, waiting: nil)
             await holdAwake(true)
             await runChunk()
@@ -60,7 +56,31 @@ actor EventSessionWorker {
             await setStatus(running: false, waiting: nil)
             return
         }
-        await setStatus(running: false, waiting: reason)
+        if await prepareGate(), Date() >= prepIdleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done", "days_prepared"]) {
+            await checkForUpdate()
+            await setStatus(running: false, waiting: "Preparing sessions")
+            await runChunk(prepareOnly: true)
+            MemoryTrim.ifHidden()
+        }
+        let pending = Self.hasPendingDay(sinceMs: since, skip: ["days_done"])
+        await setStatus(running: false, waiting: reason ?? (pending ? "Waiting" : "Up to date"))
+    }
+
+    /// 开跑前每 6 小时查一次引擎 / 运行环境有没有新版。
+    private func checkForUpdate() async {
+        guard Date() >= nextUpdateCheck else { return }
+        nextUpdateCheck = Date().addingTimeInterval(6 * 3600)
+        let local = await MainActor.run { ConfigStore.shared.current.eventSession.isLocal }
+        await EventSessionInstaller.shared.update(local: local)
+    }
+
+    /// 不用模型的几步能不能做:开着、不是交给 Premium、运行环境装好、机器不过热、延后 OCR 不在跑。不看电源和内存。
+    private func prepareGate() async -> Bool {
+        let es = await MainActor.run { ConfigStore.shared.current.eventSession }
+        guard es.enabled, es.source != Provider.premium.rawValue, EventSessionInstaller.runtimeReady else { return false }
+        let thermal = PowerMonitor.snapshot().thermalState
+        if thermal == .serious || thermal == .critical { return false }
+        return await !MainActor.run(body: { DeferredOCRStatus.shared.running })
     }
 
     /// 能跑回 nil,不能跑回原因(给设置页看)。`running` = 跑到一半的复查:模型自己占着内存,只看压力,不看余量。
@@ -89,12 +109,12 @@ actor EventSessionWorker {
         return nil
     }
 
-    /// 一批:拉起引擎 → run → 收结果,直到 chunk_done / idle / stopped / error 或看门狗到点。
-    private func runChunk() async {
+    /// 一批:拉起引擎 → run(prepareOnly 时 prepare)→ 收结果,直到 chunk_done / idle / stopped / error 或看门狗到点。
+    private func runChunk(prepareOnly: Bool = false) async {
         let es = await MainActor.run { ConfigStore.shared.current.eventSession }
         let cloud = es.isLocal ? nil : Provider(rawValue: es.source)
         let model = EventSessionInstaller.modelDir
-        guard cloud != nil || model != nil else { return }
+        guard prepareOnly || cloud != nil || model != nil else { return }
         let cloudModel = cloud.map { es.model.isEmpty ? $0.defaultModel : es.model } ?? ""
         let p = Process()
         p.executableURL = Self.launcher()
@@ -126,7 +146,7 @@ actor EventSessionWorker {
         var cfg: [String: Any] = ["since_ms": es.sinceMs, "budget": es.frameBudget,
                                   "dial_max": es.dialMax, "dial_min": EventSessionConfig.dialMin]
         if let cloud { cfg["cloud"] = "\(cloud.rawValue)/\(cloudModel)" } else if let model { cfg["model"] = model.path }
-        let cmd: [String: Any] = ["cmd": "run", "cfg": cfg, "max_sessions": chunkSessions]
+        let cmd: [String: Any] = prepareOnly ? ["cmd": "prepare", "cfg": cfg] : ["cmd": "run", "cfg": cfg, "max_sessions": chunkSessions]
         if let data = try? JSONSerialization.data(withJSONObject: cmd) {
             inPipe.fileHandleForWriting.write(data + Data("\n".utf8))
         }
@@ -162,7 +182,7 @@ actor EventSessionWorker {
                     inPipe.fileHandleForWriting.write(data + Data("\n".utf8))
                 }
             case "idle":
-                idleUntil = Date().addingTimeInterval(15 * 60)
+                if prepareOnly { prepIdleUntil = Date().addingTimeInterval(15 * 60) } else { idleUntil = Date().addingTimeInterval(15 * 60) }
                 inPipe.fileHandleForWriting.closeFile()
             case "chunk_done", "stopped":
                 inPipe.fileHandleForWriting.closeFile()
@@ -199,15 +219,16 @@ actor EventSessionWorker {
         }
     }
 
-    /// 有没有已经过完、还没做的本地日(开启那天起到昨天,对照引擎记的 days_done)。没有就不起引擎。
-    private static func hasPendingDay(sinceMs: Int64) -> Bool {
+    /// 有没有已经过完、还没做的本地日(起点那天到昨天,对照引擎记的 `keys` 几张清单:days_done = 做完,days_prepared = 不用模型的几步做完)。
+    private static func hasPendingDay(sinceMs: Int64, skip keys: [String]) -> Bool {
         guard sinceMs > 0 else { return false }
         let cal = Calendar.current
         let first = cal.startOfDay(for: Date(timeIntervalSince1970: Double(sinceMs) / 1000))
         let today = cal.startOfDay(for: Date())
         guard first < today else { return false }
         let state = Storage.pipelineDir.appendingPathComponent("eventsession/engine_state.json")
-        let done = Set(((try? JSONSerialization.jsonObject(with: Data(contentsOf: state))) as? [String: Any])?["days_done"] as? [String] ?? [])
+        let st = (try? JSONSerialization.jsonObject(with: Data(contentsOf: state))) as? [String: Any] ?? [:]
+        let done = Set(keys.flatMap { st[$0] as? [String] ?? [] })
         let fmt = DateFormatter()
         fmt.calendar = cal
         fmt.locale = Locale(identifier: "en_US_POSIX")
