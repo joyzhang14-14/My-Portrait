@@ -216,6 +216,12 @@ actor EventSessionWorker {
                                  "start": Int64(start), "end": Int64(end), "activity": rec["activity"] as? String,
                                  "record": String(decoding: data, as: UTF8.self), "model": model,
                                  "now": Int64(Date().timeIntervalSince1970 * 1000)])
+            let link = try db.cachedStatement(sql: """
+                INSERT OR REPLACE INTO session_frames (frame_id, day, session_key, kind) VALUES (:f, :day, :key, :kind)
+                """)
+            for f in rec["frame_ids"] as? [Int] ?? [] {
+                try link.execute(arguments: ["f": Int64(f), "day": day, "key": Int64(key), "kind": kind])
+            }
         }
     }
 
@@ -337,8 +343,8 @@ final class EventSessionStatus {
     var dial = 0.5
 }
 
-/// Timeline 的 Event session 卡读结果:和 [start, end] 重叠的会话里,同一个 app 的优先,再挑总结、重叠时间最长的那条
-/// (前一个会话的尾巴会和这一段重叠几秒,不能按开始时间挑)。
+/// Timeline 的 Event session 卡读结果:先用当前这一帧查它属于哪个会话(`session_frames`);
+/// 查不到(屏蔽 app 段、减负扔掉的会话没有帧)再在和 [start, end] 重叠的会话里挑:同一个 app 优先,再挑总结、重叠最长的。
 enum EventSessionStore {
     /// 卡片上显示的几项(同设计稿:context_in_app / activity / background / social / who)。减负记录只有 activity 一句说明。
     struct Entry {
@@ -350,7 +356,7 @@ enum EventSessionStore {
         var who: [String] = []
     }
 
-    static func entry(start: Date, end: Date, app: String) -> Entry? {
+    static func entry(frameId: Int64, start: Date, end: Date, app: String) -> Entry? {
         let path = Storage.eventSessionDBPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         var cfg = Configuration()
@@ -359,7 +365,12 @@ enum EventSessionStore {
         let a = Int64(start.timeIntervalSince1970 * 1000), z = Int64(end.timeIntervalSince1970 * 1000)
         return try? q.read { db -> Entry? in
             guard try db.tableExists("event_sessions") else { return nil }
-            let row = try Row.fetchOne(db, sql: """
+            let byFrame = try db.tableExists("session_frames") ? try Row.fetchOne(db, sql: """
+                SELECT e.kind, e.activity, e.record FROM session_frames f
+                JOIN event_sessions e ON e.day = f.day AND e.session_key = f.session_key AND e.kind = f.kind
+                WHERE f.frame_id = :fid
+                """, arguments: ["fid": frameId]) : nil
+            let row = try byFrame ?? Row.fetchOne(db, sql: """
                 SELECT kind, activity, record FROM event_sessions
                 WHERE kind IN ('summary', 'shed') AND start_ms <= :z AND end_ms >= :a
                 ORDER BY app = :app DESC, kind = 'summary' DESC, MIN(end_ms, :z) - MAX(start_ms, :a) DESC LIMIT 1

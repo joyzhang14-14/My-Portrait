@@ -207,6 +207,13 @@ enum DBSchema {
                 """)
             try db.execute(sql: "CREATE INDEX idx_event_sessions_time ON event_sessions(start_ms)")
         }
+        // 帧 → 会话(11-10):一帧只属于一个会话,Timeline 用当前帧直接查,不靠时间重叠去猜。
+        m.registerMigration("eventsession_v2_frames", foreignKeyChecks: .immediate) { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS "session_frames" (
+                    "frame_id" INTEGER PRIMARY KEY, "day" TEXT NOT NULL, "session_key" INTEGER NOT NULL, "kind" TEXT NOT NULL)
+                """)
+        }
         return m
     }
 

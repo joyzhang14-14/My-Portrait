@@ -819,7 +819,7 @@ struct TimelineView: View {
         let focus = currentFrame?.timestamp ?? Date()
         let title = isToday ? "Today" : Fmt.monthDay(state.selectedDay)
         return TimelineCorners(
-            g: g, pal: pal, model: model, focusIndex: state.focusIndex, focusTime: focus,
+            g: g, pal: pal, model: model, focusIndex: state.focusIndex, focusFrameId: currentFrame?.id ?? 0, focusTime: focus,
             dayTitle: title, hideToday: hideToday, apps: activeApps, audio: transcripts, audioMoments: audioMoments,
             hotApp: $hotApp,
             jumpToFrame: { setFocus($0) },
@@ -1612,6 +1612,8 @@ private struct TimelineCorners: View {
     let pal: RingPalette
     let model: DayModel
     let focusIndex: Int
+    /// 当前帧的 frames.id:Event session 卡按它查所属会话。
+    let focusFrameId: Int64
     let focusTime: Date
     let dayTitle: String
     /// 聚焦视图里只收起 Today,另外三个角照常显示、照常跟焦点更新。
@@ -1894,7 +1896,7 @@ private struct TimelineCorners: View {
         let si = model.blockIndex(ofFrame: focusIndex) ?? 0
         guard model.blocks.indices.contains(si) else { return ESInfo(si: si, n: n) }
         let b = model.blocks[si]
-        return ESInfo(si: si, n: n, block: b, entry: EventSessionStore.entry(start: b.start, end: b.end, app: b.app))
+        return ESInfo(si: si, n: n, block: b, entry: EventSessionStore.entry(frameId: focusFrameId, start: b.start, end: b.end, app: b.app))
     }
 
     /// 标题行左边 + 各张卡的位置(整页坐标);bottom = 最后一张卡的底边,Today 跟在它下面。
