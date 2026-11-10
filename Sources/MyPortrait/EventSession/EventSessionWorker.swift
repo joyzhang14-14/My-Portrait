@@ -337,7 +337,8 @@ final class EventSessionStatus {
     var dial = 0.5
 }
 
-/// Timeline 的 Event session 卡读结果:和 [start, end] 重叠、最早开始的那条(总结优先,其次减负记录)。
+/// Timeline 的 Event session 卡读结果:和 [start, end] 重叠的会话里,同一个 app 的优先,再挑总结、重叠时间最长的那条
+/// (前一个会话的尾巴会和这一段重叠几秒,不能按开始时间挑)。
 enum EventSessionStore {
     /// 卡片上显示的几项(同设计稿:context_in_app / activity / background / social / who)。减负记录只有 activity 一句说明。
     struct Entry {
@@ -349,7 +350,7 @@ enum EventSessionStore {
         var who: [String] = []
     }
 
-    static func entry(start: Date, end: Date) -> Entry? {
+    static func entry(start: Date, end: Date, app: String) -> Entry? {
         let path = Storage.eventSessionDBPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         var cfg = Configuration()
@@ -361,8 +362,8 @@ enum EventSessionStore {
             let row = try Row.fetchOne(db, sql: """
                 SELECT kind, activity, record FROM event_sessions
                 WHERE kind IN ('summary', 'shed') AND start_ms <= :z AND end_ms >= :a
-                ORDER BY kind = 'summary' DESC, start_ms LIMIT 1
-                """, arguments: ["a": a, "z": z])
+                ORDER BY app = :app DESC, kind = 'summary' DESC, MIN(end_ms, :z) - MAX(start_ms, :a) DESC LIMIT 1
+                """, arguments: ["a": a, "z": z, "app": app])
             guard let row else { return nil }
             let rec = (try? JSONSerialization.jsonObject(with: Data((row["record"] as String? ?? "").utf8))) as? [String: Any] ?? [:]
             let str = { (k: String) in (rec[k] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }

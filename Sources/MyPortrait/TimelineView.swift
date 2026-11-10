@@ -1894,7 +1894,7 @@ private struct TimelineCorners: View {
         let si = model.blockIndex(ofFrame: focusIndex) ?? 0
         guard model.blocks.indices.contains(si) else { return ESInfo(si: si, n: n) }
         let b = model.blocks[si]
-        return ESInfo(si: si, n: n, block: b, entry: EventSessionStore.entry(start: b.start, end: b.end))
+        return ESInfo(si: si, n: n, block: b, entry: EventSessionStore.entry(start: b.start, end: b.end, app: b.app))
     }
 
     /// 标题行左边 + 各张卡的位置(整页坐标);bottom = 最后一张卡的底边,Today 跟在它下面。
