@@ -1866,6 +1866,8 @@ private struct TimelineCorners: View {
     private var eventSession: some View {
         let n = model.blocks.count
         let si = model.blockIndex(ofFrame: focusIndex) ?? 0
+        let entry = model.blocks.indices.contains(si)
+            ? EventSessionStore.entry(start: model.blocks[si].start, end: model.blocks[si].end) : nil
         return VStack(alignment: .leading, spacing: 2) {
             SectionTitle(pal: pal, title: "Event session", count: nil, action: reset) {
                 HStack(spacing: 2) {
@@ -1876,6 +1878,7 @@ private struct TimelineCorners: View {
             }
             if model.blocks.indices.contains(si) {
                 let b = model.blocks[si]
+                VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 10) {
                         RealAppIcon(appName: b.app, size: 30)
@@ -1888,9 +1891,17 @@ private struct TimelineCorners: View {
                                 .lineLimit(1)
                         }
                     }
-                    if let summary = EventSessionStore.text(start: b.start, end: b.end) {
-                        Text(summary)
-                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.fg)
+                    if let e = entry, e.summarized {
+                        if !e.context.isEmpty {
+                            Text(e.context)
+                                .font(.system(size: 13 * panelFont)).foregroundStyle(pal.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 10)
+                        }
+                        esField("Activity", e.activity, nil).padding(.top, 8)
+                    } else if let e = entry {
+                        Text(e.activity)
+                            .font(.system(size: 14 * panelFont)).foregroundStyle(pal.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 10)
                     } else {
@@ -1903,9 +1914,59 @@ private struct TimelineCorners: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(pal.row))
                 .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(pal.rowb, lineWidth: 1))
+                if let e = entry, e.summarized {
+                    esSmallCard { esField("Background", e.background, "Nothing else on screen") }
+                    esSmallCard { esField("Social", e.social, "None") }
+                    esSmallCard {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Who").font(.system(size: 13 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
+                            if e.who.isEmpty {
+                                Text("No one else").font(.system(size: 13 * panelFont)).foregroundStyle(pal.faint)
+                            } else {
+                                esChips(e.who)
+                            }
+                        }
+                    }
+                }
+                }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { esCardH = $0 }
             }
         }
+    }
+
+    /// Event session 卡里的一项:粗体标题 + 内容;内容空就显示 `empty`(灰字)。
+    private func esField(_ title: String, _ text: String, _ empty: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 13 * panelFont, weight: .semibold)).foregroundStyle(pal.fg)
+            Text(text.isEmpty ? (empty ?? "") : text)
+                .font(.system(size: 14 * panelFont)).foregroundStyle(text.isEmpty ? pal.faint : pal.fg)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Who 的名字小标签,每行最多 4 个。
+    private func esChips(_ names: [String]) -> some View {
+        let rows = stride(from: 0, to: names.count, by: 4).map { Array(names[$0..<min($0 + 4, names.count)]) }
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 4) {
+                    ForEach(row, id: \.self) { name in
+                        Text(name).font(.system(size: 12.5 * panelFont)).foregroundStyle(pal.fg).lineLimit(1)
+                            .padding(.horizontal, 8).padding(.vertical, 1)
+                            .background(Capsule().fill(pal.pill))
+                            .overlay(Capsule().stroke(pal.pillb, lineWidth: 1))
+                    }
+                }
+            }
+        }
+    }
+
+    private func esSmallCard<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        content()
+            .padding(EdgeInsets(top: 10, leading: 15, bottom: 11, trailing: 15))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(pal.row))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(pal.rowb, lineWidth: 1))
     }
 
     private func navButton(_ symbol: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {

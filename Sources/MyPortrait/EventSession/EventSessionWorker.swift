@@ -339,14 +339,24 @@ final class EventSessionStatus {
 
 /// Timeline 的 Event session 卡读结果:和 [start, end] 重叠、最早开始的那条(总结优先,其次减负记录)。
 enum EventSessionStore {
-    static func text(start: Date, end: Date) -> String? {
+    /// 卡片上显示的几项(同设计稿:context_in_app / activity / background / social / who)。减负记录只有 activity 一句说明。
+    struct Entry {
+        var summarized: Bool
+        var activity: String
+        var context = ""
+        var background = ""
+        var social = ""
+        var who: [String] = []
+    }
+
+    static func entry(start: Date, end: Date) -> Entry? {
         let path = Storage.eventSessionDBPath
         guard FileManager.default.fileExists(atPath: path) else { return nil }
         var cfg = Configuration()
         cfg.readonly = true
         guard let q = try? DatabaseQueue(path: path, configuration: cfg) else { return nil }
         let a = Int64(start.timeIntervalSince1970 * 1000), z = Int64(end.timeIntervalSince1970 * 1000)
-        return try? q.read { db -> String? in
+        return try? q.read { db -> Entry? in
             guard try db.tableExists("event_sessions") else { return nil }
             let row = try Row.fetchOne(db, sql: """
                 SELECT kind, activity, record FROM event_sessions
@@ -354,10 +364,15 @@ enum EventSessionStore {
                 ORDER BY kind = 'summary' DESC, start_ms LIMIT 1
                 """, arguments: ["a": a, "z": z])
             guard let row else { return nil }
-            if (row["kind"] as String?) == "summary" { return row["activity"] }
-            let rec = (try? JSONSerialization.jsonObject(with: Data((row["record"] as String? ?? "").utf8))) as? [String: Any]
-            let title = (rec?["window"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (rec?["url"] as? String) ?? ""
-            return "Skipped — too much was waiting." + (title.isEmpty ? "" : " \(title)")
+            let rec = (try? JSONSerialization.jsonObject(with: Data((row["record"] as String? ?? "").utf8))) as? [String: Any] ?? [:]
+            let str = { (k: String) in (rec[k] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+            if (row["kind"] as String?) == "summary" {
+                return Entry(summarized: true, activity: row["activity"] ?? str("activity"), context: str("context_in_app"),
+                             background: str("background"), social: str("social"),
+                             who: (rec["who"] as? [Any] ?? []).compactMap { $0 as? String }.filter { !$0.isEmpty })
+            }
+            let title = str("window").isEmpty ? str("url") : str("window")
+            return Entry(summarized: false, activity: "Skipped — too much was waiting." + (title.isEmpty ? "" : " \(title)"))
         }
     }
 }
