@@ -30,7 +30,8 @@ actor EventSessionWorker {
     /// 实测吞吐(本次 app 运行里累计):模型真正在跑的秒数 / 这段时间看完的帧。剩余时间按它估,含合成、重启引擎、加载模型等开销。
     private var runSecs: Double = 0
     private var runFrames = 0
-    private var lastMark: (at: Date, frames: Int)?
+    /// 计时用 systemUptime(睡眠时不走):合盖睡着的时间不算进吞吐。
+    private var lastMark: (at: TimeInterval, frames: Int)?
 
     func start() {
         guard loop == nil else { return }
@@ -166,7 +167,7 @@ actor EventSessionWorker {
             ?? (model.flatMap { try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json"))) }
                 as? [String: Any])?["name"] as? String ?? model?.lastPathComponent ?? ""
         var last = Date()
-        if !prepareOnly, let p0 = Self.progress(sinceMs: es.sinceMs) { lastMark = (Date(), p0.framesDone) }   // 加载模型的时间也算
+        if !prepareOnly, let p0 = Self.progress(sinceMs: es.sinceMs) { lastMark = (ProcessInfo.processInfo.systemUptime, p0.framesDone) }   // 加载模型的时间也算
         // 关掉开关,或换了 provider / 模型 / 运行时间档:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做),
         // 下一轮按新设置重新过闸。Daily limit / Detail 只管还没准备的天,改了不停。
         let started = es
@@ -199,10 +200,10 @@ actor EventSessionWorker {
                 var prog = Self.progress(sinceMs: since)
                 if let p = prog {
                     if let m = lastMark, p.framesDone > m.frames {
-                        runSecs += Date().timeIntervalSince(m.at)
+                        runSecs += ProcessInfo.processInfo.systemUptime - m.at
                         runFrames += p.framesDone - m.frames
                     }
-                    lastMark = (Date(), p.framesDone)
+                    lastMark = (ProcessInfo.processInfo.systemUptime, p.framesDone)
                     if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
                 }
                 let shown = prog
