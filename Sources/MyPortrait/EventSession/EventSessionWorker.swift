@@ -27,6 +27,10 @@ actor EventSessionWorker {
     private var idleUntil = Date.distantPast
     private var prepIdleUntil = Date.distantPast
     private var nextUpdateCheck = Date.distantPast
+    /// 实测吞吐(本次 app 运行里累计):模型真正在跑的秒数 / 这段时间看完的帧。剩余时间按它估,含合成、重启引擎、加载模型等开销。
+    private var runSecs: Double = 0
+    private var runFrames = 0
+    private var lastMark: (at: Date, frames: Int)?
 
     func start() {
         guard loop == nil else { return }
@@ -65,10 +69,12 @@ actor EventSessionWorker {
         let pending = Self.hasPendingDay(sinceMs: since, skip: ["days_done"])
         await setStatus(running: false, waiting: reason ?? (pending ? "Waiting" : "Up to date"))
         let paused = pending ? Self.pausedStep(sinceMs: since) : nil
-        let prog = Self.progress(sinceMs: since)
+        var prog = Self.progress(sinceMs: since)
+        if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
+        let shown = prog
         await MainActor.run {
             EventSessionStatus.shared.pausedAt = paused
-            EventSessionStatus.shared.progress = prog
+            EventSessionStatus.shared.progress = shown
         }
     }
 
@@ -160,6 +166,7 @@ actor EventSessionWorker {
             ?? (model.flatMap { try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json"))) }
                 as? [String: Any])?["name"] as? String ?? model?.lastPathComponent ?? ""
         var last = Date()
+        if !prepareOnly, let p0 = Self.progress(sinceMs: es.sinceMs) { lastMark = (Date(), p0.framesDone) }   // 加载模型的时间也算
         // 关掉开关,或换了 provider / 模型 / 运行时间档:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做),
         // 下一轮按新设置重新过闸。Daily limit / Detail 只管还没准备的天,改了不停。
         let started = es
@@ -169,7 +176,9 @@ actor EventSessionWorker {
                 let now = await MainActor.run { ConfigStore.shared.current.eventSession }
                 let changed = !now.enabled || now.source != started.source || now.model != started.model
                     || now.powerMode != started.powerMode
-                if changed, p.isRunning { p.terminate(); break }
+                // 模型阶段:运行条件不满足了(不再空闲、拔了电源、内存压力严重……)也立刻停,不等这个会话做完
+                let gateFailed = prepareOnly ? false : await self.gate(running: true) != nil
+                if changed || gateFailed, p.isRunning { p.terminate(); break }
             }
         }
         let dog = Task {
@@ -187,8 +196,17 @@ actor EventSessionWorker {
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
             case "progress", "day_done":
                 let since = es.sinceMs
-                let prog = Self.progress(sinceMs: since)
-                await MainActor.run { EventSessionStatus.shared.progress = prog }
+                var prog = Self.progress(sinceMs: since)
+                if let p = prog {
+                    if let m = lastMark, p.framesDone > m.frames {
+                        runSecs += Date().timeIntervalSince(m.at)
+                        runFrames += p.framesDone - m.frames
+                    }
+                    lastMark = (Date(), p.framesDone)
+                    if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
+                }
+                let shown = prog
+                await MainActor.run { EventSessionStatus.shared.progress = shown }
             case "stage":
                 let step = Self.flowStep(obj["stage"] as? String)
                 await MainActor.run { EventSessionStatus.shared.stage = step }
@@ -225,6 +243,7 @@ actor EventSessionWorker {
         cfgWatch.cancel()
         await MainActor.run { EventSessionStatus.shared.stage = nil }
         p.waitUntilExit()
+        lastMark = nil                                      // 两批之间(等空闲、等充电)的时间不算进吞吐
     }
 
     private func store(_ rec: [String: Any], model: String) {
