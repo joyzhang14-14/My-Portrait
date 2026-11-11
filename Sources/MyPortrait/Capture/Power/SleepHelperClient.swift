@@ -65,6 +65,14 @@ final class SleepHelperClient {
         }
     }
 
+    /// 已注册、等批准(.requiresApproval)时再 register 一次:用户在系统设置里打开「允许在后台」之后,
+    /// 要再注册一次才真正启用;不再要求回 app 点 Allow。没注册过的不动,不弹系统设置。
+    func completeApprovalIfAllowed() {
+        guard service.status == .requiresApproval else { return }
+        try? service.register()
+        if service.status == .enabled { log.info("approval completed after System Settings toggle") }
+    }
+
     /// 开关关闭:复位 disablesleep + 拆连接(helper 退出)+ 注销 daemon。
     func disable() {
         teardownConnection(resetFirst: true)

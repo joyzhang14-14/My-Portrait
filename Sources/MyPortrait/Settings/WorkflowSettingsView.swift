@@ -1682,6 +1682,15 @@ struct WorkflowSettingsView: View {
                 }
                 eventSessionProviderRows(elig: elig, clouds: clouds)
                 eventSessionWhenRow(elig: elig, ready: ready && !premium)
+                if es.enabled, !premium, es.powerMode != .packed, !EventSessionStatus.shared.helperApproved {
+                    HStack(spacing: 8) {
+                        Text("Closing the lid puts this Mac to sleep and pauses EventSession. Allow the background helper to keep it running with the lid closed.")
+                            .font(.system(size: 11)).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button("Allow") { SleepHelperClient.shared.enable() }.font(.system(size: 11))
+                    }
+                }
                 levelRow("Daily limit",
                          info: "How many screenshots EventSession looks at for one day. When a day has more than this, the shortest one-screenshot sessions with no typing are skipped first (kept as app, title and time only), then each session gets less detail.\n\nLarger keeps more, but each day takes longer.\n\nThis is applied when a day is prepared, so days that are already prepared keep the setting they were prepared with.",
                          low: "Less", high: "More",

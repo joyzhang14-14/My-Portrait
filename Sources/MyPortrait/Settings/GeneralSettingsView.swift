@@ -159,6 +159,7 @@ struct GeneralSettingsView: View {
         // .task 随视图消失自动取消,不用手动 stop。
         .task {
             while !Task.isCancelled {
+                SleepHelperClient.shared.completeApprovalIfAllowed()
                 helperApproved = SleepHelperClient.shared.isApproved
                 try? await Task.sleep(for: .seconds(3))
             }

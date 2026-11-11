@@ -50,6 +50,7 @@ actor EventSessionWorker {
 
     private func tick() async {
         let since = await MainActor.run { ConfigStore.shared.current.eventSession.sinceMs }
+        await updateLidAwake(sinceMs: since)
         let reason = await gate()
         if reason == nil, Date() >= idleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done"]) {
             await checkForUpdate()
@@ -76,6 +77,22 @@ actor EventSessionWorker {
         await MainActor.run {
             EventSessionStatus.shared.pausedAt = paused
             EventSessionStatus.shared.progress = shown
+        }
+    }
+
+    /// 合盖也接着跑(11-11):开着、模型在本机或云端(不是 packed / Premium)、插着电、还有没跑完的天 → 请 helper 让机器
+    /// 合盖不睡(disablesleep),批和批之间也不睡;拔电、跑完、关掉就放开。合盖本身算空闲,闸照常过。
+    /// helper 没批准时 setKeepAwake 是 no-op,EventSession 卡上有提示。
+    private func updateLidAwake(sinceMs: Int64) async {
+        let es = await MainActor.run { ConfigStore.shared.current.eventSession }
+        let want = es.enabled && es.source != Provider.premium.rawValue && es.powerMode != .packed
+            && (!es.isLocal || EventSessionEligibility.current != .notEligible)
+            && EventSessionInstaller.isReady(local: es.isLocal) && PowerMonitor.isOnAC
+            && Self.hasPendingDay(sinceMs: sinceMs, skip: ["days_done"])
+        await MainActor.run {
+            SleepHelperClient.shared.completeApprovalIfAllowed()
+            SleepHelperClient.shared.setKeepAwake(want, owner: "eventsession")
+            EventSessionStatus.shared.helperApproved = SleepHelperClient.shared.isApproved
         }
     }
 
@@ -435,7 +452,6 @@ actor EventSessionWorker {
         await MainActor.run {
             let ac = PowerMonitor.isOnAC
             KeepAwakeAssertion.shared.set(on && ac, owner: "eventsession")
-            SleepHelperClient.shared.setKeepAwake(on && ac && PowerMonitor.isLidClosed, owner: "eventsession")
         }
     }
 
@@ -494,6 +510,8 @@ final class EventSessionStatus {
     /// 没在跑、还有活时停在哪一步(同上的 step id)。
     var pausedAt: String?
     var progress: EventSessionProgress?
+    /// 合盖保持运行的 helper 批准了没有(worker 每分钟查一次;设置页据此提示)。
+    var helperApproved = true
 }
 
 /// Timeline 的 Event session 卡读结果:先用当前这一帧查它属于哪个会话(`session_frames`);
