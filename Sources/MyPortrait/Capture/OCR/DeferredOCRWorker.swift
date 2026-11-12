@@ -202,8 +202,6 @@ actor DeferredOCRWorker {
         guard let avail = SystemMemory.availableBytes() else { return "Can't read free memory" }
         if avail < SystemMemory.minFreeBytes { return "Not enough free memory" }
         if !settings.deferOCR { return nil }
-        // 一次只跑一个重活:EventSession 已经在跑(模型已加载)就等它这一批跑完,不去抢(11-11 update)
-        if await MainActor.run(body: { EventSessionStatus.shared.running }) { return "Waiting for EventSession" }
         guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
         switch settings.ocrPowerMode {
         case .charging: return nil

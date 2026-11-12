@@ -7,7 +7,8 @@ import os.log
 /// 一批最多 `chunkSessions` 个会话就让它退出、下一批重拉(本机 MLX 长跑会触发显卡驱动 panic)。
 /// 本机模型的闸:开关开着、东西装齐;插电,且按运行时间档(charging / charging_idle,内存 < 20 GB 的机器只有后者);
 /// 内存压力不是「严重」(「警告」照跑:开着一堆网页时很多 Mac 长期在警告档,模型加载时系统会压缩 / 换出闲着的内存)、
-/// 能立刻让出来的内存 ≥ `SystemMemory.minFreeBytes`;跑的过程中每做完一个会话重查一次,变成「严重」就停在这个会话之后;温度没到 serious、不在低电量模式;延后 OCR 不在跑(一次只跑一个重活)。
+/// 能立刻让出来的内存 ≥ `SystemMemory.minFreeBytes`;温度没到 serious、不在低电量模式。和延后 OCR 可以同时跑:
+/// 引擎只做 OCR 已补完的天(engine.pending_days 停在还有 ocr_pending 的天前面),两边碰不到同一天(11-11 update)。
 /// 云端 provider:引擎每要调一次模型就发 `llm` 请求,这里用 Connections 里连好的服务调(`EventSessionCloud`),
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
 /// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
@@ -104,13 +105,12 @@ actor EventSessionWorker {
         await EventSessionInstaller.shared.update(local: local)
     }
 
-    /// 不用模型的几步能不能做:开着、不是交给 Premium、运行环境装好、机器不过热、延后 OCR 不在跑。不看电源和内存。
+    /// 不用模型的几步能不能做:开着、不是交给 Premium、运行环境装好、机器不过热。不看电源和内存。
     private func prepareGate() async -> Bool {
         let es = await MainActor.run { ConfigStore.shared.current.eventSession }
         guard es.enabled, es.source != Provider.premium.rawValue, EventSessionInstaller.runtimeReady else { return false }
         let thermal = PowerMonitor.snapshot().thermalState
-        if thermal == .serious || thermal == .critical { return false }
-        return await !MainActor.run(body: { DeferredOCRStatus.shared.running })
+        return thermal != .serious && thermal != .critical
     }
 
     /// 能跑回 nil,不能跑回原因(给设置页看)。`running` = 跑到一半的复查:模型自己占着内存,不看内存。
@@ -134,8 +134,6 @@ actor EventSessionWorker {
             if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
             guard let avail = SystemMemory.availableBytes(), avail >= SystemMemory.minFreeBytes else { return "Not enough free memory" }
         }
-        // 延后 OCR 在跑就不开跑;已经跑起来了就不让给它(它会等这一批跑完),不然两边来回抢、谁都跑不成
-        if !running, await MainActor.run(body: { DeferredOCRStatus.shared.running }) { return "Waiting for screen text recognition" }
         return nil
     }
 
