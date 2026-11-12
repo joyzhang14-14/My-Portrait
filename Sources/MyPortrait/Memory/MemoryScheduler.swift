@@ -655,7 +655,7 @@ final class MemoryScheduler {
         // 然后跑封区间检查(与 helper 同一个入口,交换锁互斥、幂等):本机和 Premium 的
         // event 链都从区间台账取活;有链搬到 Premium 时按每日节奏导出、上传(见 PremiumExchangeExporter)。
         if let pools = Self.dbPools {
-            if !s.offloadedChains.isEmpty {
+            if !s.offloadedChains.isEmpty || ConfigStore.shared.current.eventSession.toPremium {
                 _ = await PremiumExchangeImporter.runIfNeeded(dbPool: pools.workflow)
             }
             _ = await PremiumExchangeExporter.runSealCheck(pools: pools, lockWait: 0, importFirst: false)

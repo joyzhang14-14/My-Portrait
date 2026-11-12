@@ -11,7 +11,8 @@ import os.log
 /// 引擎只做 OCR 已补完的天(engine.pending_days 停在还有 ocr_pending 的天前面),两边碰不到同一天(11-11 update)。
 /// 云端 provider:引擎每要调一次模型就发 `llm` 请求,这里用 Connections 里连好的服务调(`EventSessionCloud`),
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
-/// provider 选 Premium:本机不跑,交给 Premium 的打包上传(`PremiumConfig.eventSession` 跟着开)。
+/// provider 选 Premium:本机只做准备;准备好的天由 Premium 的打包上传切成几份发出去(`exportDay`),结果回来先放进收件箱
+/// (`takePremiumResults`),一天的份数回齐就用引擎的 import 命令收尾、写进结果库(`importPremium`)。
 /// 不用模型的几步(入库分会话 / 键鼠 / 选帧 / 打包)单独做(11-10 update):天一过完、电脑醒着就用引擎的 prepare 命令做掉,
 /// 不看电源和内存;模型的闸一开,run 直接从观察开始。
 /// 没有过完、还没做的天就不起引擎;引擎回 idle(那天 OCR 还没补完)后 15 分钟内不再起。
@@ -33,6 +34,8 @@ actor EventSessionWorker {
     private var runFrames = 0
     /// 计时用 systemUptime(睡眠时不走):合盖睡着的时间不算进吞吐。
     private var lastMark: (at: TimeInterval, frames: Int)?
+    /// Premium 的结果收尾失败后,这之前不再试。
+    private var premiumImportAfter = Date.distantPast
 
     func start() {
         guard loop == nil else { return }
@@ -50,8 +53,14 @@ actor EventSessionWorker {
     }
 
     private func tick() async {
-        let since = await MainActor.run { ConfigStore.shared.current.eventSession.sinceMs }
+        let (since, toPremium) = await MainActor.run {
+            (ConfigStore.shared.current.eventSession.sinceMs, ConfigStore.shared.current.eventSession.toPremium)
+        }
         await updateLidAwake(sinceMs: since)
+        if toPremium { await checkForUpdate() }     // 交给 Premium 时本机可能一直没活,引擎也要跟上(导出 / 收尾的命令)
+        if EventSessionInstaller.runtimeReady, Date() >= premiumImportAfter {
+            for day in Self.premiumInboxDays() where Self.premiumResultsReady(day) { await importPremium(day) }
+        }
         let reason = await gate()
         if reason == nil, Date() >= idleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done"]) {
             await checkForUpdate()
@@ -145,33 +154,8 @@ actor EventSessionWorker {
         let model = EventSessionInstaller.modelDir
         guard prepareOnly || cloud != nil || model != nil else { return }
         let cloudModel = cloud.map { es.model.isEmpty ? $0.defaultModel : es.model } ?? ""
-        let p = Process()
-        p.executableURL = Self.launcher()
-        p.arguments = [EventSessionInstaller.engineDir.appendingPathComponent("engine.py").path]
-        let work = Storage.pipelineDir.appendingPathComponent("eventsession", isDirectory: true)
-        var env = ProcessInfo.processInfo.environment
-        env["MP_ES_WORK"] = work.path
-        env["PORTRAIT_ROOT"] = Storage.rootURL.path
-        env["PORTRAIT_KEYS_OUT"] = work.appendingPathComponent("keys").path
-        env["PORTRAIT_DB_DIR"] = EventSessionInstaller.root.appendingPathComponent("engine").path
-        guard let extractor = Self.frameExtractor() else {
-            log.error("frame extractor script could not be written")
-            return
-        }
-        env["MP_FRAME_EXTRACTOR"] = extractor.path
-        env["PYTHONNOUSERSITE"] = "1"
-        if FileManager.default.fileExists(atPath: EventSessionInstaller.rimeDir.path) {
-            env["PORTRAIT_RIME_DIR"] = EventSessionInstaller.rimeDir.path
-        }
-        p.environment = env
-        let inPipe = Pipe(), outPipe = Pipe()
-        p.standardInput = inPipe
-        p.standardOutput = outPipe
-        p.standardError = Self.engineLog(in: work)
-        do { try p.run() } catch {
-            log.error("engine launch failed: \(error.localizedDescription, privacy: .public)")
-            return
-        }
+        guard let (p, inPipe, outPipe) = launchEngine() else { return }
+        let work = Self.work
         var cfg: [String: Any] = ["since_ms": es.sinceMs, "budget": es.frameBudget,
                                   "dial_max": es.dialMax, "dial_min": EventSessionConfig.dialMin]
         if let cloud { cfg["cloud"] = "\(cloud.rawValue)/\(cloudModel)" } else if let model { cfg["model"] = model.path }
@@ -283,6 +267,164 @@ actor EventSessionWorker {
         p.waitUntilExit()
         lastMark = nil                                      // 两批之间(等空闲、等充电)的时间不算进吞吐
     }
+
+    private static var work: URL { Storage.pipelineDir.appendingPathComponent("eventsession", isDirectory: true) }
+
+    /// 拉起引擎子进程(环境同 app 引擎模式,见 engine.py 开头);起不来回 nil。
+    private func launchEngine() -> (Process, Pipe, Pipe)? {
+        let p = Process()
+        p.executableURL = Self.launcher()
+        p.arguments = [EventSessionInstaller.engineDir.appendingPathComponent("engine.py").path]
+        var env = ProcessInfo.processInfo.environment
+        env["MP_ES_WORK"] = Self.work.path
+        env["PORTRAIT_ROOT"] = Storage.rootURL.path
+        env["PORTRAIT_KEYS_OUT"] = Self.work.appendingPathComponent("keys").path
+        env["PORTRAIT_DB_DIR"] = EventSessionInstaller.root.appendingPathComponent("engine").path
+        guard let extractor = Self.frameExtractor() else {
+            log.error("frame extractor script could not be written")
+            return nil
+        }
+        env["MP_FRAME_EXTRACTOR"] = extractor.path
+        env["PYTHONNOUSERSITE"] = "1"
+        if FileManager.default.fileExists(atPath: EventSessionInstaller.rimeDir.path) {
+            env["PORTRAIT_RIME_DIR"] = EventSessionInstaller.rimeDir.path
+        }
+        p.environment = env
+        let inPipe = Pipe(), outPipe = Pipe()
+        p.standardInput = inPipe
+        p.standardOutput = outPipe
+        p.standardError = Self.engineLog(in: Self.work)
+        do { try p.run() } catch {
+            log.error("engine launch failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        return (p, inPipe, outPipe)
+    }
+
+    /// 起一个引擎只跑一条命令(export / import):逐会话结果照常入库,等到 `end` 事件就让它退出,回那条事件;
+    /// 出错或半小时没出声回 nil。和正在跑的批各是各的进程:export 只读,import 由 tick 在批之间串行调。
+    private func runCommand(_ cmd: [String: Any], until end: String, model: String = "") async -> [String: Any]? {
+        guard let (p, inPipe, outPipe) = launchEngine() else { return nil }
+        if let data = try? JSONSerialization.data(withJSONObject: cmd) {
+            inPipe.fileHandleForWriting.write(data + Data("\n".utf8))
+        }
+        var last = Date()
+        let dog = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                if Date().timeIntervalSince(last) > self.watchdog, p.isRunning { p.terminate() }
+            }
+        }
+        var result: [String: Any]?
+        for await line in Self.lines(outPipe.fileHandleForReading) {
+            last = Date()
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let ev = obj["event"] as? String else { continue }
+            if ev == "session", let rec = obj["record"] as? [String: Any] { store(rec, model: model) }
+            if ev == end { result = obj }
+            if ev == "error" { log.error("engine error: \(String(describing: obj["message"]), privacy: .public)") }
+            if ev == end || ev == "error" { inPipe.fileHandleForWriting.closeFile() }
+        }
+        dog.cancel()
+        p.waitUntilExit()
+        return result
+    }
+
+    // MARK: - Premium
+
+    struct PremiumPart: Sendable {
+        let name: String
+        let dir: URL
+    }
+
+    /// Premium 跑回来的产物先放这里:`<本地日>/expected.json`(这天切了几份)+ `<本地日>/<份>/`。
+    static var premiumInbox: URL { work.appendingPathComponent("premium", isDirectory: true) }
+
+    /// 一天导出的几份放在这里,打包时挪进包里。
+    static func exportDir(_ day: String) -> URL {
+        PremiumRemote.stagingDir(Storage.rootURL).appendingPathComponent("premium_es/\(day)", isDirectory: true)
+    }
+
+    /// 准备好(不用模型的几步做完)、还没做完的天,按日子先后;`includingDone` = 做完的也算(重跑)。
+    static func premiumCandidates(includingDone: Bool = false) -> [String] {
+        let st = (try? JSONSerialization.jsonObject(with: Data(contentsOf: work.appendingPathComponent("engine_state.json")))) as? [String: Any] ?? [:]
+        let done = includingDone ? [] : Set(st["days_done"] as? [String] ?? [])
+        return (st["days_prepared"] as? [String] ?? []).filter { !done.contains($0) }.sorted()
+    }
+
+    /// 准备好的一天切成几份(每份 ≤ maxBytes)写到 `exportDir`,收件箱里这天清空、记下份数。导出失败回 nil;
+    /// 没有要看的会话回 [](份数记 0,下一轮 tick 直接收尾)。
+    func exportDay(_ day: String, maxBytes: Int64) async -> [PremiumPart]? {
+        let dest = Self.exportDir(day)
+        guard let r = await runCommand(["cmd": "export", "day": day, "dir": dest.path, "max_bytes": maxBytes], until: "exported"),
+              let parts = r["parts"] as? [[String: Any]] else { return nil }
+        let inbox = Self.premiumInbox.appendingPathComponent(day, isDirectory: true)
+        let fm = FileManager.default
+        try? fm.removeItem(at: inbox)
+        do {
+            try fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: ["parts": parts.count]).write(to: inbox.appendingPathComponent("expected.json"))
+        } catch {
+            log.error("premium inbox for \(day, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        return parts.compactMap { ($0["name"] as? String).map { PremiumPart(name: $0, dir: dest.appendingPathComponent($0)) } }
+    }
+
+    /// 结果包里跑成的份挪进收件箱(导入结果包时调,`dir` = 解开的结果包)。收件箱里没有这天的份数时按结果里的记。
+    static func takePremiumResults(_ parts: [PremiumResultManifest.EventSessionPart], from dir: URL, inbox: URL = premiumInbox) {
+        let fm = FileManager.default
+        for e in parts where e.status == "complete" {
+            let src = dir.appendingPathComponent("eventsession/\(e.day)/\(e.part)", isDirectory: true)
+            let day = inbox.appendingPathComponent(e.day, isDirectory: true)
+            let dst = day.appendingPathComponent(e.part, isDirectory: true)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            try? fm.createDirectory(at: day, withIntermediateDirectories: true)
+            let expected = day.appendingPathComponent("expected.json")
+            if !fm.fileExists(atPath: expected.path) {
+                try? JSONSerialization.data(withJSONObject: ["parts": e.parts]).write(to: expected)
+            }
+            try? fm.removeItem(at: dst)
+            try? fm.moveItem(at: src, to: dst)
+        }
+    }
+
+    static func premiumInboxDays() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: premiumInbox.path)) ?? []).filter { !$0.hasPrefix(".") }.sorted()
+    }
+
+    /// 这天的份数回齐了(份数 0 = 没有要看的会话,也算齐)。
+    static func premiumResultsReady(_ day: String, inbox: URL = premiumInbox) -> Bool {
+        let d = inbox.appendingPathComponent(day, isDirectory: true)
+        guard let obj = (try? JSONSerialization.jsonObject(with: Data(contentsOf: d.appendingPathComponent("expected.json")))) as? [String: Any],
+              let n = obj["parts"] as? Int else { return false }
+        return premiumParts(day, inbox: inbox).count == n
+    }
+
+    private static func premiumParts(_ day: String, inbox: URL = premiumInbox) -> [URL] {
+        let d = inbox.appendingPathComponent(day, isDirectory: true)
+        return ((try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []).sorted()
+            .map { d.appendingPathComponent($0, isDirectory: true) }
+            .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("status.json").path) }
+    }
+
+    /// 一天的份数回齐:引擎 import 把产物放回当天目录、本机收尾,逐会话入库;做完删掉收件箱里这天。失败 15 分钟后再试。
+    private func importPremium(_ day: String) async {
+        let dirs = Self.premiumParts(day).map(\.path)
+        await setStatus(running: true, waiting: nil)
+        let r = await runCommand(["cmd": "import", "day": day, "dirs": dirs], until: "day_done", model: Self.premiumModelName)
+        await setStatus(running: false, waiting: nil)
+        if r == nil {
+            log.error("premium results for \(day, privacy: .public) could not be finished; retry in 15 minutes")
+            premiumImportAfter = Date().addingTimeInterval(15 * 60)
+            return
+        }
+        try? FileManager.default.removeItem(at: Self.premiumInbox.appendingPathComponent(day, isDirectory: true))
+        log.notice("premium results for \(day, privacy: .public) stored")
+    }
+
+    /// Premium 跑出来的会话记的模型名(Premium 用的是同一个学生模型)。
+    static let premiumModelName = "premium/EventSession-v1"
 
     private func store(_ rec: [String: Any], model: String) {
         guard let pool, let data = try? JSONSerialization.data(withJSONObject: rec),
@@ -662,9 +804,9 @@ enum EventSessionCloud {
 }
 
 extension EventSessionConfig {
-    /// EventSession 交给 Premium 时,按运行时间档决定这会儿能不能打包上传(packed 不看电源)。没交给 Premium 不拦。
+    /// EventSession 交给 Premium 时,按运行时间档决定这会儿能不能把准备好的天打包上传(packed 不看电源)。
     var premiumMayPack: Bool {
-        guard enabled, source == Provider.premium.rawValue, powerMode != .packed else { return true }
+        guard toPremium, powerMode != .packed else { return true }
         guard PowerMonitor.isOnAC else { return false }
         return powerMode == .charging || PowerMonitor.isIdle
     }

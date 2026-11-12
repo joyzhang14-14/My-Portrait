@@ -19,6 +19,7 @@ private let importLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 结果里没有的文件一律不动。
 /// 重跑(`overwrite` 列出的文件:Premium 重跑某天时改过、删过的事件和那天的性格日)照 Premium 的版本写、删,不看本机改没改过。
 /// 只导完整的结果包(`PremiumExchange.resultReady`);已经 complete 的区间 / 本地日不被结果改回别的状态。
+/// 结果里的 EventSession 产物(`eventsession/<本地日>/<份>/`)交给 `EventSessionWorker`,一天的份数回齐后由它收尾、写进结果库。
 ///
 /// 快照在 `.staging/premium_import_backup/<id>/`(三棵树 + 被改的 processing_log /
 /// event_intervals / personality_days 行 + db_ops.json),只留最近 3 份;
@@ -277,6 +278,7 @@ enum PremiumExchangeImporter {
         }
 
         // 4. 事务外的附带写入(失败只记日志)。
+        EventSessionWorker.takePremiumResults(manifest.eventSession ?? [], from: dir)
         if !alreadyImported {
             for (day, text) in ops.journalAppend ?? [:] {
                 appendJournal(day: day, text: text, root: root)

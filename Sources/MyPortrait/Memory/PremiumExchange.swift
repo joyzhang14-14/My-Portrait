@@ -287,8 +287,11 @@ struct PremiumPending: Codable, Equatable {
     /// `personalityDays` 各天的台账行(偏移 / 重试);写进 manifest 顶层 `personality_log`,
     /// 不在 pending 里编码。
     var personalityLog: [PremiumPersonalityDayEntry] = []
+    /// 包里带的 EventSession 份(本机准备好的会话,不算链;Premium 带了就跑)。
+    var eventSession: [PremiumEventSessionEntry]? = nil
 
     enum CodingKeys: String, CodingKey {
+        case eventSession = "event_session"
         case eventIntervals = "event_intervals"
         case personalityDays = "personality_days"
         case distillPending = "distill_pending"
@@ -368,6 +371,13 @@ struct PremiumParams: Codable, Equatable {
     }
 }
 
+/// 包里的一份 EventSession:本地日的第几份(`p1`…)、这天一共几份;文件在 `eventsession/<day>/<part>/`。
+struct PremiumEventSessionEntry: Codable, Equatable, Sendable {
+    var day: String
+    var part: String
+    var parts: Int
+}
+
 struct PremiumBundleManifest: Codable {
     var schemaVersion: Int = PremiumExchange.schemaVersion
     var bundleId: String
@@ -435,6 +445,15 @@ struct PremiumResultManifest: Codable {
     /// 重跑时改过 / 删过的文件:照 Premium 的版本覆盖,不看本机改没改过。
     var overwrite: [String]?
     var summary: [String: Int]?
+    /// 输入包里的 EventSession 各份和处理结果(`status` complete 的产物在 `eventsession/<day>/<part>/`)。
+    var eventSession: [EventSessionPart]?
+
+    struct EventSessionPart: Codable {
+        var day: String
+        var part: String
+        var parts: Int
+        var status: String
+    }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -443,6 +462,7 @@ struct PremiumResultManifest: Codable {
         case startedMs = "started_ms"
         case endedMs = "ended_ms"
         case status, stages, deleted, overwrite, summary
+        case eventSession = "event_session"
         case baseTrees = "base_trees"
         case resultTrees = "result_trees"
     }

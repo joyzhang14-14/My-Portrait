@@ -1117,21 +1117,17 @@ struct PremiumConfig: Codable, Equatable {
     var serverURL: String = ""
     /// 连上 Premium 前四条链的选择(键 = 链的 config 键名),断开时恢复。
     var previousProviders: [String: ChainProviderChoice] = [:]
-    /// EventSession 交给 Premium:包里除了 OCR 文字再带全部元数据(`PremiumRemote.contents`)。界面上暂时打不开。
-    var eventSession: Bool = false
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case serverURL = "server_url"
         case previousProviders = "previous_providers"
-        case eventSession = "event_session"
     }
     init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         serverURL = c.dflt(String.self, .serverURL, serverURL)
         previousProviders = c.dflt([String: ChainProviderChoice].self, .previousProviders, previousProviders)
-        eventSession = c.dflt(Bool.self, .eventSession, eventSession)
     }
 }
 
@@ -1164,6 +1160,8 @@ struct EventSessionConfig: Codable, Equatable {
     static let detailLevels = [0.2, 0.35, 0.5, 0.75, 1.0]
 
     var isLocal: Bool { source == "local" }
+    /// 交给 Premium:本机只做准备,准备好的天打进 Premium 的包(`PremiumExchangeExporter.exportEventSession`)。
+    var toPremium: Bool { enabled && source == Provider.premium.rawValue }
 
     init() {}
     enum CodingKeys: String, CodingKey {

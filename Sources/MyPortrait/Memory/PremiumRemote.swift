@@ -15,7 +15,7 @@ private let remoteLog = Logger(subsystem: "com.myportrait.memory", category: "pr
 /// 外加 `X-MP-Names`(Personal Info 的名字)和 `X-MP-Device`(`deviceId`):服务器要求其中一个名字
 /// 等于密钥登记的名字,并把密钥绑在第一次连上的那台 Mac 上;断开 Premium 时 `release` 让服务器解绑
 /// (`POST /v1/unbind`),换一台 Mac 用同一把密钥就能连。
-/// 包里放什么由用户的 pipeline 设定定(`contents`):EventSession 交给 Premium 时带全部元数据,否则只带 OCR 文字。
+/// 包里放什么由用户的 pipeline 设定定(`contents`):EventSession 交给 Premium 时另带本机准备好的会话,否则只带 OCR 文字。
 /// 要重跑哪些日子也由 Premium 定(对所有用户):`/v1/me` 的 `redo`(这台还没发包、也没回报的日子),
 /// 每天怎么处理的用 `POST /v1/redo/<请求 id>/<本地日>` 回报(`RedoReport`),见 `PremiumExchangeExporter.exportRedo`。
 ///
@@ -97,7 +97,7 @@ enum PremiumRemote {
         var bundles: [BundleStatus]
     }
 
-    /// Premium 要重跑的一批日子(本地日):`chains` ⊂ `supportedRedoChains`,四层从下到上 event_session(带全部元数据)/
+    /// Premium 要重跑的一批日子(本地日):`chains` ⊂ `supportedRedoChains`,四层从下到上 event_session(那天准备好的会话重新总结)/
     /// event(聚类、并入已有事件、打分)/ portrait(那天的事件重新蒸馏)/ personality(重跑性格日),重跑一层时它上面的层都在。
     struct Redo: Codable, Sendable, Equatable {
         var id: String
@@ -128,13 +128,14 @@ enum PremiumRemote {
             : "Premium asks to reprocess \(bad.sorted().joined(separator: ", ")), which this version can't — update My Portrait"
     }
 
-    /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字;`event_session` = 区间的画面(MP4 / JPG)、帧焦点、OCR 词框、
-    /// 击键、鼠标、打字记录(EventSession 要的全部元数据)。见 `PremiumExchangeExporter.writeBundle`。
+    /// 这个版本能放进包里的内容:`ocr` = 帧带 OCR 文字;`event_session` = 本机准备好的会话(入选帧截图、题面、OCR 文字,
+    /// 见 `PremiumExchangeExporter.exportEventSession`)。
     static let supportedContents: Set<String> = ["ocr", "event_session"]
     static let eventSessionContents = ["event_session", "ocr"]
 
-    /// 包内容:EventSession 交给 Premium 时带全部元数据,否则只带 OCR 文字(帧的时间、app、窗口、URL 总是带)。
-    static func contents(_ cfg: PremiumConfig) -> [String] { cfg.eventSession ? eventSessionContents : ["ocr"] }
+    /// 包内容:EventSession 交给 Premium(`EventSessionConfig.toPremium`)时另带准备好的会话,否则只带 OCR 文字
+    /// (帧的时间、app、窗口、URL 总是带)。
+    static func contents(eventSession: Bool) -> [String] { eventSession ? eventSessionContents : ["ocr"] }
 
     struct RemoteError: LocalizedError, Sendable {
         let message: String
@@ -164,7 +165,7 @@ enum PremiumRemote {
         private static let session: URLSession = {
             let c = URLSessionConfiguration.ephemeral
             c.timeoutIntervalForRequest = 30
-            c.timeoutIntervalForResource = 3600   // 整包上传上限 1 小时(含整天 MP4 的包可达数百 MB)
+            c.timeoutIntervalForResource = 3600   // 整包上传上限 1 小时(带 EventSession 截图的包可达数百 MB)
             return URLSession(configuration: c)
         }()
 
@@ -253,15 +254,15 @@ enum PremiumRemote {
         }
     }
 
-    /// 打包前的检查:地址通、密钥有效 → 包内容和要重跑的日子;否则是原因。
+    /// 打包前的检查:地址通、密钥有效 → 包内容和要重跑的日子;否则是原因。`eventSession` = EventSession 交给 Premium。
     /// 重跑请求里有这个版本不认识的项时只跳过那个请求。
-    static func check(_ cfg: PremiumConfig) async -> Result<Ask, RemoteError> {
+    static func check(_ cfg: PremiumConfig, eventSession: Bool) async -> Result<Ask, RemoteError> {
         guard let t = transport(cfg) else {
             return .failure(RemoteError(message: serverURL(cfg) == nil ? "no Premium server address" : "no Premium key"))
         }
         do {
             let me = try await t.me()
-            return .success(Ask(contents: contents(cfg), redo: (me.redo ?? []).filter { redoProblem([$0]) == nil }))
+            return .success(Ask(contents: contents(eventSession: eventSession), redo: (me.redo ?? []).filter { redoProblem([$0]) == nil }))
         } catch let e as RemoteError {
             return .failure(e)
         } catch {
@@ -287,16 +288,20 @@ enum PremiumRemote {
         var mergedInto: String?
         /// 重跑包:`<请求 id>/<本地日>`。
         var redo: String?
+        /// 包里的 EventSession 份:`<本地日>/<份>`(在路上时那天不再发)。
+        var esParts: [String]?
 
         init(bundleId: String, trigger: String, chains: [String], createdAt: String, status: String,
-             intervals: [String]? = nil, redo: String? = nil) {
+             intervals: [String]? = nil, redo: String? = nil, esParts: [String]? = nil) {
             self.bundleId = bundleId; self.trigger = trigger; self.chains = chains
             self.createdAt = createdAt; self.status = status; self.intervals = intervals; self.redo = redo
+            self.esParts = esParts
         }
 
         enum CodingKeys: String, CodingKey {
             case bundleId = "bundle_id"
             case trigger, chains, status, ahead, stage, summary, intervals, redo
+            case esParts = "es_parts"
             case createdAt = "created_at"
             case resultSha256 = "result_sha256"
             case mergedInto = "merged_into"
@@ -319,17 +324,36 @@ enum PremiumRemote {
         var lastImport: Event?
         /// 最近一次打包时区间台账的截止点(`event_intervals` 的 MAX(end_ms));之后又封了区间才再发包。
         var lastExportCutMs: Int64?
+        /// EventSession 每天发过几次(本地日 → 次数):结果没回齐就重发,发满 `PremiumExchangeExporter.maxEventSessionAttempts` 次不再发。
+        var esAttempts: [String: Int] = [:]
 
         enum CodingKeys: String, CodingKey {
             case uploads
             case lastExport = "last_export"
             case lastImport = "last_import"
             case lastExportCutMs = "last_export_cut_ms"
+            case esAttempts = "es_attempts"
+        }
+
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            uploads = try c.decodeIfPresent([Upload].self, forKey: .uploads) ?? []
+            lastExport = try c.decodeIfPresent(Event.self, forKey: .lastExport)
+            lastImport = try c.decodeIfPresent(Event.self, forKey: .lastImport)
+            lastExportCutMs = try c.decodeIfPresent(Int64.self, forKey: .lastExportCutMs)
+            esAttempts = try c.decodeIfPresent([String: Int].self, forKey: .esAttempts) ?? [:]
         }
 
         /// 在路上的包里的区间(不再发)。
         var sentIntervals: Set<String> {
             Set(uploads.filter { PremiumRemote.outstandingStatuses.contains($0.status) }.flatMap { $0.intervals ?? [] })
+        }
+
+        /// EventSession 在路上的本地日(有份发出了、结果还没导入)。
+        var sentEsDays: Set<String> {
+            let parts: [String] = uploads.filter { PremiumRemote.outstandingStatuses.contains($0.status) }.flatMap { $0.esParts ?? [] }
+            return Set(parts.map { String($0.prefix { $0 != "/" }) })
         }
 
         /// 在路上的重跑日子(`<请求 id>/<本地日>`)。
@@ -500,9 +524,9 @@ enum PremiumRemote {
         var healthy: Bool { problem == nil }
     }
 
-    static func probe(_ cfg: PremiumConfig, root: URL = Storage.rootURL) async -> Status {
+    static func probe(_ cfg: PremiumConfig, eventSession: Bool, root: URL = Storage.rootURL) async -> Status {
         let server = serverURL(cfg)?.absoluteString ?? cfg.serverURL
-        var st = Status(server: server, hasKey: key() != nil, problem: nil, user: nil, contents: contents(cfg),
+        var st = Status(server: server, hasKey: key() != nil, problem: nil, user: nil, contents: contents(eventSession: eventSession),
                         state: readState(root))
         guard let t = transport(cfg) else {
             st.problem = serverURL(cfg) == nil ? "no server address" : "no key"

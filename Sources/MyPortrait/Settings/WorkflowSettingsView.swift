@@ -1650,7 +1650,7 @@ struct WorkflowSettingsView: View {
 
     /// EventSession(workflow 第 1 层:每个会话先总结)。只处理开启之后的会话。Provider = 本机模型(内存够才列出)
     /// 或 Connections 里连好的服务;本机模型能不能用每次打开本页按物理内存重算(`EventSessionEligibility`)。
-    /// 选 Premium 时 `PremiumConfig.eventSession` 跟着开(包里带全部元数据,本机不跑)。
+    /// 选 Premium 时本机只做准备,准备好的天打进 Premium 的包(`EventSessionConfig.toPremium`)。
     private var eventSessionSection: some View {
         let elig = EventSessionEligibility.current
         let es = cfg.current.eventSession
@@ -1665,7 +1665,6 @@ struct WorkflowSettingsView: View {
                     if on, elig == .notEligible, $0.eventSession.isLocal {
                         $0.eventSession.source = clouds.first?.rawValue ?? ""
                     }
-                    $0.premium.eventSession = on && $0.eventSession.source == Provider.premium.rawValue
                 }
             })
         let local = es.isLocal && elig != .notEligible
@@ -1742,7 +1741,6 @@ struct WorkflowSettingsView: View {
                     $0.eventSession.source = v
                     $0.eventSession.model = ""
                     $0.eventSession.powerMode = v == "local" ? .chargingIdle : .packed
-                    $0.premium.eventSession = $0.eventSession.enabled && v == Provider.premium.rawValue
                 }
                 EventSessionInstaller.shared.refresh(local: v == "local")
             })

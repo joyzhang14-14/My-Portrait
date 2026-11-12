@@ -613,7 +613,7 @@ enum PremiumImportSelfTest {
             return await E.sealThenExport(
                 seal: { try store.sealCheck(now: now, tzOffsetMin: 0) }, due: { due }, offloaded: true,
                 unreachable: {
-                    switch await R.check(cfg) {
+                    switch await R.check(cfg, eventSession: false) {
                     case .success(let a): contents = a.contents; return nil
                     case .failure(let e): return e.message
                     }
@@ -655,11 +655,11 @@ enum PremiumImportSelfTest {
         check(skipped(r1) == "Premium not reachable (offline)" && writes == 0,
               "seal check, Premium not reachable: export skipped with the reason, nothing packed")
         fake.reachable = true
-        var es = PremiumConfig()
-        es.eventSession = true
-        let probed = await R.probe(cfg, root: root)
-        check(R.contents(cfg) == ["ocr"] && R.contents(es) == ["event_session", "ocr"] && probed.healthy && probed.contents == ["ocr"],
-              "bundle contents follow the pipeline setting: OCR only, everything when EventSession is on")
+        let probed = await R.probe(cfg, eventSession: false, root: root)
+        let probedES = await R.probe(cfg, eventSession: true, root: root)
+        check(R.contents(eventSession: false) == ["ocr"] && R.contents(eventSession: true) == ["event_session", "ocr"]
+              && probed.healthy && probed.contents == ["ocr"] && probedES.contents == ["event_session", "ocr"],
+              "bundle contents follow the pipeline setting: OCR only, plus prepared sessions when EventSession is on Premium")
         let released = await R.release(cfg)
         fake.reachable = false
         let offline = await R.release(cfg)
@@ -745,103 +745,75 @@ enum PremiumImportSelfTest {
         await R.refresh(root: root, cfg: cfg)
         check(R.readState(root).uploads.isEmpty, "refresh: bundle unknown to the server (404) dropped")
 
-        let probe = await R.probe(cfg, root: root)
+        let probe = await R.probe(cfg, eventSession: false, root: root)
         fake.reachable = false
-        let probeOff = await R.probe(cfg, root: root)
+        let probeOff = await R.probe(cfg, eventSession: false, root: root)
         fake.reachable = true
         check(probe.healthy && probe.user == "Selftest" && probe.contents == ["ocr"]
               && !probeOff.healthy && probeOff.problem != nil,
               "Detect: reachable + key valid → healthy with the user name and contents; offline → the reason")
     }
 
-    /// event_session:画面(MP4 块 / JPG)、帧焦点、OCR 词框、击键、鼠标、打字记录,分片只取分片那段。
+    /// EventSession 交给 Premium:准备好的一份挪进包里(`eventsession/<天>/<份>/`)、列进 pending、每个文件记进 manifest.files;
+    /// 只带 OCR 的包里没有它;结果里跑成的份挪进收件箱,份数回齐才算齐;台账里在路上的份 → 那天不再发。
     private static func checkEventSession(tmp: URL) async throws {
-        print("[premium-selftest] event session contents")
+        print("[premium-selftest] event session parts")
         let fm = FileManager.default
         let pools = try DBPools.open(in: tmp.appendingPathComponent("session-db", isDirectory: true))
-        let media = tmp.appendingPathComponent("session-media", isDirectory: true)
-        try fm.createDirectory(at: media, withIntermediateDirectories: true)
-        let mp4 = media.appendingPathComponent("mmain_1000.mp4"), jpg = media.appendingPathComponent("1600_mmain.jpg")
-        try Data("mp4".utf8).write(to: mp4)
-        try Data("jpg".utf8).write(to: jpg)
-        try await pools.screen.write { db in
-            try db.execute(sql: """
-                INSERT INTO video_chunks (id, file_path, device_name, fps, start_ts_ms, end_ts_ms, frame_count, created_at_ms)
-                VALUES (7, :p, 'main', 1, 1000, 1400, 2, 1)
-                """, arguments: ["p": mp4.path])
-            for (t, chunk, offset, snap) in [(Int64(1100), Int64?(7), Int64?(0), String?.none), (1300, 7, 200, nil),
-                                             (1600, nil, nil, jpg.path), (1900, nil, nil, media.appendingPathComponent("gone.jpg").path)] {
-                try db.execute(sql: """
-                    INSERT INTO frames (timestamp_ms, app_name, snapshot_path, video_chunk_id, offset_ms, capture_trigger,
-                                        full_text, ocr_words_json, focus_state, visible_app, created_at_ms)
-                    VALUES (:t, 'App', :snap, :chunk, :offset, 'click', 'text', '[{"text":"text"}]', 'normal', 'App', :t)
-                    """, arguments: ["t": t, "snap": snap, "chunk": chunk, "offset": offset])
-            }
-        }
-        try await pools.input.write { db in
-            for t in [Int64(1200), 1700, 2500] {
-                try db.execute(sql: """
-                    INSERT INTO keystroke_log (ts_ms, bundle_id, char, is_backspace, modifiers) VALUES (:t, 'app', 'a', 0, 0)
-                    """, arguments: ["t": t])
-            }
-            try db.execute(sql: """
-                INSERT INTO mouse_log (ts_ms, bundle_id, kind, click_count, modifiers) VALUES (1250, 'app', 'left_down', 1, 0)
-                """)
-            try db.execute(sql: """
-                INSERT INTO typing_events (bundle_id, element_hash, started_at, ended_at, text, edit_log, total_chars,
-                                           session_start, end_value, stripped, url)
-                VALUES ('app', 1, 1650, 1700, 'hello', '', 5, '', 'hello', '', '')
-                """)
-        }
         let root = tmp.appendingPathComponent("session-root", isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        func bundle(_ iv: PremiumIntervalEntry, _ contents: [String], _ id: String) throws -> URL {
-            let input = PremiumExchangeExporter.Input(
-                chains: ["event"], contents: contents,
-                pending: PremiumPending(eventIntervals: [iv], personalityDays: [], distillPending: false,
-                                      classifyPending: false, writingStyleEnabled: false, writingRecordsUnprocessed: 0),
+        let part = tmp.appendingPathComponent("session-part/p1", isDirectory: true)
+        try fm.createDirectory(at: part.appendingPathComponent("images"), withIntermediateDirectories: true)
+        try Data(#"{"day":"2026-01-04","part":"p1"}"#.utf8).write(to: part.appendingPathComponent("meta.json"))
+        try Data("jpg".utf8).write(to: part.appendingPathComponent("images/f1.jpg"))
+        let entry = PremiumEventSessionEntry(day: "2026-01-04", part: "p1", parts: 2)
+        func bundle(_ contents: [String], _ es: [PremiumEventSessionEntry]?, _ dirs: [URL], _ id: String) throws -> URL {
+            var input = PremiumExchangeExporter.Input(
+                chains: [], contents: contents,
+                pending: PremiumPending(eventIntervals: [], personalityDays: [], distillPending: false, classifyPending: false,
+                                        writingStyleEnabled: false, writingRecordsUnprocessed: 0, eventSession: es),
                 processingLog: [], aboutUserBlock: "", params: selftestParams, appVersion: "selftest")
+            input.eventSessionDirs = dirs
             return try PremiumExchangeExporter.writeBundle(input: input, bundleId: id, root: root,
                                                          parentDir: tmp.appendingPathComponent("session", isDirectory: true),
                                                          pools: pools)
         }
-        func lines(_ d: URL, _ rel: String) -> [[String: Any]] {
-            (read(d.appendingPathComponent(rel)) ?? "").split(separator: "\n").compactMap {
-                try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
-            }
+        func manifest(_ d: URL) throws -> PremiumBundleManifest {
+            try JSONDecoder().decode(PremiumBundleManifest.self, from: Data(contentsOf: d.appendingPathComponent("manifest.json")))
         }
-        let whole = PremiumIntervalEntry(id: "iv:1000", startMs: 1000, endMs: 2000)
-        let all = try bundle(whole, ["event_session", "ocr"], "20260104T000000Z-es")
-        let frames = lines(all, "frames/iv:1000.jsonl")
-        let man = try JSONDecoder().decode(PremiumBundleManifest.self,
-                                           from: Data(contentsOf: all.appendingPathComponent("manifest.json")))
-        check(frames.count == 4
-              && frames[0]["video"] as? String == "video/mmain_1000.mp4" && frames[1]["offset_ms"] as? Int64 == 200
-              && frames[2]["image"] as? String == "images/1600_mmain.jpg"
-              && frames[3]["image"] is NSNull && frames[3]["video"] is NSNull
-              && frames.allSatisfy { $0["focus_state"] as? String == "normal" && $0["visible_app"] as? String == "App"
-                                     && $0["ocr_words_json"] as? String == #"[{"text":"text"}]"# && $0["ocr"] as? String == "text" },
-              "event_session frames: MP4 chunk + offset or the not-yet-compressed JPG, focus, OCR word boxes")
-        check(read(all.appendingPathComponent("video/mmain_1000.mp4")) == "mp4"
-              && read(all.appendingPathComponent("images/1600_mmain.jpg")) == "jpg"
-              && man.files["video/mmain_1000.mp4"] == PremiumExchange.fileSHA(mp4)
-              && man.files["keystrokes/iv:1000.jsonl"] != nil && man.files["frames/iv:1000.jsonl"] != nil,
-              "event_session: screen media copied into the bundle, every file hashed in manifest.files")
-        check(lines(all, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1200, 1700]
-              && lines(all, "mouse/iv:1000.jsonl").count == 1 && lines(all, "typing/iv:1000.jsonl").first?["text"] as? String == "hello",
-              "event_session keys / mouse / typing: only the interval's own time range")
-        var half = whole
-        half.partFromMs = 1500; half.partToMs = 2000
-        let part = try bundle(half, ["event_session", "ocr"], "20260104T000001Z-es")
-        check(lines(part, "frames/iv:1000.jsonl").count == 2 && !fm.fileExists(atPath: part.appendingPathComponent("video").path)
-              && lines(part, "keystrokes/iv:1000.jsonl").map { $0["ts_ms"] as? Int64 } == [1700],
-              "event_session part: media and keys of that part only")
-        let plain = try bundle(whole, ["ocr"], "20260104T000002Z-es")
-        let plainFrames = lines(plain, "frames/iv:1000.jsonl")
-        check(plainFrames.count == 4 && plainFrames.allSatisfy { $0["focus_state"] == nil && $0["video"] == nil }
-              && ["keystrokes", "mouse", "typing", "video", "images"].allSatisfy {
-                  !fm.fileExists(atPath: plain.appendingPathComponent($0).path) },
-              "OCR only: frames as before, nothing from EventSession")
+        let es = try bundle(["event_session", "ocr"], [entry], [part], "20260104T000000Z-es")
+        let man = try manifest(es)
+        check(read(es.appendingPathComponent("eventsession/2026-01-04/p1/images/f1.jpg")) == "jpg" && !fm.fileExists(atPath: part.path)
+              && man.pending.eventSession == [entry] && man.contents == ["event_session", "ocr"] && man.chains.isEmpty
+              && man.files["eventsession/2026-01-04/p1/meta.json"] != nil && man.files["eventsession/2026-01-04/p1/images/f1.jpg"] != nil,
+              "event session: the prepared part moved into the bundle, listed in pending, every file hashed")
+        let plain = try bundle(["ocr"], nil, [], "20260104T000002Z-es")
+        let plainMan = try manifest(plain)
+        check(!fm.fileExists(atPath: plain.appendingPathComponent("eventsession").path) && plainMan.pending.eventSession == nil,
+              "OCR only: nothing from EventSession")
+
+        // 结果:p1 跑成、p2 失败 → 收件箱只有 p1,两份没齐;p2 回来后齐了
+        let inbox = tmp.appendingPathComponent("session-inbox", isDirectory: true)
+        let result = tmp.appendingPathComponent("session-result", isDirectory: true)
+        for p in ["p1", "p2"] {
+            let d = result.appendingPathComponent("eventsession/2026-01-04/\(p)", isDirectory: true)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: d.appendingPathComponent("status.json"))
+        }
+        typealias Part = PremiumResultManifest.EventSessionPart
+        EventSessionWorker.takePremiumResults([Part(day: "2026-01-04", part: "p1", parts: 2, status: "complete"),
+                                               Part(day: "2026-01-04", part: "p2", parts: 2, status: "failed")],
+                                              from: result, inbox: inbox)
+        let half = EventSessionWorker.premiumResultsReady("2026-01-04", inbox: inbox)
+        EventSessionWorker.takePremiumResults([Part(day: "2026-01-04", part: "p2", parts: 2, status: "complete")],
+                                              from: result, inbox: inbox)
+        check(!half && EventSessionWorker.premiumResultsReady("2026-01-04", inbox: inbox)
+              && fm.fileExists(atPath: inbox.appendingPathComponent("2026-01-04/p2/status.json").path),
+              "event session results: finished parts moved to the inbox, the day ready only when every part is back")
+        var st = PremiumRemote.State()
+        st.uploads = [.init(bundleId: "a", trigger: "nightly", chains: [], createdAt: "", status: "queued", esParts: ["2026-01-04/p1"]),
+                      .init(bundleId: "b", trigger: "nightly", chains: [], createdAt: "", status: "superseded", esParts: ["2026-01-05/p1"])]
+        check(st.sentEsDays == ["2026-01-04"], "event session: a day with a part on its way is not sent again")
     }
 
     /// 重跑:Premium 给的日子按先后、去掉在路上的、限天数;做不了的项跳过那个请求;按天取区间(区间台账之前的那段拼一个
@@ -1281,7 +1253,7 @@ enum PremiumImportSelfTest {
         secondHalf.partFromMs = 1500; secondHalf.partToMs = 2000
         func frameTimes(_ iv: PremiumIntervalEntry) throws -> [Int64] {
             let url = tmp.appendingPathComponent("part-\(UUID().uuidString).jsonl")
-            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, mediaInto: nil, pools: partPools)
+            try PremiumExchangeExporter.writeIntervalFrames(iv, to: url, ocr: true, pools: partPools)
             return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").compactMap {
                 (try JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])?["timestamp_ms"] as? Int64
             }

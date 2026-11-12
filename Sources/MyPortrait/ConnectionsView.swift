@@ -348,7 +348,7 @@ struct ConnectionsView: View {
 
     /// Premium 要的包内容在 Connections 里的显示(帧的时间、app、窗口、URL 总是带)。
     private static func premiumContentsLine(_ contents: [String]) -> String {
-        let titles = ["ocr": "OCR text", "event_session": "EventSession (screen video, focus, keys & mouse, typing, OCR boxes)"]
+        let titles = ["ocr": "OCR text", "event_session": "EventSession (prepared sessions: selected screenshots, prompts, OCR text)"]
         return (["app & window names"] + contents.map { titles[$0] ?? $0 }).joined(separator: ", ")
     }
 
@@ -395,7 +395,10 @@ struct ConnectionsView: View {
         .task {
             premiumServerDraft = ConfigStore.shared.current.premium.serverURL
             // 没连上时不去问服务器:带着留下的密钥一问,服务器就把它又绑回这台 Mac。
-            if connected { premiumStatus = await PremiumRemote.probe(ConfigStore.shared.current.premium) }
+            if connected {
+                premiumStatus = await PremiumRemote.probe(ConfigStore.shared.current.premium,
+                                                          eventSession: ConfigStore.shared.current.eventSession.toPremium)
+            }
         }
     }
 
@@ -682,7 +685,8 @@ struct ConnectionsView: View {
             connecting = integration.id
             Task { @MainActor in
                 defer { connecting = nil }
-                let st = await PremiumRemote.probe(ConfigStore.shared.current.premium)
+                let st = await PremiumRemote.probe(ConfigStore.shared.current.premium,
+                                                   eventSession: ConfigStore.shared.current.eventSession.toPremium)
                 premiumStatus = st
                 if st.healthy {
                     if !appState.isConnected(integration.id) {
