@@ -389,11 +389,11 @@ private struct IconSlot: View {
 
 // MARK: - 菜单栏图标说明卡
 
-/// 用 Canvas 按**真实图标几何**画出来的三盏采集灯 + 逐盏实时状态。
+/// 按**真实图标几何**(`MenuBarEye`)画出来的那只眼睛 + 逐路实时状态。
 ///
 /// 不是一张说明图 —— 它读的是 `CaptureLampState.shared`,跟菜单栏那个图标同一个
 /// 数据源。所以这张卡同时是"这图标什么意思"和"我现在到底在被记什么"的自查面板:
-/// 用户切到 1Password 再回来看这一页,能看到灯确实灭过。
+/// 用户切到 1Password 再回来看这一页,能看到眼睛确实闭过。
 private struct MenuBarLampCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var config = ConfigStore.shared
@@ -401,7 +401,7 @@ private struct MenuBarLampCard: View {
     var body: some View {
         SettingsCard(
             title: "Menu bar icon",
-            info: "Three rings, one per capture channel — screen outside, audio in the middle, typing inside. A ring lights up only while that channel is recording the app you're in right now. It turns gray the moment the channel is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on that channel's ignore list. When **All Capture** is switched off, the whole icon turns red."
+            info: "An eye. It's open while My Portrait is capturing the screen of the app you're in right now, and closes the moment screen capture is switched off, its permission is missing, capture is paused, or the app — or the page — you're in is on the ignore list. Audio and typing aren't on the icon; hover over it, or check the list here, to see each one."
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 // ⚠️ **拉取式,不是 @ObservedObject 推送式**。
@@ -414,12 +414,9 @@ private struct MenuBarLampCard: View {
                 SwiftUI.TimelineView(LampSchedule()) { tl in
                     let lamps = CaptureLampState.shared
                     HStack(alignment: .center, spacing: 22) {
-                        // 底片模拟菜单栏,**跟随系统外观**:深色模式深底、浅色模式浅底,
-                        // 色板也跟着换 —— 和菜单栏里真正显示的那一版(Assets 里
-                        // Any / Dark 两套)始终一致,不然用户在这张卡上看到的和
-                        // 抬头看到的对不上。
+                        // 底片模拟菜单栏,**跟随系统外观**:深色模式深底白眼、浅色模式浅底黑眼,
+                        // 和菜单栏里那个模板图一致。
                         let dark = colorScheme == .dark
-                        let pal = LampGlyph.palette(dark: dark)
                         ZStack {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(dark ? Color(red: 0.11, green: 0.11, blue: 0.12)
@@ -428,28 +425,24 @@ private struct MenuBarLampCard: View {
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .stroke(dark ? Color.white.opacity(0.10)
                                                      : Color.black.opacity(0.10), lineWidth: 1))
-                            LampGlyph(screen: lamps.screen.on,
-                                      audio: lamps.audio.on,
-                                      typing: lamps.typing.on,
-                                      paused: lamps.masterOff,
-                                      dark: dark,
-                                      now: tl.date)
-                                .padding(8)
+                            EyeGlyph(open: lamps.watching)
+                                .foregroundStyle(dark ? Color.white : Color.black)
+                                .padding(22)
                         }
                         .frame(width: 128, height: 128)
 
                         VStack(alignment: .leading, spacing: 9) {
-                            // 总开关:开着不占颜色;关掉 = 暂停,整个图标变红。
-                            // 灭的那句说明放这里(三盏灯灭时只说"被总开关关掉",不再各自重复)。
-                            legendRow("All Capture", pal.paused,
+                            // 总开关:关掉 = 暂停,眼睛闭上。灭的那句说明放这里
+                            // (三路灭时只说"被总开关关掉",不再各自重复)。
+                            legendRow("All Capture",
                                       CaptureLampState.Lamp(
                                           on: !lamps.masterOff,
-                                          reason: "All capture is switched off — the icon turns red."),
-                                      onText: "On — every capture channel is allowed to run.",
-                                      offFilled: true)
-                            legendRow("Screen",  pal.screen, lamps.screen)
-                            legendRow("Audio",   pal.audio,  lamps.audio)
-                            legendRow("Typing",  pal.typing, lamps.typing)
+                                          reason: "All capture is switched off — the eye is closed."),
+                                      onText: "On — every capture channel is allowed to run.")
+                            legendRow("Screen", lamps.screen,
+                                      onText: "Capturing this app right now — the eye is open.")
+                            legendRow("Audio",  lamps.audio)
+                            legendRow("Typing", lamps.typing)
                         }
                         Spacer(minLength: 0)
                     }
@@ -477,13 +470,12 @@ private struct MenuBarLampCard: View {
         }
     }
 
-    @ViewBuilder
-    /// `offFilled`:总开关那一行反过来 —— 关掉(暂停)才是实心红,开着是空心。
-    private func legendRow(_ name: String, _ color: Color,
+    /// 实心点 = 这一路此刻在记,空心 = 没在记(灰字给原因)。
+    private func legendRow(_ name: String,
                            _ lamp: CaptureLampState.Lamp,
-                           onText: String = "Recording this app right now.",
-                           offFilled: Bool = false) -> some View {
-        let filled = offFilled ? !lamp.on : lamp.on
+                           onText: String = "Recording this app right now.") -> some View {
+        let filled = lamp.on
+        let color = Theme.textPrimary.opacity(0.8)
         return HStack(alignment: .top, spacing: 9) {
             Circle()
                 .fill(filled ? color : Color.clear)
@@ -501,9 +493,9 @@ private struct MenuBarLampCard: View {
     }
 }
 
-/// 灯卡的墙钟:平时 20 帧/秒(星尘漂浮 + 拉取灯状态);本 app 没有露在屏幕上的窗口、
-/// 或显示器睡了 / 亮度调到最低时,降到 2s 一帧 —— 看不见还按 20 帧重画,整夜挂着设置页
-/// 能吃掉 30%+ CPU。条件每秒最多查一次;不能停表:后台窗口收不到推送,停了就醒不过来。
+/// 灯卡的墙钟:平时半秒拉一次灯状态;本 app 没有露在屏幕上的窗口、或显示器睡了 /
+/// 亮度调到最低时,降到 2s 一次。条件每秒最多查一次;不能停表:后台窗口收不到推送,
+/// 停了就醒不过来。
 private struct LampSchedule: TimelineSchedule {
     func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
         var next = startDate
@@ -516,7 +508,7 @@ private struct LampSchedule: TimelineSchedule {
                 hidden = Self.hidden()
             }
             let t = max(next, now)
-            next = t.addingTimeInterval(hidden || mode == .lowFrequency ? 2 : 1.0 / 20)
+            next = t.addingTimeInterval(hidden || mode == .lowFrequency ? 2 : 0.5)
             return t
         }
     }
@@ -530,114 +522,20 @@ private struct LampSchedule: TimelineSchedule {
     }
 }
 
-/// 菜单栏图标的大号版:同心三圈星尘带(实心带外缘 7.8 / 内缘 4.68,单位是 18pt 图标),
-/// 色板与 Assets 里 MenuBarLamp-* 两套 PNG 一致。菜单栏那版是静态的星云底 + 星尘;
-/// 这里尺寸大,颗粒更细更密;每圈往相邻那圈渗半个环宽(交界处颜色融在一起),
-/// 最外圈像 app 图标那圈一样往外散(越远越稀、越小、越淡,但更稀疏),空心内缘也散进去一点;
-/// 三圈颗粒都在自己的范围里漂浮(不越出这个范围、不整体转)—— 灰环和红环也漂:
-/// 看这张卡时前台就是本 app,它通常在忽略名单里,三圈多半是灰的。
-private struct LampGlyph: View {
-    var screen: Bool
-    var audio: Bool
-    var typing: Bool
-    /// 总开关关(暂停)= 三圈全红。
-    var paused: Bool
-    var dark: Bool
-    /// 漂浮相位由外层墙钟 TimelineView 传进来(外层已保证后台也在 tick)。
-    var now: Date
-
-    struct Palette { let screen, audio, typing, off, paused: Color }
-
-    private static func rgb(_ hex: UInt32) -> Color {
-        Color(red: Double(hex >> 16 & 0xFF) / 255, green: Double(hex >> 8 & 0xFF) / 255,
-              blue: Double(hex & 0xFF) / 255)
-    }
-
-    /// 浅色底用偏深、偏饱和的色;深色底用偏亮的色。
-    static func palette(dark: Bool) -> Palette {
-        dark ? Palette(screen: rgb(0xB07CFF), audio: rgb(0xFFD84D),
-                       typing: rgb(0x6AA8FF), off: rgb(0x66666C),
-                       paused: rgb(0xFF5A52))
-             : Palette(screen: rgb(0x7A1FE0), audio: rgb(0xE0A800),
-                       typing: rgb(0x2563EB), off: rgb(0xB4B4BA),
-                       paused: rgb(0xE0342B))
-    }
-
-    /// 一颗星尘:极坐标位置 + 大小/透明度 + 漂浮的频率与相位。
-    private struct Dust {
-        let angle, radius, size, alpha: Double
-        let r1, r2: Double                 // 这颗能待的内外半径(本圈带子外扩半个环宽,夹在空心与外缘之间)
-        let fa, pa, fr, pr: Double         // 沿环 / 径向两个方向的摆动频率与相位
-    }
-
-    /// 三圈颗粒一次生成、固定种子:带内按面积均匀撒,渗进相邻那圈的部分越远越稀。
-    /// 画布半宽(图标坐标):装下往外散的颗粒,再留一点漂浮余量。
-    private static let extent = 7.8 + 3.0 * 1.2
-
-    private static let dust: [[Dust]] = {
-        // 实心带外缘 7.8 / 内缘 4.68(和菜单栏图标同宽);三圈互渗半个环宽;最外圈像 app 图标那圈一样往外散 3
-        // (大多挤在环边,越外越少越小越淡,只是更稀疏),最内圈往空心里散 1
-        let outer = 7.8, hole = 4.68, w = (outer - hole) / 3
-        let blend = 0.5, spillOut = 3.0, spillIn = 1.0, spillFrac = 0.9
-        var seed: UInt64 = 0x9E3779B97F4A7C15
-        func next() -> Double {          // SplitMix64
-            seed &+= 0x9E3779B97F4A7C15
-            var z = seed
-            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
-            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
-            return Double((z ^ (z >> 31)) >> 11) / Double(1 << 53)
-        }
-        return (0..<3).map { i in
-            let r2 = outer - Double(i) * w, r1 = r2 - w
-            let lo = max(hole, r1 - blend * w), hi = min(outer, r2 + blend * w)
-            let n = Int(16 * Double.pi * (r2 * r2 - r1 * r1) * (1 + blend))
-            // fade:散出边缘的程度(0 = 带内),越大颗粒越小越淡;漂浮范围包住它自己的位置
-            func dust(_ r: Double, _ fade: Double) -> Dust {
-                Dust(angle: next() * 2 * .pi,
-                     radius: r,
-                     size: (0.08 + next() * 0.16) * (1 - 0.5 * fade),
-                     alpha: (0.55 + next() * 0.45) * (1 - 0.8 * fade),
-                     r1: min(r, lo), r2: max(r, hi),
-                     fa: 0.15 + next() * 0.25, pa: next() * 2 * .pi,
-                     fr: 0.2 + next() * 0.3, pr: next() * 2 * .pi)
-            }
-            var ring: [Dust] = (0..<n).map { _ in
-                var r = 0.0
-                while true {
-                    r = (lo * lo + next() * (hi * hi - lo * lo)).squareRoot()
-                    let out = r < r1 ? (r1 - r) / (blend * w) : r > r2 ? (r - r2) / (blend * w) : 0
-                    if next() > out { break }
-                }
-                return dust(r, 0)
-            }
-            // 边缘散开:越远越稀(u² 偏向边缘)
-            let extra = Int(Double(n) * spillFrac)
-            if i == 0 { for _ in 0..<extra { let u = pow(next(), 2.8); ring.append(dust(outer + u * spillOut, u)) } }
-            if i == 2 { for _ in 0..<extra { let u = pow(next(), 2); ring.append(dust(hole - u * spillIn, u)) } }
-            return ring
-        }
-    }()
+/// 菜单栏那只眼睛的大号版,几何直接用 `MenuBarEye`(24×24 坐标),颜色由外面的
+/// foregroundStyle 定。
+private struct EyeGlyph: View {
+    var open: Bool
 
     var body: some View {
         Canvas { ctx, size in
-            let pal = Self.palette(dark: dark)
-            let k = min(size.width, size.height) / (2 * Self.extent)
-            let cx = size.width / 2, cy = size.height / 2
-            let t = now.timeIntervalSinceReferenceDate
-            let rings: [(Bool, Color)] = [(screen, pal.screen), (audio, pal.audio), (typing, pal.typing)]
-            for (i, ring) in rings.enumerated() {
-                let lit = !paused && ring.0
-                let color = paused ? pal.paused : (lit ? ring.1 : pal.off)
-                for d in Self.dust[i] {
-                    var a = d.angle, r = d.radius
-                    // 沿环来回漂 + 径向晃,半径夹在自己的范围里
-                    let ts = t * 2
-                    a += 0.18 * sin(ts * d.fa + d.pa)
-                    r = min(d.r2 - d.size, max(d.r1 + d.size, r + 0.66 * sin(ts * d.fr + d.pr)))
-                    let x = cx + cos(a) * r * k, y = cy + sin(a) * r * k, rr = d.size * k
-                    ctx.fill(Path(ellipseIn: CGRect(x: x - rr, y: y - rr, width: 2 * rr, height: 2 * rr)),
-                             with: .color(color.opacity(d.alpha)))
-                }
+            let k = min(size.width, size.height) / 24
+            let ox = (size.width - 24 * k) / 2, oy = (size.height - 24 * k) / 2
+            let t = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: k, y: k)
+            ctx.stroke(Path(MenuBarEye.stroke(open: open)).applying(t), with: .foreground,
+                       style: StrokeStyle(lineWidth: MenuBarEye.lineWidth * k, lineCap: .round, lineJoin: .round))
+            if let f = MenuBarEye.fill(open: open) {
+                ctx.fill(Path(f).applying(t), with: .foreground)
             }
         }
     }

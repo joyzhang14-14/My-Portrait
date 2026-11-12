@@ -299,30 +299,16 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
         // 切成红色惊叹号 —— 用户不喜欢那个刺眼图标。健康状态仍由下面的 tooltip
         // 表达(hover 才看到,不打扰)。
         statusItem.button?.contentTintColor = nil
-        do {
-            // 菜单栏图标 = **三盏实时采集灯**,画成紧贴的同心三圈星尘带(淡色底 + 颗粒)、
-            // 中心空心(外→内:紫屏幕 / 黄音频 / 蓝打字);灭的那圈是灰色,总开关关掉整个变红。
-            // 灯亮 ⇔ 这一路此刻真的在记当前这个 app;前台切到 Ignored app、
-            // 撞上暂停、功能关掉或没权限 → 对应的灯灭。判定见 CaptureLampState。
-            //
-            // **isTemplate = false 是关键**:图是彩色的,设 true 会被系统压成
-            // 黑白剪影,三盏灯就全一个颜色、彻底失去意义。
-            // 深浅两套色板不走代码分支 —— 每个 imageset 里 Any(浅色菜单栏用偏深的色)
-            // 和 Dark(深色菜单栏用偏亮的色)各一份,AppKit 按按钮的 effectiveAppearance 自己挑。
-            // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
-            // 变化通知,回头调 refreshIcon,重算会成自激死循环(主线程 100% CPU、
-            // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
-            let lamps = CaptureLampState.shared
-            if let img = NSImage(named: lamps.assetName) {
-                // 图标是 24pt 画布(实心环约 20pt,外圈星尘散到画布边),按设置的边长缩放;
-                // 素材有 3x,放大到 36pt 在 2x 屏上也不糊。
-                let r = Self.iconSizeRange
-                let side = CGFloat(min(max(ConfigStore.shared.display.menuBarIconSize, r.lowerBound), r.upperBound))
-                img.size = NSSize(width: side * img.size.width / max(img.size.height, 1), height: side)
-                img.isTemplate = false
-                statusItem.button?.image = img
-            }
-        }
+        // 菜单栏图标 = **一只眼睛**,模板图(纯黑 / 纯白,跟系统其他菜单栏图标一样随
+        // 菜单栏深浅变)。睁眼 ⇔ 屏幕此刻真的在截当前这个 app;前台切到 Ignored app、
+        // 撞上暂停、屏幕采集关掉或没权限 → 闭眼。判定见 CaptureLampState。音频和打字
+        // 不上图标,hover 的 tooltip 逐路说明。
+        // ⚠️ 这里**只读**灯的当前状态,绝不触发它重算 —— 下面订阅了它的
+        // 变化通知,回头调 refreshIcon,重算会成自激死循环(主线程 100% CPU、
+        // UI 冻死)。它自己有 2s 轮询兜 DRM/睡眠。
+        let r = Self.iconSizeRange
+        let side = CGFloat(min(max(ConfigStore.shared.display.menuBarIconSize, r.lowerBound), r.upperBound))
+        statusItem.button?.image = MenuBarEye.image(open: CaptureLampState.shared.watching, side: side)
 
         let toolTip: String
         if unhealthy {
@@ -427,5 +413,60 @@ final class StatusBarMenu: NSObject, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+/// 菜单栏的眼睛。24×24 坐标、y 朝下,线宽 1.7:睁眼 = 杏仁形眼眶 + 实心瞳孔;
+/// 闭眼 = 往下弯的眼皮线 + 三根睫毛。菜单栏和 Display 设置页的说明卡共用这套几何。
+enum MenuBarEye {
+    static let lineWidth: CGFloat = 1.7
+
+    /// 描边部分:眼眶,或眼皮 + 睫毛。
+    static func stroke(open: Bool) -> CGPath {
+        let p = CGMutablePath()
+        if open {
+            p.move(to: CGPoint(x: 2.5, y: 12))
+            p.addCurve(to: CGPoint(x: 21.5, y: 12), control1: CGPoint(x: 6, y: 6), control2: CGPoint(x: 18, y: 6))
+            p.addCurve(to: CGPoint(x: 2.5, y: 12), control1: CGPoint(x: 18, y: 18), control2: CGPoint(x: 6, y: 18))
+            p.closeSubpath()
+        } else {
+            p.move(to: CGPoint(x: 2.5, y: 11))
+            p.addCurve(to: CGPoint(x: 21.5, y: 11), control1: CGPoint(x: 6, y: 16), control2: CGPoint(x: 18, y: 16))
+            for (a, b) in [(CGPoint(x: 7, y: 14.6), CGPoint(x: 5.8, y: 17)),
+                           (CGPoint(x: 12, y: 15.8), CGPoint(x: 12, y: 18.4)),
+                           (CGPoint(x: 17, y: 14.6), CGPoint(x: 18.2, y: 17))] {
+                p.move(to: a)
+                p.addLine(to: b)
+            }
+        }
+        return p
+    }
+
+    /// 实心部分:瞳孔。闭眼没有。
+    static func fill(open: Bool) -> CGPath? {
+        open ? CGPath(ellipseIn: CGRect(x: 8.7, y: 8.7, width: 6.6, height: 6.6), transform: nil) : nil
+    }
+
+    /// 边长 `side` 的模板图(系统按菜单栏深浅染成纯黑 / 纯白)。
+    static func image(open: Bool, side: CGFloat) -> NSImage {
+        let img = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            ctx.scaleBy(x: rect.width / 24, y: rect.height / 24)
+            ctx.setStrokeColor(NSColor.black.cgColor)
+            ctx.setFillColor(NSColor.black.cgColor)
+            ctx.setLineWidth(lineWidth)
+            ctx.setLineCap(.round)
+            ctx.setLineJoin(.round)
+            ctx.addPath(stroke(open: open))
+            ctx.strokePath()
+            if let f = fill(open: open) {
+                ctx.addPath(f)
+                ctx.fillPath()
+            }
+            return true
+        }
+        img.isTemplate = true
+        img.accessibilityDescription = open ? "My Portrait — capturing" : "My Portrait — not capturing"
+        return img
     }
 }

@@ -40,15 +40,11 @@ final class CaptureLampState: ObservableObject {
     @Published private(set) var screen = Lamp(on: false, reason: "off")
     @Published private(set) var audio = Lamp(on: false, reason: "off")
     @Published private(set) var typing = Lamp(on: false, reason: "off")
-    /// 全局采集总开关(capture.screen.enabled)关着(= 暂停)—— 整个图标变红。
+    /// 全局采集总开关(capture.screen.enabled)关着(= 暂停)。
     @Published private(set) var masterOff = false
 
-    /// 三盏灯的组合 → 资源名 `MenuBarLamp-S1-A0-T1`;总开关关掉 → `MenuBarLamp-Off`
-    /// (三个环全红)。
-    var assetName: String {
-        masterOff ? "MenuBarLamp-Off"
-                  : "MenuBarLamp-S\(screen.on ? 1 : 0)-A\(audio.on ? 1 : 0)-T\(typing.on ? 1 : 0)"
-    }
+    /// 菜单栏那只眼睛睁着:屏幕此刻真的在截当前这个 app。
+    var watching: Bool { !masterOff && screen.on }
 
     private var cancellables = Set<AnyCancellable>()
     /// 前台 app 的三个标量(名字 / bundle id / pid)。**不存 NSRunningApplication**
