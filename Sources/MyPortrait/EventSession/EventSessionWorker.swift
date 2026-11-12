@@ -239,7 +239,11 @@ actor EventSessionWorker {
                 await MainActor.run { EventSessionStatus.shared.progress = shown }
             case "stage":
                 let step = Self.flowStep(obj["stage"] as? String)
-                await MainActor.run { EventSessionStatus.shared.stage = step }
+                let preparing = prepareOnly ? obj["day"] as? String : nil
+                await MainActor.run {
+                    EventSessionStatus.shared.stage = step
+                    EventSessionStatus.shared.preparingDay = preparing
+                }
             case "plan", "day_plan":
                 await setPlan(obj)
             case "llm":
@@ -271,7 +275,10 @@ actor EventSessionWorker {
         }
         dog.cancel()
         cfgWatch.cancel()
-        await MainActor.run { EventSessionStatus.shared.stage = nil }
+        await MainActor.run {
+            EventSessionStatus.shared.stage = nil
+            EventSessionStatus.shared.preparingDay = nil
+        }
         p.waitUntilExit()
         lastMark = nil                                      // 两批之间(等空闲、等充电)的时间不算进吞吐
     }
@@ -522,6 +529,8 @@ final class EventSessionStatus {
     /// 没在跑、还有活时停在哪一步(同上的 step id)。
     var pausedAt: String?
     var progress: EventSessionProgress?
+    /// 正在准备(不用模型那几步)的那天,"yyyy-MM-dd";没在准备 = nil。
+    var preparingDay: String?
     /// 合盖保持运行的 helper 批准了没有(worker 每分钟查一次;设置页据此提示)。
     var helperApproved = true
 }

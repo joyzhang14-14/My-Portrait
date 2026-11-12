@@ -1051,6 +1051,16 @@ struct WorkflowSettingsView: View {
         }
     }
 
+    /// "yyyy-MM-dd" → "Nov 11"。
+    private static func monthDay(_ day: String) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: day) else { return day }
+        f.dateFormat = "MMM d"
+        return f.string(from: d)
+    }
+
     /// 第几天 / 共几天 · 那天的会话进度,下面一条总进度条(按帧),右边剩余帧数和按最近速度估的时间。
     private func eventSessionProgress(_ p: EventSessionProgress) -> some View {
         let dayLabel: String = {
@@ -1065,9 +1075,14 @@ struct WorkflowSettingsView: View {
         let eta = p.secPerFrame.map { Double(left) * $0 / 3600 }.map { $0 >= 1 ? "about \(Int($0.rounded())) h left" : "about \(max(1, Int(($0 * 60).rounded()))) min left" }
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 0) {
-                Text("Day \(p.dayIndex) of \(p.days)").font(.system(size: 12, weight: .semibold))
-                Text(" · \(dayLabel) · \(p.sessionsDone) of \(p.sessions) sessions")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                // 准备阶段在跑时写它在准备哪天(流程图亮的是那天的 Cut / Pick),跑完换回模型的进度
+                if let prep = EventSessionStatus.shared.preparingDay {
+                    Text("Preparing \(Self.monthDay(prep))").font(.system(size: 12, weight: .semibold))
+                } else {
+                    Text("Day \(p.dayIndex) of \(p.days)").font(.system(size: 12, weight: .semibold))
+                    Text(" · \(dayLabel) · \(p.sessionsDone) of \(p.sessions) sessions")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Text("\(p.framesDone.formatted()) of \(p.frames.formatted()) frames" + (eta.map { " · \($0)" } ?? ""))
                     .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
