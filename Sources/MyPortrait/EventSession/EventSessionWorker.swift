@@ -105,10 +105,10 @@ actor EventSessionWorker {
         await EventSessionInstaller.shared.update(local: local)
     }
 
-    /// 不用模型的几步能不能做:开着、不是交给 Premium、运行环境装好、机器不过热。不看电源和内存。
+    /// 不用模型的几步能不能做:开着、运行环境装好、机器不过热(不管 provider,含 Premium)。不看电源和内存。
     private func prepareGate() async -> Bool {
         let es = await MainActor.run { ConfigStore.shared.current.eventSession }
-        guard es.enabled, es.source != Provider.premium.rawValue, EventSessionInstaller.runtimeReady else { return false }
+        guard es.enabled, EventSessionInstaller.runtimeReady else { return false }   // 不管 provider(含 Premium)都先准备好
         let thermal = PowerMonitor.snapshot().thermalState
         return thermal != .serious && thermal != .critical
     }
@@ -126,9 +126,10 @@ actor EventSessionWorker {
             guard PowerMonitor.isOnAC else { return "Waiting for the charger" }
             if mode == .chargingIdle, !PowerMonitor.isIdle { return "Waiting until the screen isn't in use" }
         }
+        // 下面这些只管本机模型;云端只是把包发出去、收回结果,不占本机算力
         let snap = PowerMonitor.snapshot()
         if es.isLocal, snap.isLowPowerMode { return "Low Power Mode is on" }
-        if snap.thermalState == .serious || snap.thermalState == .critical { return "The Mac is too hot" }
+        if es.isLocal, snap.thermalState == .serious || snap.thermalState == .critical { return "The Mac is too hot" }
         // 内存只在开跑前看:跑起来后压力高是模型自己占的(加载那一下就会冲到严重),不能因此把自己停掉
         if es.isLocal, !running {
             if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
