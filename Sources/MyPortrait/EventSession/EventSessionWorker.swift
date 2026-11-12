@@ -134,7 +134,8 @@ actor EventSessionWorker {
             if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
             guard let avail = SystemMemory.availableBytes(), avail >= SystemMemory.minFreeBytes else { return "Not enough free memory" }
         }
-        if await MainActor.run(body: { DeferredOCRStatus.shared.running }) { return "Waiting for screen text recognition" }
+        // 延后 OCR 在跑就不开跑;已经跑起来了就不让给它(它会等这一批跑完),不然两边来回抢、谁都跑不成
+        if !running, await MainActor.run(body: { DeferredOCRStatus.shared.running }) { return "Waiting for screen text recognition" }
         return nil
     }
 
