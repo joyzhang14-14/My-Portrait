@@ -113,7 +113,7 @@ actor EventSessionWorker {
         return await !MainActor.run(body: { DeferredOCRStatus.shared.running })
     }
 
-    /// 能跑回 nil,不能跑回原因(给设置页看)。`running` = 跑到一半的复查:模型自己占着内存,只看压力,不看余量。
+    /// 能跑回 nil,不能跑回原因(给设置页看)。`running` = 跑到一半的复查:模型自己占着内存,不看内存。
     private func gate(running: Bool = false) async -> String? {
         let es = await MainActor.run { ConfigStore.shared.current.eventSession }
         guard es.enabled else { return "Off" }
@@ -129,11 +129,10 @@ actor EventSessionWorker {
         let snap = PowerMonitor.snapshot()
         if es.isLocal, snap.isLowPowerMode { return "Low Power Mode is on" }
         if snap.thermalState == .serious || snap.thermalState == .critical { return "The Mac is too hot" }
-        if es.isLocal {
+        // 内存只在开跑前看:跑起来后压力高是模型自己占的(加载那一下就会冲到严重),不能因此把自己停掉
+        if es.isLocal, !running {
             if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
-            if !running {
-                guard let avail = SystemMemory.availableBytes(), avail >= SystemMemory.minFreeBytes else { return "Not enough free memory" }
-            }
+            guard let avail = SystemMemory.availableBytes(), avail >= SystemMemory.minFreeBytes else { return "Not enough free memory" }
         }
         if await MainActor.run(body: { DeferredOCRStatus.shared.running }) { return "Waiting for screen text recognition" }
         return nil
@@ -188,15 +187,29 @@ actor EventSessionWorker {
         // 关掉开关,或换了 provider / 模型 / 运行时间档:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做),
         // 下一轮按新设置重新过闸。Daily limit / Detail 只管还没准备的天,改了不停。
         let started = es
+        let log = self.log
         let cfgWatch = Task {
+            var misses = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                 let now = await MainActor.run { ConfigStore.shared.current.eventSession }
                 let changed = !now.enabled || now.source != started.source || now.model != started.model
                     || now.powerMode != started.powerMode
                 // 模型阶段:运行条件不满足了(不再空闲、拔了电源、内存压力严重……)也立刻停,不等这个会话做完
-                let gateFailed = prepareOnly ? false : await self.gate(running: true) != nil
-                if changed || gateFailed, p.isRunning { p.terminate(); break }
+                let reason = prepareOnly ? nil : await self.gate(running: true)
+                misses = reason == nil ? 0 : misses + 1
+                // 连着两次(约 4 秒)都不满足才停:合盖 / 熄屏切换的那一下状态会抖
+                if changed || misses >= 2, p.isRunning {
+                    let why = changed ? "settings changed" : reason ?? ""
+                    log.notice("engine stopped: \(why, privacy: .public)")
+                    if let h = FileHandle(forWritingAtPath: work.appendingPathComponent("engine.log").path) {
+                        _ = try? h.seekToEnd()
+                        h.write(Data("\n=== \(Date()) engine stopped by app: \(why) ===\n".utf8))
+                        try? h.close()
+                    }
+                    p.terminate()
+                    break
+                }
             }
         }
         let dog = Task {
