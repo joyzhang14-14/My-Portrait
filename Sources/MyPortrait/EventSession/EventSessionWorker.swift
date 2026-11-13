@@ -7,7 +7,7 @@ import os.log
 /// 一批最多 `chunkSessions` 个会话就让它退出、下一批重拉(本机 MLX 长跑会触发显卡驱动 panic)。
 /// 本机模型的闸:开关开着、东西装齐;插电,且按运行时间档(charging / charging_idle,内存 < 20 GB 的机器只有后者);
 /// 内存压力不是「严重」(「警告」照跑:开着一堆网页时很多 Mac 长期在警告档,模型加载时系统会压缩 / 换出闲着的内存)、
-/// 能立刻让出来的内存 ≥ `SystemMemory.minFreeBytes`;温度没到 serious、不在低电量模式。和延后 OCR 可以同时跑:
+/// 能立刻让出来的内存 ≥ `SystemMemory.minFreeBytes`;温度没到 critical(serious 时系统自己降频,慢一点照跑)、不在低电量模式。和延后 OCR 可以同时跑:
 /// 引擎只做 OCR 已补完的天(engine.pending_days 停在还有 ocr_pending 的天前面),两边碰不到同一天(11-11 update)。
 /// 云端 provider:引擎每要调一次模型就发 `llm` 请求,这里用 Connections 里连好的服务调(`EventSessionCloud`),
 /// 把回复交回引擎;运行时间档多一个 packed(一天过完、电脑醒着就跑,不看电源),不看内存。
@@ -138,7 +138,7 @@ actor EventSessionWorker {
         // 下面这些只管本机模型;云端只是把包发出去、收回结果,不占本机算力
         let snap = PowerMonitor.snapshot()
         if es.isLocal, snap.isLowPowerMode { return "Low Power Mode is on" }
-        if es.isLocal, snap.thermalState == .serious || snap.thermalState == .critical { return "The Mac is too hot" }
+        if es.isLocal, snap.thermalState == .critical { return "The Mac is too hot" }
         // 内存只在开跑前看:跑起来后压力高是模型自己占的(加载那一下就会冲到严重),不能因此把自己停掉
         if es.isLocal, !running {
             if let level = SystemMemory.pressureLevel(), level >= 4 { return "Memory pressure is critical" }
