@@ -1696,7 +1696,7 @@ struct WorkflowSettingsView: View {
                 }
                 eventSessionProviderRows(elig: elig, clouds: clouds)
                 eventSessionWhenRow(elig: elig, ready: ready && !premium)
-                if es.enabled, !premium, es.powerMode != .packed, !EventSessionStatus.shared.helperApproved {
+                if es.enabled, !premium, es.powerMode != .packed, !SleepHelperClient.shared.isApproved {
                     HStack(spacing: 8) {
                         Text("Closing the lid puts this Mac to sleep and pauses EventSession. Allow the background helper to keep it running with the lid closed.")
                             .font(.system(size: 11)).foregroundStyle(.orange)

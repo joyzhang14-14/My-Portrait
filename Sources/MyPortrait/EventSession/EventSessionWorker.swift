@@ -102,7 +102,6 @@ actor EventSessionWorker {
         await MainActor.run {
             SleepHelperClient.shared.completeApprovalIfAllowed()
             SleepHelperClient.shared.setKeepAwake(want, owner: "eventsession")
-            EventSessionStatus.shared.helperApproved = SleepHelperClient.shared.isApproved
         }
     }
 
@@ -209,12 +208,14 @@ actor EventSessionWorker {
             switch ev {
             case "session":
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
-            case "frame":
-                // 一帧一记:上一帧(或这批开跑)到这一帧的时间。按会话记会把被打断那几轮看的帧算到续看的那一轮头上,吞吐偏高
-                let now = ProcessInfo.processInfo.systemUptime
-                if let m = lastMark { runSecs += now - m; runFrames += 1 }
-                lastMark = now
-            case "progress", "day_done":
+            case "frame", "progress", "day_done":
+                if ev == "frame" {
+                    // 一帧一记:上一帧(或这批开跑)到这一帧的时间。按会话记会把被打断那几轮看的帧算到续看的那一轮头上,吞吐偏高
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if let m = lastMark { runSecs += now - m; runFrames += 1 }
+                    lastMark = now
+                }
+                // 每看完一帧就重算进度和剩余时间
                 var prog = Self.progress(sinceMs: es.sinceMs)
                 if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
                 let shown = prog
@@ -525,12 +526,15 @@ actor EventSessionWorker {
             let dir = work.appendingPathComponent("runs/day_\(day)")
             let sel = (try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("select.json")))) as? [String: Any]
             let fids = sel?["fids"] as? [String: [Int]] ?? [:]
-            let obs = Set(((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
-                .filter { $0.hasPrefix("obs_s") && $0.hasSuffix(".json") }
-                .map { String($0.dropFirst(5).dropLast(5)) })
+            let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+            let obs = Set(names.filter { $0.hasPrefix("obs_s") && $0.hasSuffix(".json") }.map { String($0.dropFirst(5).dropLast(5)) })
+            // 看到一半的会话(obs_part_s*.json)已看的帧也算进去
+            let partial = names.filter { $0.hasPrefix("obs_part_s") && $0.hasSuffix(".json") }.reduce(0) { n, f in
+                n + ((((try? JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent(f)))) as? [String: Any])?["digests"] as? [Any])?.count ?? 0)
+            }
             p.frames += fids.values.reduce(0) { $0 + $1.count }
             p.framesDone += done.contains(day) ? fids.values.reduce(0) { $0 + $1.count }
-                                               : fids.filter { obs.contains($0.key) }.values.reduce(0) { $0 + $1.count }
+                                               : fids.filter { obs.contains($0.key) }.values.reduce(0) { $0 + $1.count } + partial
             if p.day.isEmpty, !done.contains(day) {
                 p.day = day
                 p.dayIndex = i + 1
@@ -671,8 +675,6 @@ final class EventSessionStatus {
     var progress: EventSessionProgress?
     /// 正在准备(不用模型那几步)的那天,"yyyy-MM-dd";没在准备 = nil。
     var preparingDay: String?
-    /// 合盖保持运行的 helper 批准了没有(worker 每分钟查一次;设置页据此提示)。
-    var helperApproved = true
 }
 
 /// Timeline 的 Event session 卡读结果:先用当前这一帧查它属于哪个会话(`session_frames`);
