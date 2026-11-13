@@ -851,3 +851,55 @@ enum AppName {
 extension NSRunningApplication {
     var cleanName: String? { localizedName.map(AppName.clean) }
 }
+
+/// 「正在输密码」:两个信号任一命中,屏幕整帧不截、菜单栏的眼睛闭上。
+///
+/// 1. 系统安全输入(Secure Event Input)是**焦点 app** 打开的。会话字典里的
+///    `kCGSSessionSecureInputPID` 记的是打开它的那个 app(实测子进程打开时记的是所属 app)。
+///    只看 `IsSecureEventInputEnabled()` 不够:Terminal 开着「安全键盘输入」、或别的
+///    app 用完没关,它都会一直为真。
+/// 2. 当前焦点控件是密码框(role / subrole = AXSecureTextField)。补那些不开安全输入的密码框。
+///
+/// AX 在 `AXSerialQueue` 上同步读,系统级查询单次超时 50ms —— **别在主线程调**。
+enum PasswordFocus {
+
+    nonisolated static func check() -> Bool {
+        AXSerialQueue.shared.sync { read() }
+    }
+
+    private nonisolated static func read() -> Bool {
+        let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
+        var pid: pid_t = 0
+        var appRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(sys, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
+           let appRef, CFGetTypeID(appRef) == AXUIElementGetTypeID() {
+            // swiftlint:disable:next force_cast
+            AXUIElementGetPid(appRef as! AXUIElement, &pid)
+        }
+        if pid == 0 { pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0 }
+
+        if pid > 0,
+           let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+           let owner = (session["kCGSSessionSecureInputPID"] as? NSNumber)?.int32Value,
+           owner == pid {
+            return true
+        }
+
+        var elRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &elRef) == .success,
+              let elRef, CFGetTypeID(elRef) == AXUIElementGetTypeID() else { return false }
+        // swiftlint:disable:next force_cast
+        let el = elRef as! AXUIElement
+        AXUIElementSetMessagingTimeout(el, 0.05)
+        for attr in [kAXSubroleAttribute, kAXRoleAttribute] {
+            var v: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success,
+               TypingPrivacyFilter.isSecureRole(v as? String) {
+                return true
+            }
+        }
+        return false
+    }
+}
+

@@ -61,6 +61,8 @@ final class CaptureLampState: ObservableObject {
     /// 标题和 URL 都是自己做的窄读(不走 AX 全树):切 app、2s tick、FocusProbe 的
     /// 标题变化回调(换标签页 / 跳页)都会刷。
     private var browserUrl: String?
+    /// 焦点在密码框里(见 PasswordFocus)。截屏那边命中时立刻推过来;2s tick 也自己查一次兜底。
+    private var passwordFocused = false
     /// 信号源都是 Services 持有的实例(不是单例),起来之后 attach 进来。
     /// **没 attach 之前权限当未授** —— 三灯全灭。宁可该亮时灭。
     private weak var permissions: PermissionMonitor?
@@ -144,6 +146,22 @@ final class CaptureLampState: ObservableObject {
         }
     }
 
+    /// 截屏流水线发现进 / 出密码框时推过来,眼睛不用等下一个 tick。
+    func notePasswordFocus(_ on: Bool) {
+        guard passwordFocused != on else { return }
+        passwordFocused = on
+        recompute()
+    }
+
+    /// 2s tick 的兜底:没有截屏触发时(比如用 Tab 键跳进密码框)也能在 2s 内闭眼。
+    /// PasswordFocus.check 自己会 sync 到 AXSerialQueue,所以这里放全局队列,不能放 AXSerialQueue(会死锁)。
+    private func refreshPasswordFocus() {
+        DispatchQueue.global(qos: .utility).async {
+            let on = PasswordFocus.check()
+            Task { @MainActor in CaptureLampState.shared.notePasswordFocus(on) }
+        }
+    }
+
     /// 当前浏览器页面是否在打字 URL 黑名单里。KeystrokeCharLogger 写每颗键前问它,和打字灯同一份 URL。
     func typingURLBlocked(bundleId: String) -> Bool {
         guard bundleId == frontBundleId, let url = browserUrl else { return false }
@@ -190,6 +208,7 @@ final class CaptureLampState: ObservableObject {
                     self.recompute()
                     // 标题变化回调只在屏幕采集跑着时挂着,这个 tick 兜底,最多滞后一个 tick。
                     self.refreshFocusedWindow()
+                    self.refreshPasswordFocus()
                 }
             }
             .store(in: &cancellables)
@@ -220,6 +239,8 @@ final class CaptureLampState: ObservableObject {
             s = Lamp(on: false, reason: "The display is asleep — nothing to capture.")
         } else if pause.drmActive {
             s = Lamp(on: false, reason: "Paused — protected video is playing on screen.")
+        } else if passwordFocused {
+            s = Lamp(on: false, reason: "You're typing a password — the screen isn't captured until you leave the field.")
         } else if !appName.isEmpty,
                   ignoreGate?.shouldMaskWindow(appName: appName, bundleId: bundleId.isEmpty ? nil : bundleId,
                                                title: windowTitle) == true {

@@ -48,6 +48,8 @@ actor CaptureCoordinator {
     private var drmActive: Bool = false
     /// 切换等稳任务(见 scheduleSettleCapture)。同一时间最多一个。
     private var settleTask: Task<Void, Never>?
+    /// 正在输密码时等它结束、再补拍一帧的任务(见 holdForPassword)。同一时间最多一个。
+    private var passwordWait: Task<Void, Never>?
     /// 这次等稳开始时的画面(灰度格)和开始时刻。
     private var settleBaseline: [UInt8]?
     private var settleStartedAt: Date?
@@ -186,6 +188,8 @@ actor CaptureCoordinator {
         drmTask?.cancel()
         sleepWakeTask?.cancel()
         settleTask?.cancel()
+        passwordWait?.cancel()
+        passwordWait = nil
         // 等手上那一帧入库再往下拆。
         for task in inFlight { await task?.value }
         captureTask = nil
@@ -235,6 +239,22 @@ actor CaptureCoordinator {
             // 睡前/睡后差异巨大，强制下一帧保留。
             comparer.reset()
             // SCStream 已 invalidate，下次 trigger 来时会懒重建。
+        }
+    }
+
+    /// 进入「正在输密码」:菜单栏的眼睛马上闭上;每 0.5s 看一次,离开密码框后
+    /// 眼睛睁开、补拍一帧(按同 app 内换焦点记)。
+    private func holdForPassword() {
+        guard passwordWait == nil else { return }
+        Task { @MainActor in CaptureLampState.shared.notePasswordFocus(true) }
+        passwordWait = Task {
+            while !Task.isCancelled, PasswordFocus.check() {
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            guard !Task.isCancelled else { return }
+            passwordWait = nil
+            await MainActor.run { CaptureLampState.shared.notePasswordFocus(false) }
+            try? await captureOneFrame(trigger: .windowFocus, force: true)
         }
     }
 
@@ -320,6 +340,14 @@ actor CaptureCoordinator {
         //     读不到亮度(外接不可控显示器等)fail-open 不跳,照常采集。
         if pauseAtMinBrightness, DisplayBrightness.isAtMinimum() {
             await VisionMetrics.shared.recordIntentionalSkip()
+            return
+        }
+
+        // 2d. 正在输密码(见 PasswordFocus)→ 整帧跳过,连回车那一帧也不拍;
+        //     离开密码框后补拍一帧。
+        if PasswordFocus.check() {
+            await VisionMetrics.shared.recordIntentionalSkip()
+            holdForPassword()
             return
         }
 
