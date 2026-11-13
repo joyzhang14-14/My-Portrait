@@ -33,7 +33,7 @@ actor EventSessionWorker {
     private var runSecs: Double = 0
     private var runFrames = 0
     /// 计时用 systemUptime(睡眠时不走):合盖睡着的时间不算进吞吐。
-    private var lastMark: (at: TimeInterval, frames: Int)?
+    private var lastMark: TimeInterval?
     /// Premium 的结果收尾失败后,这之前不再试。
     private var premiumImportAfter = Date.distantPast
 
@@ -167,7 +167,7 @@ actor EventSessionWorker {
             ?? (model.flatMap { try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json"))) }
                 as? [String: Any])?["name"] as? String ?? model?.lastPathComponent ?? ""
         var last = Date()
-        if !prepareOnly, let p0 = Self.progress(sinceMs: es.sinceMs) { lastMark = (ProcessInfo.processInfo.systemUptime, p0.framesDone) }   // 加载模型的时间也算
+        if !prepareOnly { lastMark = ProcessInfo.processInfo.systemUptime }   // 加载模型的时间也算
         // 关掉开关,或换了 provider / 模型 / 运行时间档:不等这个会话做完,立刻结束引擎(没做完的会话没有产物,下次重做),
         // 下一轮按新设置重新过闸。Daily limit / Detail 只管还没准备的天,改了不停。
         let started = es
@@ -209,17 +209,14 @@ actor EventSessionWorker {
             switch ev {
             case "session":
                 if let rec = obj["record"] as? [String: Any] { store(rec, model: modelName) }
+            case "frame":
+                // 一帧一记:上一帧(或这批开跑)到这一帧的时间。按会话记会把被打断那几轮看的帧算到续看的那一轮头上,吞吐偏高
+                let now = ProcessInfo.processInfo.systemUptime
+                if let m = lastMark { runSecs += now - m; runFrames += 1 }
+                lastMark = now
             case "progress", "day_done":
-                let since = es.sinceMs
-                var prog = Self.progress(sinceMs: since)
-                if let p = prog {
-                    if let m = lastMark, p.framesDone > m.frames {
-                        runSecs += ProcessInfo.processInfo.systemUptime - m.at
-                        runFrames += p.framesDone - m.frames
-                    }
-                    lastMark = (ProcessInfo.processInfo.systemUptime, p.framesDone)
-                    if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
-                }
+                var prog = Self.progress(sinceMs: es.sinceMs)
+                if runFrames >= 20 { prog?.secPerFrame = runSecs / Double(runFrames) }
                 let shown = prog
                 await MainActor.run { EventSessionStatus.shared.progress = shown }
             case "stage":
