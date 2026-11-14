@@ -4,15 +4,16 @@ import Foundation
 /// 剪贴板内容变化 → .clipboard。
 ///
 /// 用 `NSPasteboard.changeCount` 轮询（200ms 一次）。
-/// 没有官方通知 API；轮询是大家的标准做法。
+/// 没有官方通知 API；轮询是大家的标准做法。轮询在后台串行队列上跑:锁屏/解锁时
+/// 剪贴板服务会十几秒不响应,连读 changeCount 都要等,不能放主线程。
 @MainActor
 final class PasteboardWatcher {
 
     private let emit: @Sendable (CaptureTrigger) -> Void
     private let intervalMs: Int
 
-    private var lastChangeCount: Int = 0
-    private var pollTask: Task<Void, Never>?
+    private let queue = DispatchQueue(label: "com.myportrait.pasteboard.watch")
+    private var timer: DispatchSourceTimer?
 
     init(
         emit: @escaping @Sendable (CaptureTrigger) -> Void,
@@ -23,31 +24,28 @@ final class PasteboardWatcher {
     }
 
     func start() {
-        guard pollTask == nil else { return }
-        // 初始基线 —— 不触发初次 emit。
-        lastChangeCount = NSPasteboard.general.changeCount
-
-        let ms = intervalMs
+        guard timer == nil else { return }
         let e = emit
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
-                guard let self else { break }
-                self.poll(emit: e)
-            }
+        let last = PasteboardChangeCount()
+        let t = DispatchSource.makeTimerSource(queue: queue)
+        t.schedule(deadline: .now(), repeating: .milliseconds(intervalMs))
+        t.setEventHandler { @Sendable in
+            let curr = NSPasteboard.general.changeCount
+            // 第一拍只记基线 —— 不触发初次 emit。
+            if let prev = last.value, prev != curr { e(.clipboard) }
+            last.value = curr
         }
+        t.resume()
+        timer = t
     }
 
     func stop() {
-        pollTask?.cancel()
-        pollTask = nil
+        timer?.cancel()
+        timer = nil
     }
+}
 
-    private func poll(emit: @Sendable (CaptureTrigger) -> Void) {
-        let curr = NSPasteboard.general.changeCount
-        if curr != lastChangeCount {
-            lastChangeCount = curr
-            emit(.clipboard)
-        }
-    }
+/// 上次看到的 `changeCount`,nil = 还没取基线。只在所属轮询队列上读写。
+final class PasteboardChangeCount: @unchecked Sendable {
+    var value: Int?
 }

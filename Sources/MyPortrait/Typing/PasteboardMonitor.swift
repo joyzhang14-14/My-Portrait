@@ -20,29 +20,38 @@ final class PasteboardMonitor {
     /// 生产模式注入:每次换内容记一行 clipboard_log。dev 模式 nil。
     var logger: ClipboardLogger?
 
-    private var lastChangeCount: Int
-    private var timer: Timer?
+    private var timer: DispatchSourceTimer?
 
     /// `changeCount` 轮询间隔。只是整数比较，可以勤快点 —— 内容读取仍只在
     /// 计数器变化时发生。
-    private static let pollIntervalSec: TimeInterval = 0.25
+    private static let pollIntervalMs = 250
 
-    init() {
-        let pb = NSPasteboard.general
-        lastChangeCount = pb.changeCount
-        currentText = pb.string(forType: .string)
-    }
+    init() {}
 
+    /// 轮询和读内容都在 `readQueue` 上:锁屏/解锁时剪贴板服务会十几秒不响应,连读
+    /// changeCount 都要等;复制方 app 只登记类型、等有人读才交数据时读内容也要等。
+    /// 第一拍只记基线和当前内容,不算一次复制。
     func start() {
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: Self.pollIntervalSec,
-                                     repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.poll() }
+        let last = PasteboardChangeCount()
+        let t = DispatchSource.makeTimerSource(queue: readQueue)
+        t.schedule(deadline: .now(), repeating: .milliseconds(Self.pollIntervalMs))
+        t.setEventHandler { @Sendable [weak self] in
+            let cc = NSPasteboard.general.changeCount
+            guard cc != last.value else { return }   // 没复制过，不读内容
+            let copied = last.value != nil
+            last.value = cc
+            let text = NSPasteboard.general.string(forType: .string)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.changed(text: text, copied: copied) }
+            }
         }
+        t.resume()
+        timer = t
     }
 
     func stop() {
-        timer?.invalidate()
+        timer?.cancel()
         timer = nil
     }
 
@@ -56,20 +65,10 @@ final class PasteboardMonitor {
 
     // MARK: - 私有
 
-    /// 读内容走这条串行队列:复制方 app 只登记了类型、等有人读才交数据时,
-    /// 读取要等它响应,它忙就能卡几秒,不能放在主线程。
     private let readQueue = DispatchQueue(label: "com.myportrait.pasteboard.read")
 
-    private func poll() {
-        let cc = NSPasteboard.general.changeCount
-        guard cc != lastChangeCount else { return }   // 没复制过，不读内容
-        lastChangeCount = cc
-        logger?.record(on: readQueue)
-        readQueue.async { [weak self] in
-            let text = NSPasteboard.general.string(forType: .string)
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.currentText = text }
-            }
-        }
+    private func changed(text: String?, copied: Bool) {
+        currentText = text
+        if copied { logger?.record(on: readQueue) }
     }
 }
