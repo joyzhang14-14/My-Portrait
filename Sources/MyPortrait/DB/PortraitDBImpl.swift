@@ -718,7 +718,7 @@ actor PortraitDBImpl: PortraitDB {
                     id: id,
                     timestamp: Date(timeIntervalSince1970: TimeInterval(ts) / 1000),
                     appName: app,
-                    windowName: win,
+                    windowName: WindowTitle.clean(win),
                     browserUrl: url,
                     snapshotPath: snap,
                     videoPath: vpath,
@@ -734,34 +734,37 @@ actor PortraitDBImpl: PortraitDB {
         let startMs = ms - Int64(windowSeconds * 1000)
         let endMs = ms + Int64(windowSeconds * 1000)
 
+        // 一个窗口一行(11-14 update):有窗口编号(window_key)按编号分组,没有的按清理后的标题,
+        // 每组显示最近那帧的标题。按原始标题分组时,终端标题里的转圈符一变就多出一行。
         return try await screenPool.read { db in
             let sql = """
             SELECT app_name,
                    COALESCE(window_name, '') AS window_name,
                    COALESCE(browser_url, '') AS browser_url,
-                   MAX(timestamp_ms) AS latest
+                   timestamp_ms,
+                   window_key
             FROM frames
             WHERE timestamp_ms >= :startMs AND timestamp_ms <= :endMs
               AND app_name IS NOT NULL AND app_name != ''
-            GROUP BY app_name, window_name
-            ORDER BY latest DESC
-            LIMIT 30
+            ORDER BY timestamp_ms DESC
+            LIMIT 1000
             """
             let rows = try Row.fetchAll(
                 db, sql: sql,
                 arguments: ["startMs": startMs, "endMs": endMs])
-            return rows.map { row -> ActiveAppEntry in
-                let app: String = row["app_name"] ?? ""
-                let win: String = row["window_name"] ?? ""
-                let url: String = row["browser_url"] ?? ""
-                let latest: Int64 = row["latest"] ?? 0
-                return ActiveAppEntry(
-                    appName: app,
-                    windowName: win,
-                    browserUrl: url.isEmpty ? nil : url,
-                    lastSeen: Date(timeIntervalSince1970: TimeInterval(latest) / 1000)
+            var out: [ActiveAppEntry] = []
+            var seen = Set<String>()
+            for row in rows where out.count < 30 {
+                let entry = ActiveAppEntry(
+                    appName: row["app_name"] ?? "",
+                    windowName: WindowTitle.clean(row["window_name"] ?? ""),
+                    browserUrl: (row["browser_url"] as String?).flatMap { $0.isEmpty ? nil : $0 },
+                    lastSeen: Date(timeIntervalSince1970: TimeInterval(row["timestamp_ms"] as Int64? ?? 0) / 1000),
+                    windowKey: row["window_key"]
                 )
+                if seen.insert(entry.id).inserted { out.append(entry) }
             }
+            return out
         }
     }
 

@@ -59,6 +59,21 @@ struct TimelineFrame: Identifiable, Hashable {
     var hasViewableMedia: Bool { snapshotPath != nil || videoPath != nil }
 }
 
+/// 窗口标题去掉会自己变的部分再显示(11-14 update):每段(「 — 」分隔)开头的动画 / 状态符号
+/// (终端里 AI 工具的转圈符 ✳ ◐ ⠂…)、终端末尾的尺寸(120×40)。规则同 EventSession 管线的 win_title。
+enum WindowTitle {
+    static func clean(_ raw: String) -> String {
+        var parts = raw.components(separatedBy: " — ").map { part -> String in
+            let body = part.drop { ch in !(ch.isLetter || ch.isNumber || "(（[".contains(ch)) }
+            return String(body).trimmingCharacters(in: .whitespaces)
+        }
+        if parts.count > 1, parts.last?.range(of: #"^\d+\s*[×x]\s*\d+$"#, options: .regularExpression) != nil {
+            parts.removeLast()
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: " — ")
+    }
+}
+
 /// Distinct app + window that was active within a small time window
 /// around the focused frame. Used in the Timeline sidebar's "Active Apps" panel.
 struct ActiveAppEntry: Identifiable, Hashable {
@@ -66,9 +81,11 @@ struct ActiveAppEntry: Identifiable, Hashable {
     let windowName: String
     let browserUrl: String?
     let lastSeen: Date
-    /// 稳定 id = app + window(查询就是按这两个 GROUP BY,天然唯一)。
+    /// 窗口编号(frames.window_key);旧帧没有。
+    var windowKey: String? = nil
+    /// 稳定 id = app + 窗口编号(没有编号时用标题),查询按它去重,天然唯一。
     /// **不含 lastSeen** —— 它每滑一帧就变,含进 id 会让行每帧重建闪屏。
-    var id: String { appName + "|" + windowName }
+    var id: String { appName + "|" + (windowKey.map { "#" + $0 } ?? windowName) }
 }
 
 /// One audio transcription chunk near the focused frame's timestamp.
