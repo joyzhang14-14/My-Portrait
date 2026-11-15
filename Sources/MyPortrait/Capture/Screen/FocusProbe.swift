@@ -543,7 +543,8 @@ actor FocusProbe {
         if let bid = bundleId, Self.browserBundleIds.contains(bid) {
             url = Self.extractBrowserURL(focusedWindow: focusedWindow)
         }
-        return (focusedWindow, title, url, axId, windowKey(focusedWindow))
+        let isBrowser = bundleId.map { Self.browserBundleIds.contains($0) } ?? false
+        return (focusedWindow, title, url, axId, windowKey(focusedWindow, browser: isBrowser))
     }
 
     /// 系统的私有接口 `_AXUIElementGetWindow`:AX 窗口 → 窗口编号(CGWindowID)。取不到符号时为 nil。
@@ -552,11 +553,39 @@ actor FocusProbe {
         dlsym(dlopen(nil, RTLD_NOW), "_AXUIElementGetWindow").map { unsafeBitCast($0, to: AXGetWindow.self) }
 
     /// 窗口身份(11-14 update):系统给每个窗口的编号,窗口关掉之前不变,标题怎么变都一样。
-    /// 终端、Finder 这类系统原生标签,每个标签本身就是一个窗口,编号各不相同。读不到回 nil。
-    nonisolated static func windowKey(_ window: AXUIElement) -> String? {
+    /// 终端、Finder 这类系统原生标签,每个标签本身就是一个窗口,编号各不相同。
+    /// 浏览器(Safari、Chrome 实测)一个窗口里的标签共用一个编号,后面加「#当前是第几个标签」(0 起数);
+    /// 标签没有系统编号,关掉或拖动标签后位置会错开。读不到编号回 nil。
+    nonisolated static func windowKey(_ window: AXUIElement, browser: Bool) -> String? {
         var id: CGWindowID = 0
         guard let axGetWindow, axGetWindow(window, &id) == .success, id != 0 else { return nil }
-        return String(id)
+        guard browser, let tab = selectedTab(in: window) else { return String(id) }
+        return "\(id)#\(tab)"
+    }
+
+    /// 浏览器标签栏里当前选中的是第几个:按层往下找第一组带「选中」的单选按钮(标签栏的标签就是它)。
+    /// 网页内容(AXWebArea)不进;深度上限 7(Chrome 的标签栏在第 6 层),元素上限 300。
+    nonisolated private static func selectedTab(in window: AXUIElement) -> Int? {
+        func value(_ e: AXUIElement, _ name: String) -> CFTypeRef? {
+            var ref: CFTypeRef?
+            return AXUIElementCopyAttributeValue(e, name as CFString, &ref) == .success ? ref : nil
+        }
+        var level: [AXUIElement] = [window]
+        var visited = 0
+        for _ in 0..<7 {
+            var next: [AXUIElement] = []
+            for e in level {
+                let kids = value(e, kAXChildrenAttribute) as? [AXUIElement] ?? []
+                visited += kids.count
+                let roles = kids.map { value($0, kAXRoleAttribute) as? String }
+                let tabs = zip(kids, roles).filter { $0.1 == kAXRadioButtonRole }.map(\.0)
+                if let i = tabs.firstIndex(where: { value($0, kAXValueAttribute) as? Int == 1 }) { return i }
+                next += zip(kids, roles).filter { $0.1 != "AXWebArea" }.map(\.0)
+            }
+            if next.isEmpty || visited > 300 { return nil }
+            level = next
+        }
+        return nil
     }
 
     /// 浏览器 URL 抽取。fallback 链:
@@ -839,7 +868,7 @@ public struct FocusInfo: Equatable, Sendable {
     /// 焦点窗口的 AXIdentifier。Arc 等浏览器的无痕窗口这里含
     /// "incognito"/"private" —— IncognitoGate Tier 1 用。其它情况多为 nil。
     public let axIdentifier: String?
-    /// 焦点窗口的编号(见 `FocusProbe.windowKey`),标题变了也认得出是同一个窗口。
+    /// 焦点窗口的身份:窗口编号,浏览器另加「#第几个标签」(见 `FocusProbe.windowKey`),标题变了也认得出是同一个窗口。
     public let windowKey: String?
     public let isFocused: Bool
 
