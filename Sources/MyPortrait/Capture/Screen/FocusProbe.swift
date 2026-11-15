@@ -164,12 +164,12 @@ actor FocusProbe {
         // 前台是自己时不能在主线程同步读自己的 AX tree(见 refresh)。
         let meta = pid > 0 && pid != getpid() && AXIsProcessTrusted()
             ? await MainActor.run {
-                Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 0.2).map { ($0.title, $0.url, $0.axId) }
+                Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 0.2).map { ($0.title, $0.url, $0.axId, $0.key) }
             }
             : nil
         return FocusInfo(appName: front.activeName, bundleId: bundleId,
                          windowTitle: meta?.0, browserUrl: meta?.1, axText: nil,
-                         axIdentifier: meta?.2, isFocused: true)
+                         axIdentifier: meta?.2, windowKey: meta?.3, isFocused: true)
     }
 
     /// 同一时刻读两个前台来源(一次主线程跳转内读完,两边时间尽量贴近):
@@ -395,6 +395,7 @@ actor FocusProbe {
         var browserUrl: String?
         var axText: String?
         var axIdentifier: String?
+        var windowKey: String?
 
         // AX 查询。若无权限就只返回 app 名。
         if AXIsProcessTrusted() {
@@ -404,12 +405,13 @@ actor FocusProbe {
             // AXUIElementCopyAttributeValue 会 _dispatch_assert_queue_fail 崩。
             // refresh 由 app 切换触发(不频繁)，遍历有 depth/char/超时三重
             // 上限，主线程上的停顿可忽略。
-            let result: (title: String?, url: String?, axText: String?, axId: String?) =
+            let result: (title: String?, url: String?, axText: String?, axId: String?, key: String?) =
                 await MainActor.run { self.queryAX(pid: pid, bundleId: bundleId) }
             windowTitle = result.title
             browserUrl = result.url
             axText = result.axText
             axIdentifier = result.axId
+            windowKey = result.key
         } else if !axPermissionWarned {
             logger.warning("Accessibility permission not granted — window title / browser URL / AX text will be nil. Grant in System Settings → Privacy & Security → Accessibility.")
             axPermissionWarned = true
@@ -422,6 +424,7 @@ actor FocusProbe {
             browserUrl: browserUrl,
             axText: axText,
             axIdentifier: axIdentifier,
+            windowKey: windowKey,
             isFocused: true
         )
     }
@@ -458,10 +461,11 @@ actor FocusProbe {
     /// 调 AX 抓窗口标题 + URL（仅浏览器）+ AX tree 文本子树。
     /// AX API 是跨进程同步 XPC，可能 10–50ms（AX text 走到 100ms+ 时降级让出）。
     /// 仅在 refresh() 内调用，不在采集热路径上。
-    nonisolated private func queryAX(pid: pid_t, bundleId: String?) -> (title: String?, url: String?, axText: String?, axId: String?) {
+    nonisolated private func queryAX(pid: pid_t, bundleId: String?)
+        -> (title: String?, url: String?, axText: String?, axId: String?, key: String?) {
         // 卡死时单次调用最多等 1.5s —— 共用串行队列,一个慢调用别拖垮全局。
-        guard let (focusedWindow, title, url, axId) = Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 1.5)
-        else { return (nil, nil, nil, nil) }
+        guard let (focusedWindow, title, url, axId, key) = Self.readWindowMeta(pid: pid, bundleId: bundleId, timeout: 1.5)
+        else { return (nil, nil, nil, nil, nil) }
 
         // 4. AX tree 文本子树。终端类 app 跳过（拿到的是脏数据，OCR 更准）。
         var axText: String?
@@ -490,12 +494,12 @@ actor FocusProbe {
             }
         }
 
-        return (title, url, axText, axId)
+        return (title, url, axText, axId, key)
     }
 
     /// 焦点窗口 + 标题 / AXIdentifier / 浏览器 URL,不读 AX 文本。主线程调。
     nonisolated static func readWindowMeta(pid: pid_t, bundleId: String?, timeout: Float)
-        -> (window: AXUIElement, title: String?, url: String?, axId: String?)? {
+        -> (window: AXUIElement, title: String?, url: String?, axId: String?, key: String?)? {
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, timeout)
 
@@ -539,7 +543,20 @@ actor FocusProbe {
         if let bid = bundleId, Self.browserBundleIds.contains(bid) {
             url = Self.extractBrowserURL(focusedWindow: focusedWindow)
         }
-        return (focusedWindow, title, url, axId)
+        return (focusedWindow, title, url, axId, windowKey(focusedWindow))
+    }
+
+    /// 系统的私有接口 `_AXUIElementGetWindow`:AX 窗口 → 窗口编号(CGWindowID)。取不到符号时为 nil。
+    private typealias AXGetWindow = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+    nonisolated private static let axGetWindow: AXGetWindow? =
+        dlsym(dlopen(nil, RTLD_NOW), "_AXUIElementGetWindow").map { unsafeBitCast($0, to: AXGetWindow.self) }
+
+    /// 窗口身份(11-14 update):系统给每个窗口的编号,窗口关掉之前不变,标题怎么变都一样。
+    /// 终端、Finder 这类系统原生标签,每个标签本身就是一个窗口,编号各不相同。读不到回 nil。
+    nonisolated static func windowKey(_ window: AXUIElement) -> String? {
+        var id: CGWindowID = 0
+        guard let axGetWindow, axGetWindow(window, &id) == .success, id != 0 else { return nil }
+        return String(id)
     }
 
     /// 浏览器 URL 抽取。fallback 链:
@@ -822,12 +839,14 @@ public struct FocusInfo: Equatable, Sendable {
     /// 焦点窗口的 AXIdentifier。Arc 等浏览器的无痕窗口这里含
     /// "incognito"/"private" —— IncognitoGate Tier 1 用。其它情况多为 nil。
     public let axIdentifier: String?
+    /// 焦点窗口的编号(见 `FocusProbe.windowKey`),标题变了也认得出是同一个窗口。
+    public let windowKey: String?
     public let isFocused: Bool
 
     public init(
         appName: String, bundleId: String?, windowTitle: String?,
         browserUrl: String?, axText: String?, axIdentifier: String? = nil,
-        isFocused: Bool
+        windowKey: String? = nil, isFocused: Bool
     ) {
         self.appName = appName
         self.bundleId = bundleId
@@ -835,6 +854,7 @@ public struct FocusInfo: Equatable, Sendable {
         self.browserUrl = browserUrl
         self.axText = axText
         self.axIdentifier = axIdentifier
+        self.windowKey = windowKey
         self.isFocused = isFocused
     }
 }

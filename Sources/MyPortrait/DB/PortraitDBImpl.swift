@@ -1005,7 +1005,8 @@ private extension FrameRow {
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
             visibleApp: record.visibleApp,
             focusState: record.focusState,
-            visibleWindows: record.visibleWindows
+            visibleWindows: record.visibleWindows,
+            windowKey: record.windowKey
         )
     }
 
@@ -1030,7 +1031,8 @@ private extension FrameRow {
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
             visibleApp: record.visibleApp,
             focusState: record.focusState,
-            visibleWindows: record.visibleWindows
+            visibleWindows: record.visibleWindows,
+            windowKey: record.windowKey
         )
     }
 }

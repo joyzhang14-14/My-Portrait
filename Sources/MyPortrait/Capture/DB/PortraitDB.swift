@@ -203,12 +203,14 @@ struct FrameRecord: Sendable {
     let visibleApp: String?      // 画面最前普通窗口所属 app(见 FrontReading)
     let focusState: String?      // FrameFocusState.rawValue
     let visibleWindows: String?  // 主屏上露出来的普通窗口 JSON(见 VisibleWindow)
+    let windowKey: String?       // 焦点窗口的编号(见 FocusProbe.windowKey)
 
     init(
         timestampMs: Int64, appName: String, windowName: String?,
         browserUrl: String?, focused: Bool, deviceName: String,
         snapshotPath: String, captureTrigger: String,
-        visibleApp: String? = nil, focusState: String? = nil, visibleWindows: String? = nil
+        visibleApp: String? = nil, focusState: String? = nil, visibleWindows: String? = nil,
+        windowKey: String? = nil
     ) {
         self.timestampMs = timestampMs
         self.appName = appName
@@ -221,6 +223,7 @@ struct FrameRecord: Sendable {
         self.visibleApp = visibleApp
         self.focusState = focusState
         self.visibleWindows = visibleWindows
+        self.windowKey = windowKey
     }
 }
 

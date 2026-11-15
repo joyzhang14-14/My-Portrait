@@ -452,7 +452,8 @@ actor CaptureCoordinator {
             captureTrigger: trigger.rawValue,
             visibleApp: front.visibleName,
             focusState: focusState.rawValue,
-            visibleWindows: front.visibleWindowsJSON
+            visibleWindows: front.visibleWindowsJSON,
+            windowKey: recordFocus.windowKey
         )
 
         do {

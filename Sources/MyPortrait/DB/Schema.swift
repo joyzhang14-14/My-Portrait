@@ -21,6 +21,10 @@ enum DBSchema {
         m.registerMigration("screen_v1", foreignKeyChecks: .immediate) { db in
             for sql in screenBaseline { try db.execute(sql: sql) }
         }
+        // window_key = 焦点窗口的编号(11-14 update),标题变了也认得出同一个窗口;原生标签每个标签一个编号。
+        m.registerMigration("screen_v2") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN window_key TEXT")
+        }
         return m
     }
 
