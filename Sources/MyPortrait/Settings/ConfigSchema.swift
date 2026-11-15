@@ -1153,6 +1153,8 @@ struct EventSessionConfig: Codable, Equatable {
     var sinceMs: Int64 = 0
     /// 下发包的根地址(manifest.json 所在目录)。
     var downloadBase: String = "https://models.joyzhang14.com/eventsession"
+    /// 本机模型怎么更新,见 `ModelUpdateMode`。
+    var modelUpdates: ModelUpdateMode = .autoDownload
 
     static let dialMin = 0.2
     /// 「Daily limit」5 档对应的一天待看帧数上限;「Detail」5 档对应的挑帧比例上限。默认都是第 3 档。
@@ -1171,6 +1173,7 @@ struct EventSessionConfig: Codable, Equatable {
         case dialMax = "dial_max"
         case sinceMs = "since_ms"
         case downloadBase = "download_base"
+        case modelUpdates = "model_updates"
     }
     init(from decoder: Decoder) throws {
         self.init()
@@ -1183,7 +1186,17 @@ struct EventSessionConfig: Codable, Equatable {
         dialMax = c.dflt(Double.self, .dialMax, dialMax)
         sinceMs = c.dflt(Int64.self, .sinceMs, sinceMs)
         downloadBase = c.dflt(String.self, .downloadBase, downloadBase)
+        modelUpdates = c.dflt(ModelUpdateMode.self, .modelUpdates, modelUpdates)
     }
+}
+
+/// 本机 EventSession 模型的更新方式(同 app 更新的三档):manual = 只在点 Check now 时查;
+/// autoCheck = 每 6 小时查,有新版提示、点 Download 才下;autoDownload = 每 6 小时查,有新版就在后台下好,
+/// EventSession 空下来时换上(下载期间照常用旧模型跑)。
+enum ModelUpdateMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case manual
+    case autoCheck = "auto_check"
+    case autoDownload = "auto_download"
 }
 
 /// EventSession 什么时候跑。charging / charging_idle 都要插电(idle 见 `PowerMonitor.isIdle`);

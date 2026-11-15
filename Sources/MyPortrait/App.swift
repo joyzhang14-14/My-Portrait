@@ -368,6 +368,10 @@ struct MyPortraitApp: App {
         if args.contains("--interval-selftest") {
             IntervalSelfTest.run()
         }
+        // EventSession 本机模型更新的自检(只在 CFFIXED_USER_HOME 指定的临时数据根上跑)。详见 ModelUpdateCLI。内部 exit。
+        if args.contains("--model-update-selftest") {
+            ModelUpdateSelfTest.run()
+        }
         // `--writing-style-*` 独立提炼链路 CLI 入口。详见 WritingStyleCLI。
         if args.contains("--writing-style-run") {
             let mode: WritingStyleMode = args.contains("--auto") ? .auto : .manual

@@ -33,6 +33,24 @@ final class EventSessionInstaller {
     /// 按这次下载的平均速度估的剩余秒数。
     private(set) var remaining: TimeInterval?
 
+    /// 模型更新(11-15 update):查到的新版、后台下载进度。和上面 Set up 的那套状态分开,装好之后才用得到。
+    enum ModelUpdate: Equatable {
+        case unknown
+        case checking
+        case upToDate
+        case available(name: String, size: Int64)
+        case downloading(name: String)
+        case paused(name: String)
+        /// 下好、校验过,等 EventSession 空下来换上。
+        case downloaded(name: String)
+        case failed(String)
+    }
+    private(set) var modelUpdate: ModelUpdate = .unknown
+    private(set) var updateReceived: Int64 = 0
+    private(set) var updateExpected: Int64 = 0
+    private var updateJob: Task<Void, Never>?
+    private var updateDownload: RangeDownload?
+
     private var job: Task<Void, Never>?
     /// 每次 start / stop 加一;旧的一轮看到对不上就停手,不再改文件和状态。
     private var generation = 0
@@ -124,6 +142,7 @@ final class EventSessionInstaller {
     /// 删掉整套运行环境和模型(Downloads 页的 Uninstall)。
     func uninstall() {
         stop()
+        stopModelUpdate()
         try? FileManager.default.removeItem(at: Self.root)
         if let m = Self.modelDir { try? FileManager.default.removeItem(at: m) }
         phase = .idle
@@ -139,6 +158,139 @@ final class EventSessionInstaller {
         generation += 1
         await install(local: local, gen: generation, keepModel: true)
         if Self.isReady(local: local) { phase = .ready }
+    }
+
+    // MARK: - 模型更新
+
+    /// 下好待换的新模型:包在 downloads/model-update.part,说明在 model-update.json。
+    nonisolated private static var updatePart: URL { partsDir.appendingPathComponent("model-update.part") }
+    nonisolated private static var updateInfo: URL { partsDir.appendingPathComponent("model-update.json") }
+    private struct UpdateInfo: Codable { let sha: String; let size: Int64; let name: String; let strip: Int?; var verified: Bool }
+
+    /// 已装模型的包指纹(模型目录里的 .installed)。
+    nonisolated private static var installedModelSha: String? {
+        modelDir.flatMap { try? String(contentsOf: $0.appendingPathComponent(".installed"), encoding: .utf8) }
+    }
+
+    private func readManifest() async throws -> Manifest {
+        let base = ConfigStore.shared.current.eventSession.downloadBase.trimmingCharacters(in: .whitespaces)
+        guard !base.isEmpty, let murl = URL(string: base.hasSuffix("/") ? base + "manifest.json" : base + "/manifest.json") else {
+            throw Failure("The download location isn't set up yet.")
+        }
+        let (mdata, _) = try await URLSession.shared.data(for: URLRequest(url: murl, cachePolicy: .reloadIgnoringLocalCacheData))
+        return try JSONDecoder().decode(Manifest.self, from: mdata)
+    }
+
+    /// 查下发清单里的模型和已装的是不是同一份;不同就记成有新版,`download` 时接着在后台下(不等它下完就返回)。
+    /// 已经下好待换、或正在下的那一份就是清单里的,不重查。没装模型(还没 Set up)时不查。
+    func checkModelUpdate(download: Bool) async {
+        guard Self.modelDir != nil, phase != .working else { return }
+        if case .downloading = modelUpdate { return }
+        let before = modelUpdate
+        modelUpdate = .checking
+        do {
+            let m = try await readManifest()
+            guard let c = m.components["model"], let sha = c.sha256 else { modelUpdate = .upToDate; return }
+            if sha == Self.installedModelSha {
+                modelUpdate = .upToDate
+                Self.dropUpdatePart()
+                return
+            }
+            let name = c.name ?? "EventSession"
+            if let info = Self.pendingUpdate(), info.sha == sha, info.verified {
+                modelUpdate = .downloaded(name: name)
+                return
+            }
+            modelUpdate = .available(name: name, size: c.size ?? 0)
+            if download { downloadModelUpdate(c, sha: sha, name: name) }
+        } catch {
+            modelUpdate = before == .unknown || before == .checking ? .failed("Couldn't check for updates") : before
+        }
+    }
+
+    /// 点 Download(或自动下载):后台下到 model-update.part,能接着上次的下;下完校验 sha。
+    func downloadModelUpdate() {
+        Task {
+            guard let m = try? await readManifest(), let c = m.components["model"], let sha = c.sha256 else { return }
+            downloadModelUpdate(c, sha: sha, name: c.name ?? "EventSession")
+        }
+    }
+
+    private func downloadModelUpdate(_ c: Manifest.Component, sha: String, name: String) {
+        guard updateJob == nil, let url = URL(string: c.url) else { return }
+        modelUpdate = .downloading(name: name)
+        updateJob = Task {
+            defer { updateJob = nil; updateDownload = nil }
+            do {
+                try FileManager.default.createDirectory(at: Self.partsDir, withIntermediateDirectories: true)
+                if Self.pendingUpdate()?.sha != sha { try? FileManager.default.removeItem(at: Self.updatePart) }   // 清单换了版本,旧的半截不能接
+                var info = UpdateInfo(sha: sha, size: c.size ?? 0, name: name, strip: c.strip, verified: false)
+                try JSONEncoder().encode(info).write(to: Self.updateInfo)
+                let dl = RangeDownload(url: url, to: Self.updatePart, expected: c.size ?? 0)
+                updateDownload = dl
+                updateReceived = dl.existing
+                updateExpected = c.size ?? 0
+                try await dl.run { [weak self] got, total in
+                    Task { @MainActor in
+                        guard let self, case .downloading = self.modelUpdate else { return }
+                        self.updateReceived = got
+                        if total > 0 { self.updateExpected = total }
+                    }
+                }
+                let got = try await off({ try Self.sha256(Self.updatePart) })
+                guard got == sha else {
+                    try? FileManager.default.removeItem(at: Self.updatePart)
+                    modelUpdate = .failed("The update download is damaged. Try again.")
+                    return
+                }
+                info.verified = true
+                try JSONEncoder().encode(info).write(to: Self.updateInfo)
+                modelUpdate = .downloaded(name: name)
+            } catch {
+                if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    modelUpdate = .paused(name: name)
+                } else {
+                    modelUpdate = .failed("Couldn't download the update")
+                }
+            }
+        }
+    }
+
+    /// Stop:停下后台下载,已下的字节留着,下次 Download / 自动下载接着下。
+    func stopModelUpdate() {
+        updateDownload?.cancel()
+        updateJob?.cancel()
+    }
+
+    /// 下好、校验过的新模型换上(worker 在开跑前调,这时引擎没在跑):解进 models/,装好后删掉旧模型目录。回是否换了。
+    func applyModelUpdate() async -> Bool {
+        guard phase != .working, updateJob == nil, let info = Self.pendingUpdate(), info.verified else { return false }
+        let unit = Self.modelsDir.appendingPathComponent(info.name, isDirectory: true)
+        let old = Self.modelDir
+        do {
+            try? FileManager.default.removeItem(at: unit)
+            var args = ["-xf", Self.updatePart.path, "-C", Self.modelsDir.path]
+            if let s = info.strip, s > 0 { args.append("--strip-components=\(s)") }
+            let tarArgs = args
+            try await off { try Self.run("/usr/bin/tar", tarArgs) }
+            try info.sha.write(to: unit.appendingPathComponent(".installed"), atomically: true, encoding: .utf8)
+            if let old, old.standardizedFileURL != unit.standardizedFileURL { try? FileManager.default.removeItem(at: old) }
+            Self.dropUpdatePart()
+            modelUpdate = .upToDate
+            return true
+        } catch {
+            modelUpdate = .failed("Couldn't install the update")
+            return false
+        }
+    }
+
+    nonisolated private static func pendingUpdate() -> UpdateInfo? {
+        try? JSONDecoder().decode(UpdateInfo.self, from: Data(contentsOf: updateInfo))
+    }
+
+    nonisolated private static func dropUpdatePart() {
+        try? FileManager.default.removeItem(at: updatePart)
+        try? FileManager.default.removeItem(at: updateInfo)
     }
 
     private func install(local: Bool, gen: Int, keepModel: Bool = false) async {

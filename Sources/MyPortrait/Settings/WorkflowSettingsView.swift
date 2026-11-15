@@ -1695,6 +1695,7 @@ struct WorkflowSettingsView: View {
                         ? "✓ This Mac is eligible · \(gb) GB of memory" + (elig == .idleOnly ? ", runs only while idle" : "") : nil)
                 }
                 eventSessionProviderRows(elig: elig, clouds: clouds)
+                if es.isLocal, ready, local { eventSessionModelUpdateRows() }
                 eventSessionWhenRow(elig: elig, ready: ready && !premium)
                 if es.enabled, !premium, es.powerMode != .packed, !SleepHelperClient.shared.isApproved {
                     HStack(spacing: 8) {
@@ -1717,6 +1718,58 @@ struct WorkflowSettingsView: View {
                          set: { i in cfg.mutate { $0.eventSession.dialMax = EventSessionConfig.detailLevels[i] } })
             }
             .onAppear { installer.refresh(local: es.isLocal) }
+        }
+    }
+
+    /// 本机模型更新(11-15 update):更新方式三档(同 app 更新)+ 当前模型一行(状态 + 对应按钮,下载中带进度条)。
+    @ViewBuilder
+    private func eventSessionModelUpdateRows() -> some View {
+        let inst = EventSessionInstaller.shared
+        let mode = cfg.current.eventSession.modelUpdates
+        let name = (EventSessionInstaller.modelDir.flatMap {
+            try? JSONSerialization.jsonObject(with: Data(contentsOf: $0.appendingPathComponent("eventsession.json")))
+        } as? [String: Any])?["name"] as? String ?? "EventSession"
+        HStack(spacing: 0) {
+            Text("Model updates").font(.system(size: 12))
+            SettingsInfoBadge(text: "Auto-download checks every 6 hours and downloads a new model in the background; EventSession keeps using the current model and switches over the next time it's idle.\n\nAuto-check only tells you when a new model is out. Manually checks only when you click Check now.")
+            Spacer()
+            Picker("", selection: cfg.binding(\.eventSession.modelUpdates)) {
+                Text("Manually check for updates").tag(ModelUpdateMode.manual)
+                Text("Auto-check for updates").tag(ModelUpdateMode.autoCheck)
+                Text("Auto-download updates").tag(ModelUpdateMode.autoDownload)
+            }
+            .pickerStyle(.menu).labelsHidden().frame(width: 260)
+        }
+        let pct = inst.updateExpected > 0 ? Int(Double(inst.updateReceived) / Double(inst.updateExpected) * 100) : 0
+        let (status, button): (String, (String, () -> Void)?) = {
+            let check: (String, () -> Void) = ("Check now", { Task { await inst.checkModelUpdate(download: mode == .autoDownload) } })
+            switch inst.modelUpdate {
+            case .unknown: return ("", check)
+            case .checking: return ("checking…", nil)
+            case .upToDate: return ("up to date", check)
+            case .available(let n, let size):
+                return ("\(n) available" + (size > 0 ? " (\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)))" : ""),
+                        ("Download", { inst.downloadModelUpdate() }))
+            case .downloading(let n): return ("downloading \(n) · \(pct)%", ("Stop", { inst.stopModelUpdate() }))
+            case .paused(let n): return ("\(n) paused · \(pct)%", ("Resume", { inst.downloadModelUpdate() }))
+            case .downloaded(let n): return ("\(n) downloaded — switches over when EventSession is idle", nil)
+            case .failed(let why): return (why, ("Try again", check.1))
+            }
+        }()
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name + (status.isEmpty ? "" : " · \(status)"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .downloading = inst.modelUpdate {
+                    ProgressView(value: Double(inst.updateReceived), total: Double(max(inst.updateExpected, 1)))
+                        .progressViewStyle(.linear)
+                }
+            }
+            Spacer(minLength: 8)
+            if let (title, act) = button {
+                Button(title, action: act).font(.system(size: 11))
+            }
         }
     }
 

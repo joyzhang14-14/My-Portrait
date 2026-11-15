@@ -29,6 +29,7 @@ actor EventSessionWorker {
     private var idleUntil = Date.distantPast
     private var prepIdleUntil = Date.distantPast
     private var nextUpdateCheck = Date.distantPast
+    private var nextModelCheck = Date.distantPast
     /// 实测吞吐(本次 app 运行里累计):模型真正在跑的秒数 / 这段时间看完的帧。剩余时间按它估,含合成、重启引擎、加载模型等开销。
     private var runSecs: Double = 0
     private var runFrames = 0
@@ -57,6 +58,7 @@ actor EventSessionWorker {
             (ConfigStore.shared.current.eventSession.sinceMs, ConfigStore.shared.current.eventSession.toPremium)
         }
         await updateLidAwake(sinceMs: since)
+        await checkModelUpdate()
         if toPremium { await checkForUpdate() }     // 交给 Premium 时本机可能一直没活,引擎也要跟上(导出 / 收尾的命令)
         if EventSessionInstaller.runtimeReady, Date() >= premiumImportAfter {
             for day in Self.premiumInboxDays() where Self.premiumResultsReady(day) { await importPremium(day) }
@@ -64,6 +66,7 @@ actor EventSessionWorker {
         let reason = await gate()
         if reason == nil, Date() >= idleUntil, Self.hasPendingDay(sinceMs: since, skip: ["days_done"]) {
             await checkForUpdate()
+            _ = await EventSessionInstaller.shared.applyModelUpdate()   // 下好的新模型趁引擎没在跑时换上
             await setStatus(running: true, waiting: nil)
             await holdAwake(true)
             await runChunk()
@@ -103,6 +106,15 @@ actor EventSessionWorker {
             SleepHelperClient.shared.completeApprovalIfAllowed()
             SleepHelperClient.shared.setKeepAwake(want, owner: "eventsession")
         }
+    }
+
+    /// 本机模型的新版(11-15 update):按设置的更新方式每 6 小时查一次(手动档不查);自动下载档查到就在后台下。
+    private func checkModelUpdate() async {
+        guard Date() >= nextModelCheck else { return }
+        let es = await MainActor.run { ConfigStore.shared.current.eventSession }
+        guard es.isLocal, es.modelUpdates != .manual, EventSessionInstaller.modelDir != nil else { return }
+        nextModelCheck = Date().addingTimeInterval(6 * 3600)
+        await EventSessionInstaller.shared.checkModelUpdate(download: es.modelUpdates == .autoDownload)
     }
 
     /// 开跑前每 6 小时查一次引擎 / 运行环境有没有新版。
