@@ -26,6 +26,7 @@ struct FrameRow: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     var focusState: String? = nil
     var visibleWindows: String? = nil
     var windowKey: String? = nil
+    var displayName: String? = nil
 
     static let databaseTableName = "frames"
 

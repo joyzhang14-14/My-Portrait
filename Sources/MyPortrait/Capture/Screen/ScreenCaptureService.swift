@@ -28,7 +28,7 @@ final class ScreenCaptureService {
     /// `unowned(unsafe)`，必须用长生命周期常量，否则临时 CGColor 立即释放成野指针。
     private static let maskBackground = CGColor(gray: 0, alpha: 1)
 
-    /// **无遮罩规则时**复用的主显示器缓存:SCShareableContent 枚举是到 replayd
+    /// **无遮罩规则时**复用的显示器缓存(按 displayID):SCShareableContent 枚举是到 replayd
     /// 的全量 XPC 往返(枚举全部窗口+元数据,典型 20-100ms,抓帧热路径最大
     /// 单项开销),没配任何 mask 规则时窗口列表完全用不上,只为拿 SCDisplay
     /// 白付一次。显示器参数变化(接/拔屏、改分辨率)由
@@ -37,7 +37,7 @@ final class ScreenCaptureService {
     /// **有规则时仍然每帧枚举,不缓存窗口列表** —— 遮罩的实时性是隐私语义:
     /// 新弹出的 1Password 窗口必须在当帧就被抹掉,TTL 缓存意味着最多一个
     /// TTL 周期的裸奔帧。
-    private var cachedDisplay: SCDisplay?
+    private var cachedDisplays: [CGDirectDisplayID: SCDisplay] = [:]
     private var screenParamsObserver: NSObjectProtocol?
 
     private func ensureScreenParamsObserver() {
@@ -46,7 +46,7 @@ final class ScreenCaptureService {
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.cachedDisplay = nil }
+            MainActor.assumeIsolated { self?.cachedDisplays = [:] }
         }
     }
 
@@ -58,8 +58,8 @@ final class ScreenCaptureService {
         self.ignore = ignore
     }
 
-    /// 抓主显示器一帧。失败重试 3 次。
-    func captureMainDisplay() async throws -> CGImage {
+    /// 抓 `displayID` 那块屏一帧(焦点在哪块屏抓哪块,见 `FocusProbe.targetDisplay`)。失败重试 3 次。
+    func capture(display displayID: CGDirectDisplayID) async throws -> CGImage {
         // **Preflight 权限检查**：CGPreflightScreenCaptureAccess() 不触发 SCK XPC
         // 调用，纯本地查 TCC database。如果没授权，**根本不调 SCScreenshotManager**。
         //
@@ -87,10 +87,10 @@ final class ScreenCaptureService {
                 let excluded: [SCWindow]
                 if ignore.hasUserRules {
                     // 有遮罩规则 → 每帧重新枚举(实时性是隐私语义,见
-                    // cachedDisplay 注释),顺手刷新显示器缓存。
-                    let (d, windows) = try await fetchDisplayAndWindows()
+                    // cachedDisplays 注释),顺手刷新显示器缓存。
+                    let (d, windows) = try await fetchDisplayAndWindows(displayID)
                     display = d
-                    cachedDisplay = d
+                    cachedDisplays[displayID] = d
                     // Content masking：命中 ignore 规则的窗口排除出捕获 buffer
                     // （帧照拍，那些窗口在帧里变透明）。
                     excluded = windows.filter {
@@ -103,12 +103,12 @@ final class ScreenCaptureService {
                 } else {
                     // 无规则 → 跳过窗口枚举,复用显示器缓存(没有就取一次)。
                     ensureScreenParamsObserver()
-                    if let cached = cachedDisplay {
+                    if let cached = cachedDisplays[displayID] {
                         display = cached
                     } else {
-                        let (d, _) = try await fetchDisplayAndWindows()
+                        let (d, _) = try await fetchDisplayAndWindows(displayID)
                         display = d
-                        cachedDisplay = d
+                        cachedDisplays[displayID] = d
                     }
                     excluded = []
                 }
@@ -139,11 +139,11 @@ final class ScreenCaptureService {
                 // **快速抛出，绝对不重试**：getOrFetchMainDisplay 已经把 NSError
                 // 转成了我们自己的 enum，外层别再 wrap 一次也别 retry。
                 // 重试只会让 SCK 多投递几个失败回调到 caulk，挤崩 dispatch queue。
-                logger.warning("captureMainDisplay: screen recording permission denied — bailing without retry")
+                logger.warning("capture: screen recording permission denied — bailing without retry")
                 throw CaptureError.screenRecordingPermissionDenied
             } catch {
                 lastError = error
-                logger.warning("captureMainDisplay attempt \(attempt + 1) failed: \(String(describing: error), privacy: .public)")
+                logger.warning("capture attempt \(attempt + 1) failed: \(String(describing: error), privacy: .public)")
 
                 // 防御性：NSError 形式的权限错也不重试（理论上 getOrFetchMainDisplay
                 // 已经转过了，但 SCScreenshotManager.captureImage 也可能直接抛）。
@@ -152,7 +152,7 @@ final class ScreenCaptureService {
                 }
 
                 // 失败可能源于陈旧的 SCDisplay(replayd 重启等)→ 重试前丢缓存。
-                cachedDisplay = nil
+                cachedDisplays[displayID] = nil
 
                 // 重试前小睡（100ms），避免立即撞错。
                 try? await Task.sleep(nanoseconds: 100_000_000)
@@ -165,14 +165,14 @@ final class ScreenCaptureService {
 
     /// 切换等稳用:截一张 256 宽的小图,缩成 64×40 灰度格,只用来比画面变没变,不落盘、不 OCR。
     /// 不套遮罩规则(省掉窗口枚举),格子在内存里比完就丢。
-    func captureGrid() async throws -> [UInt8] {
+    func captureGrid(display displayID: CGDirectDisplayID) async throws -> [UInt8] {
         ensureScreenParamsObserver()
         let display: SCDisplay
-        if let cached = cachedDisplay {
+        if let cached = cachedDisplays[displayID] {
             display = cached
         } else {
-            display = try await fetchDisplayAndWindows().0
-            cachedDisplay = display
+            display = try await fetchDisplayAndWindows(displayID).0
+            cachedDisplays[displayID] = display
         }
         let cfg = SCStreamConfiguration()
         cfg.width = 256
@@ -205,14 +205,14 @@ final class ScreenCaptureService {
     /// sleep/wake / DRM watcher 调用:丢掉显示器缓存(唤醒后显示器配置
     /// 可能已变)。有遮罩规则时窗口列表本来就每帧重新枚举,无需失效。
     func invalidateStream() async {
-        cachedDisplay = nil
+        cachedDisplays = [:]
     }
 
     // MARK: - 私有
 
-    /// 每帧重新枚举：主显示器 + 当前所有屏上窗口。masking 要逐窗口判定排除，
+    /// 每帧重新枚举：`displayID` 那块屏(找不到时退回主屏)+ 当前所有屏上窗口。masking 要逐窗口判定排除，
     /// 窗口位置 / 开关每帧都在变，不能缓存。
-    private func fetchDisplayAndWindows() async throws -> (SCDisplay, [SCWindow]) {
+    private func fetchDisplayAndWindows(_ displayID: CGDirectDisplayID) async throws -> (SCDisplay, [SCWindow]) {
         let monitorId = config.monitorId
         let startedNs = DispatchTime.now().uptimeNanoseconds
         let result = try await Task.detached(priority: .userInitiated) {
@@ -230,7 +230,8 @@ final class ScreenCaptureService {
             }
 
             let mainID = CGMainDisplayID()
-            guard let display = content.displays.first(where: { $0.displayID == mainID })
+            guard let display = content.displays.first(where: { $0.displayID == displayID })
+                ?? content.displays.first(where: { $0.displayID == mainID })
                 ?? content.displays.first
             else {
                 throw CaptureError.displayNotFound(monitorId: monitorId)

@@ -66,13 +66,16 @@ final class MouseClickLogger {
         if flags.contains(.maskShift)     { modifiers |= 0x08 }   // shift+click = 扩展选区
         let modifierBits = modifiers
 
-        // 主显示器像素尺寸:OCR 的 bbox 是归一化 0..1,没有它就没法把坐标对到词,
+        // 点击所在那块屏的尺寸:OCR 的 bbox 是归一化 0..1,没有它就没法把坐标对到词,
         // 而 frames 表不存画面尺寸、事后不可恢复。CoreGraphics 的 display 查询
         // 可跨线程调(不碰 AppKit —— NSScreen 在 tap 线程读是另一类崩溃源,
         // 同 InputSourceCache 注释里 TIS 那个坑)。
-        // ⚠️多显示器下 location 是 union 空间坐标,主屏尺寸只够单屏场景归一化;
-        // 真要支持多屏得记「包含该点的那块屏」的 bounds,留给需要时再说。
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        // 多显示器下 location 是全局坐标,x/y 记成相对这块屏左上角的坐标(主屏原点就是 0,0),
+        // 和截这块屏的帧对得上(采集截焦点所在的屏)。
+        var clickDisplay = CGMainDisplayID()
+        var displayCount: UInt32 = 0
+        _ = CGGetDisplaysWithPoint(location, 1, &clickDisplay, &displayCount)
+        let bounds = CGDisplayBounds(displayCount > 0 ? clickDisplay : CGMainDisplayID())
         let screenW = Int(bounds.width)
         let screenH = Int(bounds.height)
 
@@ -114,8 +117,8 @@ final class MouseClickLogger {
                     kind: kind,
                     targetPid: targetPid,
                     targetBundleId: targetBundle,
-                    x: redact ? nil : location.x,
-                    y: redact ? nil : location.y,
+                    x: redact ? nil : location.x - bounds.minX,
+                    y: redact ? nil : location.y - bounds.minY,
                     screenW: screenW,
                     screenH: screenH,
                     clickCount: max(1, clickCount),

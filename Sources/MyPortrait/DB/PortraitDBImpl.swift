@@ -1009,7 +1009,8 @@ private extension FrameRow {
             visibleApp: record.visibleApp,
             focusState: record.focusState,
             visibleWindows: record.visibleWindows,
-            windowKey: record.windowKey
+            windowKey: record.windowKey,
+            displayName: record.displayName
         )
     }
 
@@ -1035,7 +1036,8 @@ private extension FrameRow {
             visibleApp: record.visibleApp,
             focusState: record.focusState,
             visibleWindows: record.visibleWindows,
-            windowKey: record.windowKey
+            windowKey: record.windowKey,
+            displayName: record.displayName
         )
     }
 }

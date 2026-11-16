@@ -185,19 +185,20 @@ actor FocusProbe {
     /// 此时两个来源都不可信。
     /// Dock 有一个 layer 18 的全屏窗口 → 调度中心(Mission Control)或显示桌面开着:画面是 Dock 画的总览,
     /// 两个来源都还报总览前的 app。Dock 常驻的那个全屏窗口在 layer 20,不算。
-    /// 顺带记主屏上露出来的普通窗口(`visibleWindows`):从前往后叠,被前面窗口盖住的部分不算,
+    /// 顺带记截的那块屏上露出来的普通窗口(`visibleWindows`):从前往后叠,被前面窗口盖住的部分不算,
     /// 分屏 / 平铺 / 并排时画面上同时有几个 app,OCR 文字按坐标落进哪个窗口就归哪个 app。
     /// 不到屏幕 10% 的窗口(全屏 Chrome 的工具栏条这类)不参与遮挡计算。
     /// 激活 app 的窗口没被别的 app 盖住(`activeUnoccluded`)时,窗口前后顺序不影响画面:分屏里点左边一格,
     /// 右边那格仍排在最前,但两格都完整露着。
     /// 判读规则见 `FrameFocusState.classify`。实测数据:Tests/investigationResults/frontapp-probe/。
-    func liveFront() async -> FrontReading {
+    /// 画面最前 app、露出窗口都按截的那块屏(`display`)算,别的屏上的窗口不算。
+    func liveFront(display: CGDirectDisplayID) async -> FrontReading {
         await MainActor.run {
             // Spotlight、Bob 这类面板拿到键盘焦点时不会变成激活 app,这时以它为准:app_name 记面板的 app,
             // 面板不是 layer-0 窗口,画面最前的普通窗口照常进 visible_app(焦点状态 no_window)。
             let active = Self.focusedPanelApp() ?? NSWorkspace.shared.frontmostApplication
             let activePid = active?.processIdentifier ?? -1
-            let screen = CGDisplayBounds(CGMainDisplayID())
+            let screen = CGDisplayBounds(display)
             let screenArea = screen.width * screen.height
             var displayIds = [CGDirectDisplayID](repeating: 0, count: 16)
             var displayCount: UInt32 = 0
@@ -208,6 +209,7 @@ actor FocusProbe {
             ) as? [[String: Any]] ?? []
             var visiblePid: pid_t?
             var visibleOwner: String?
+            var sawFront = false
             var activeHasWindow = false
             var activeUnoccluded = false
             var activeHasOverlay = false
@@ -222,20 +224,26 @@ actor FocusProbe {
                 if layer != 0 {
                     if screenArea > 0,
                        let b = w[kCGWindowBounds as String] as? [String: CGFloat],
-                       (b["Width"] ?? 0) * (b["Height"] ?? 0) >= screenArea * 0.9 {
+                       (b["Width"] ?? 0) * (b["Height"] ?? 0) >= screenArea * 0.9,
+                       screen.intersects(CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
+                                                width: b["Width"] ?? 0, height: b["Height"] ?? 0)) {
                         if pid == activePid { activeHasOverlay = true }
                         if layer == 18, w[kCGWindowOwnerName as String] as? String == "Dock" { overviewOpen = true }
                     }
                     continue
                 }
-                if visiblePid == nil {
+                let frame = (w[kCGWindowBounds as String] as? [String: CGFloat]).map {
+                    CGRect(x: $0["X"] ?? 0, y: $0["Y"] ?? 0, width: $0["Width"] ?? 0, height: $0["Height"] ?? 0)
+                }
+                if !sawFront {
+                    sawFront = true
+                    if !displays.isEmpty, let frame {
+                        frontOffscreen = !displays.contains { $0.intersects(frame) }
+                    }
+                }
+                if visiblePid == nil, let frame, frame.intersects(screen) {
                     visiblePid = pid
                     visibleOwner = (w[kCGWindowOwnerName as String] as? String).map(AppName.clean)
-                    if !displays.isEmpty, let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
-                        let rect = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0,
-                                          width: b["Width"] ?? 0, height: b["Height"] ?? 0)
-                        frontOffscreen = !displays.contains { $0.intersects(rect) }
-                    }
                 }
                 if pid == activePid { activeHasWindow = true }
                 if screenArea > 0, let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
@@ -273,6 +281,9 @@ actor FocusProbe {
             let visibleName = visiblePid.flatMap {
                 NSRunningApplication(processIdentifier: $0)?.cleanName
             } ?? visibleOwner
+            let displayName = display == CGMainDisplayID() ? nil : NSScreen.screens.first {
+                ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == display
+            }?.localizedName
             return FrontReading(
                 activeName: active?.cleanName ?? "Unknown",
                 activeBundleId: active?.bundleIdentifier,
@@ -283,8 +294,45 @@ actor FocusProbe {
                 activeUnoccluded: activeUnoccluded,
                 frontOffscreen: frontOffscreen,
                 overviewOpen: overviewOpen,
-                visibleWindows: visibleWindows
+                visibleWindows: visibleWindows,
+                displayName: displayName
             )
+        }
+    }
+
+    /// 这一帧截哪块屏:激活 app 最前那个普通窗口所在的屏(按重叠面积);它没有普通窗口
+    /// (菜单栏小工具、面板、Finder 无窗口)时取鼠标所在的屏;都取不到时主屏。只有一块屏时直接主屏。
+    func targetDisplay() async -> CGDirectDisplayID {
+        await MainActor.run {
+            var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+            var count: UInt32 = 0
+            CGGetActiveDisplayList(16, &ids, &count)
+            let displays = ids.prefix(Int(count))
+            guard displays.count > 1 else { return CGMainDisplayID() }
+            let active = Self.focusedPanelApp() ?? NSWorkspace.shared.frontmostApplication
+            let activePid = active?.processIdentifier ?? -1
+            let windows = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+            ) as? [[String: Any]] ?? []
+            if let w = windows.first(where: {
+                   $0[kCGWindowOwnerPID as String] as? pid_t == activePid
+                       && ($0[kCGWindowLayer as String] as? Int ?? 0) == 0
+                       && ($0[kCGWindowAlpha as String] as? CGFloat ?? 1) > 0.01
+               }),
+               let b = w[kCGWindowBounds as String] as? [String: CGFloat] {
+                let frame = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+                let overlap = { (id: CGDirectDisplayID) -> CGFloat in
+                    let r = CGDisplayBounds(id).intersection(frame)
+                    return r.isNull ? 0 : r.width * r.height
+                }
+                if let best = displays.max(by: { overlap($0) < overlap($1) }), overlap(best) > 0 { return best }
+            }
+            if let mouse = CGEvent(source: nil)?.location {
+                var id: CGDirectDisplayID = 0
+                var n: UInt32 = 0
+                if CGGetDisplaysWithPoint(mouse, 1, &id, &n) == .success, n > 0 { return id }
+            }
+            return CGMainDisplayID()
         }
     }
 
@@ -771,8 +819,10 @@ struct FrontReading: Sendable {
     let frontOffscreen: Bool
     /// 调度中心 / 显示桌面开着(Dock 的 layer 18 全屏窗口在屏上)。
     let overviewOpen: Bool
-    /// 主屏上露出来的普通窗口,前 → 后。
+    /// 截的那块屏上露出来的普通窗口,前 → 后。
     let visibleWindows: [VisibleWindow]
+    /// 截的不是主屏时那块屏的名字(如 Sidecar 的 iPad),主屏为 nil。
+    let displayName: String?
 
     /// 写进 `frames.visible_windows` 的 JSON。
     var visibleWindowsJSON: String? {
@@ -788,7 +838,7 @@ struct FrontReading: Sendable {
     }
 }
 
-/// 主屏上露出来的一个普通窗口。坐标是窗口在主屏内的部分,按屏宽高归一化、原点左上,
+/// 截的那块屏上露出来的一个普通窗口。坐标是窗口在这块屏内的部分,按屏宽高归一化、原点左上,
 /// 和 `ocr_words_json` 的词框同一口径;`visible` = 没被前面窗口盖住的面积占整屏的比例。
 struct VisibleWindow: Codable, Sendable {
     /// 露出不到屏幕 10% 的窗口不记(被盖住的、贴边的小窗)。

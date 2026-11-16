@@ -44,6 +44,8 @@ actor CaptureCoordinator {
     private var drmTask: Task<Void, Never>?
     private var sleepWakeTask: Task<Void, Never>?
     private var lastCaptureAt: Date?
+    /// 上一张入库帧截的是哪块屏。换屏的帧不走去重(两块屏画面可能恰好相近)。
+    private var lastCaptureDisplay: CGDirectDisplayID?
     /// DRM 命中时为 true —— captureOneFrame 全部跳过。
     private var drmActive: Bool = false
     /// 切换等稳任务(见 scheduleSettleCapture)。同一时间最多一个。
@@ -336,9 +338,12 @@ actor CaptureCoordinator {
             return
         }
 
+        // 焦点在哪块屏截哪块(接了 Sidecar / 外接屏时)。
+        let display = await focus.targetDisplay()
+
         // 2c. 屏幕亮度调到最低(滑块 0)→ 整帧跳过(屏幕黑着,用户没在看)。
-        //     读不到亮度(外接不可控显示器等)fail-open 不跳,照常采集。
-        if pauseAtMinBrightness, DisplayBrightness.isAtMinimum() {
+        //     读不到亮度(外接不可控显示器等)fail-open 不跳,照常采集。亮度只读得到主屏,只管截主屏的帧。
+        if pauseAtMinBrightness, display == CGMainDisplayID(), DisplayBrightness.isAtMinimum() {
             await VisionMetrics.shared.recordIntentionalSkip()
             return
         }
@@ -359,12 +364,12 @@ actor CaptureCoordinator {
         //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
         let image: CGImage
         do {
-            image = try await screen.captureMainDisplay()
+            image = try await screen.capture(display: display)
         } catch {
             await VisionMetrics.shared.recordLost()
             throw error
         }
-        let front = await focus.liveFront()
+        let front = await focus.liveFront(display: display)
         var focusState = FrameFocusState.classify(front)
         // 等稳期间截的帧、或截图途中来了切换通知(点别的 app 时点击帧先截、激活后到):
         // 前台读数已是新 app,画面可能还是上一个,标签不可信。
@@ -386,12 +391,13 @@ actor CaptureCoordinator {
         }
 
         // 5. 去重。
-        if !force, !comparer.shouldKeep(image, now: now) {
+        if !force, display == lastCaptureDisplay, !comparer.shouldKeep(image, now: now) {
             await VisionMetrics.shared.recordDedup()
             return
         }
 
         lastCaptureAt = now
+        lastCaptureDisplay = display
 
         // 5b. app 名取截图后的激活 app。focusInfo 是 FocusProbe 缓存(通知刷新,有节流),
         //     会落后于激活 app。正在切换时 windowTitle/url/axText 一并作废(宁可空也别
@@ -453,7 +459,8 @@ actor CaptureCoordinator {
             visibleApp: front.visibleName,
             focusState: focusState.rawValue,
             visibleWindows: front.visibleWindowsJSON,
-            windowKey: recordFocus.windowKey
+            windowKey: recordFocus.windowKey,
+            displayName: front.displayName
         )
 
         do {
@@ -508,7 +515,7 @@ actor CaptureCoordinator {
     private func runSettleCapture(trigger: CaptureTrigger) async {
         if settleStartedAt == nil {
             settleStartedAt = Date()
-            settleBaseline = try? await screen.captureGrid()
+            settleBaseline = try? await screen.captureGrid(display: await focus.targetDisplay())
             if Task.isCancelled { return }
         }
         let started = settleStartedAt ?? Date()
@@ -523,7 +530,8 @@ actor CaptureCoordinator {
             if Task.isCancelled { return }   // stop() 或新的切 app 顶掉了
             let waitedMs = Int(Date().timeIntervalSince(started) * 1000)
             if Date() >= deadline { break }
-            let grid = try? await screen.captureGrid()
+            let display = await focus.targetDisplay()
+            let grid = try? await screen.captureGrid(display: display)
             if Task.isCancelled { return }
             var still = false
             if let grid, let base = settleBaseline {
@@ -531,7 +539,7 @@ actor CaptureCoordinator {
                 still = prev.map { ScreenCaptureService.gridDiff($0, grid) < settleStillDiff } ?? false
                 prev = grid
             }
-            let front = await focus.liveFront()
+            let front = await focus.liveFront(display: display)
             if Task.isCancelled { return }
             guard front.isSettled else { continue }
             // 小图截不到时只看前台读数。

@@ -26,6 +26,10 @@ enum DBSchema {
         m.registerMigration("screen_v2") { db in
             try db.execute(sql: "ALTER TABLE frames ADD COLUMN window_key TEXT")
         }
+        // display_name = 截的不是主屏时那块屏的名字(11-15 update:焦点在哪块屏截哪块),主屏为 NULL。
+        m.registerMigration("screen_v3") { db in
+            try db.execute(sql: "ALTER TABLE frames ADD COLUMN display_name TEXT")
+        }
         return m
     }
 
