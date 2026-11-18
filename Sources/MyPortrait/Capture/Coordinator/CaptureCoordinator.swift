@@ -364,7 +364,11 @@ actor CaptureCoordinator {
         //    切换途中截的帧标 switching,并在前台稳定后补拍一帧。
         let image: CGImage
         do {
-            image = try await screen.capture(display: display)
+            // 网站名单只能判最前面的浏览器窗口:windowKey 开头是它的窗口编号(见 FocusProbe.windowKey)。
+            let frontURL = focusInfo.browserUrl.flatMap { url in
+                focusInfo.windowKey.flatMap { CGWindowID($0.split(separator: "#").first ?? "") }.map { (window: $0, url: url) }
+            }
+            image = try await screen.capture(display: display, frontURL: frontURL)
         } catch {
             await VisionMetrics.shared.recordLost()
             throw error

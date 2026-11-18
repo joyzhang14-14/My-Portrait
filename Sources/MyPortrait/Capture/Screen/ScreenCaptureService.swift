@@ -59,7 +59,9 @@ final class ScreenCaptureService {
     }
 
     /// 抓 `displayID` 那块屏一帧(焦点在哪块屏抓哪块,见 `FocusProbe.targetDisplay`)。失败重试 3 次。
-    func capture(display displayID: CGDirectDisplayID) async throws -> CGImage {
+    /// `frontURL`:最前面那个浏览器窗口的编号和网址 —— 网站名单只能判它(见 IgnoreGate)。
+    func capture(display displayID: CGDirectDisplayID,
+                 frontURL: (window: CGWindowID, url: String)? = nil) async throws -> CGImage {
         // **Preflight 权限检查**：CGPreflightScreenCaptureAccess() 不触发 SCK XPC
         // 调用，纯本地查 TCC database。如果没授权，**根本不调 SCScreenshotManager**。
         //
@@ -97,7 +99,9 @@ final class ScreenCaptureService {
                         ignore.shouldMaskWindow(
                             appName: $0.owningApplication?.applicationName ?? "",
                             bundleId: $0.owningApplication?.bundleIdentifier,
-                            title: $0.title
+                            title: $0.title,
+                            layer: $0.windowLayer,
+                            url: $0.windowID == frontURL?.window ? frontURL?.url : nil
                         )
                     }
                 } else {

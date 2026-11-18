@@ -691,12 +691,12 @@ struct ScreenCaptureSettingsView: View {
             }
             SettingsDivider()
             VStack(alignment: .leading, spacing: 0) {
-                Text("URLs — hostnames or substrings…")
+                Text("Websites — matched by main domain, so mail.google.com covers all of google.com")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.ignoredUrls),
-                              placeholder: "e.g. wellsfargo.com, mail.",
+                              placeholder: "e.g. wellsfargo.com, t.me",
                               icon: "link")
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }
@@ -916,12 +916,12 @@ struct TypingCaptureSettingsView: View {
             }
             SettingsDivider()
             VStack(alignment: .leading, spacing: 0) {
-                Text("URLs — hostnames or substrings…")
+                Text("Websites — matched by main domain, so mail.google.com covers all of google.com")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textPrimary.opacity(0.50))
                     .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 8)
                 TagListEditor(tags: config.binding(\.privacy.typingBlacklistUrls),
-                              placeholder: "e.g. wellsfargo.com, mail.",
+                              placeholder: "e.g. wellsfargo.com, t.me",
                               icon: "link")
                     .padding(.horizontal, 14).padding(.bottom, 12)
             }

@@ -1,3 +1,5 @@
+import Foundation
+
 /// TypingPrivacyFilter —— 打字采集的隐私闸门。两道判据：
 ///
 ///   1. **App 黑名单**（按 bundle id）：密码管理器 / 机密类 app 整体不订阅 AX。
@@ -67,17 +69,13 @@ struct TypingPrivacyFilter {
             bundleId: bundleId, selected: Set(privacy.typingBlacklistCategories))
     }
 
-    /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 命中 URL 名单里的
-    /// 任一**小写子串**(不分 app,跟屏幕采集 ignoredUrls 同口径)。
+    /// (bundle, url) 是否命中黑名单 —— 整 app 屏蔽,或 URL 的主域名等于 URL 名单里
+    /// 某一条的主域名(不分 app,跟屏幕采集 ignoredUrls 同口径,见 `mainDomain`)。
     /// 给 TypingRecordWriter.persist 用(已知具体 URL)。
     @MainActor
     static func isBlacklisted(bundleId: String, url: String) -> Bool {
         if isBlacklisted(bundleId: bundleId) { return true }
-        let u = url.lowercased()
-        guard !u.isEmpty else { return false }
-        return ConfigStore.shared.privacy.typingBlacklistUrls.contains {
-            !$0.isEmpty && u.contains($0.lowercased())
-        }
+        return sameMainDomain(url, ConfigStore.shared.privacy.typingBlacklistUrls)
     }
 
     /// 给后台批读用 —— 把两张名单 snapshot 一份,在 dbPool 线程上比对
@@ -91,9 +89,40 @@ struct TypingPrivacyFilter {
         if AppCategoryResolver.shared.matches(bundleId: bundleId, selected: categories) {
             return true
         }
-        let u = url.lowercased()
-        guard !u.isEmpty else { return false }
-        return urls.contains { !$0.isEmpty && u.contains($0.lowercased()) }
+        return sameMainDomain(url, urls)
+    }
+
+    /// 网址的主域名(可注册域名):`https://mail.google.com/x` → `google.com`,
+    /// `www.bbc.co.uk` → `bbc.co.uk`。名单是手输的,`t.me`、`https://t.me/abc`、
+    /// `www.t.me` 都归到同一个主域名。不带协议的串按主机名解析;解析不出 → nil。
+    /// 没有完整的公共后缀表,两段式后缀(co.uk / com.cn …)只认下面这份常见的。
+    nonisolated static func mainDomain(_ s: String) -> String? {
+        let raw = s.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !raw.isEmpty else { return nil }
+        let host = (URL(string: raw.contains("://") ? raw : "http://" + raw)?.host ?? "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !host.isEmpty else { return nil }
+        let labels = host.split(separator: ".").map(String.init)
+        // IP 地址 / 单段主机名原样比
+        if labels.count <= 2 || labels.allSatisfy({ Int($0) != nil }) { return host }
+        let lastTwo = labels.suffix(2).joined(separator: ".")
+        return labels.suffix(twoPartSuffixes.contains(lastTwo) ? 3 : 2).joined(separator: ".")
+    }
+
+    private nonisolated static let twoPartSuffixes: Set<String> = [
+        "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk",
+        "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn",
+        "com.hk", "com.tw", "org.tw", "edu.tw",
+        "co.jp", "ne.jp", "or.jp", "ac.jp",
+        "co.kr", "or.kr", "com.sg", "com.my",
+        "com.au", "net.au", "org.au", "edu.au", "co.nz",
+        "co.in", "com.br", "com.mx", "co.za",
+    ]
+
+    /// url 的主域名是否等于名单里某一条的主域名。
+    nonisolated static func sameMainDomain(_ url: String, _ list: [String]) -> Bool {
+        guard let d = mainDomain(url) else { return false }
+        return list.contains { mainDomain($0) == d }
     }
 
     /// hardcoded 黑名单 snapshot —— `matches(...)` 用。

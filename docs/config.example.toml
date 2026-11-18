@@ -51,9 +51,11 @@ pipe_alerts = true
 capture_clipboard = false
 ignore_incognito = true
 # Default blacklist: password managers / sensitive tools. Exact app-name
-# match (case-insensitive). A frame is skipped when the focused app matches.
+# match (case-insensitive); its windows are blacked out of each frame. System
+# entries such as 'Wallpaper', 'Trash' or '.env' match window titles instead.
 ignored_apps = ['1Password', 'Bitwarden', 'KeePassXC', 'Keychain Access', 'Authy', 'My Portrait', 'Wallpaper']
-# URL glob patterns (NSPredicate LIKE[c]). e.g. '*.bank.com/*', '*mail*'.
+# Websites, matched by main domain on the front browser window.
+# e.g. 'wellsfargo.com' (mail.google.com covers all of google.com).
 ignored_urls = []
 # Window-title substrings (case-insensitive contains). A window whose title
 # contains any of these is masked out of the screenshot.

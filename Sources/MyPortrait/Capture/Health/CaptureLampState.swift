@@ -243,7 +243,7 @@ final class CaptureLampState: ObservableObject {
             s = Lamp(on: false, reason: "You're typing a password — the screen isn't captured until you leave the field.")
         } else if !appName.isEmpty,
                   ignoreGate?.shouldMaskWindow(appName: appName, bundleId: bundleId.isEmpty ? nil : bundleId,
-                                               title: windowTitle) == true {
+                                               title: windowTitle, url: browserUrl) == true {
             // 抓帧逐窗口问的就是这个函数(app 名 / 标题 / 类别 / 遮罩总开关),灯不另写一份。
             s = Lamp(on: false, reason: "This window matches your Ignored apps, URLs or categories — the screenshot is still taken, but this window is blanked out of it.")
         }
