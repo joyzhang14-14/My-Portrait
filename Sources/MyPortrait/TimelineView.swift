@@ -927,7 +927,8 @@ struct TimelineView: View {
     }
 }
 
-/// 只给滚轮监听 / Esc 用的引用型状态 —— NSEvent 闭包里要读写它。
+/// 只给滚轮监听 / Esc 用的引用型状态 —— NSEvent 闭包里要读写它。只在主线程用。
+@MainActor
 @Observable
 final class TimelineUI {
     var focused = false
