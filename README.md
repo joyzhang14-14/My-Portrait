@@ -26,10 +26,13 @@ flowchart TB
     subgraph AUD["Audio"]
       M["Mic + system audio"] --> VAD["Silero VAD"] --> ASR["Qwen3-ASR / Whisper"] --> DZ["Diarization<br/>pyannote + CAM++"]
     end
-    K["Keyboard<br/>listen-only event tap,<br/>input-method text kept"]
+    subgraph KB["Typing"]
+      K["Keystrokes<br/>listen-only event tap,<br/>input-method text kept"] --> SD["Send detection<br/>bare Return + input box cleared<br/>→ a sent message"]
+      AX["AX text capture<br/>focused text field,<br/>diffed per field"] --> SD
+    end
     OCR --> DB[("~/.portrait<br/>capture DB")]
     DZ --> DB
-    K --> DB
+    SD --> DB
   end
 
   subgraph ES["2 · EventSession · local"]
