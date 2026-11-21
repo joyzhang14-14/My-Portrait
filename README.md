@@ -18,8 +18,8 @@
 
 ```mermaid
 flowchart TB
-  subgraph CAP["Capture system"]
-    A1["Screenshots"] --> B1["OCR"]
+  subgraph CAP["Capture"]
+    A1["Screenshots on interaction events"] --> B1["OCR"]
     A2["Mic + system audio"] --> B2["Transcribe + diarize"]
     A3["Keystrokes / AX"]
     A1 --> TL["Timeline"]
@@ -30,41 +30,26 @@ flowchart TB
     A3 --> MT
   end
 
-  subgraph ANA["Analysis system"]
-    E["Events"] --> P["Portrait:<br/>Experiences, social, etc."]
-    E --> PS["Personality"]
-    TE["Typing event"] --> WS["Writing style"]
-
-    E --> DB[("~/.portrait<br/>SQLite + markdown files")]
-    TE --> DB
-    P --> DB
-    PS --> DB
-    WS --> DB
+  subgraph UND["Understanding"]
+    S["Session records<br/>local 9B model"] --> E["Events<br/>in development"]
+    E --> P["Portrait<br/>being rebuilt"]
   end
 
-  MT --> E
-  MT --> PS
-  MT --> TE
-
-  DB --> G(("Neural Graph"))
+  MT --> S
 
   style CAP fill:#f9731626,stroke:#f97316,stroke-width:2px
-  style ANA fill:#3b82f626,stroke:#3b82f6,stroke-width:2px
-  style G fill:#a855f733,stroke:#a855f7,stroke-width:3px
+  style UND fill:#3b82f626,stroke:#3b82f6,stroke-width:2px
+  style E stroke-dasharray:4 3
+  style P stroke-dasharray:4 3
 ```
 
 ## The Neural Graph
 
-Over time, My Portrait builds a memory graph and a portrait graph that belong only to you, out of what it sees and the algorithms built into it.
+As My Portrait keeps running, the events it finds grow into a graph that belongs only to you.
 
 <div align="center">
-  <img src=".github/media/memory-graph.png" alt="Memory graph after three months" width="100%" /><br/>
-  <sub>Memory graph, after My Portrait had been running for 3 months.</sub>
-</div>
-
-<div align="center">
-  <img src=".github/media/portrait-graph.png" alt="Portrait graph after three months" width="100%" /><br/>
-  <sub>Portrait graph, after 3 months of running.</sub>
+  <img src=".github/media/event-graph.gif" alt="The event graph changing over time" width="100%" /><br/>
+  <sub>The event graph, played back over time.</sub>
 </div>
 
 ## Install
@@ -87,11 +72,11 @@ Over time, My Portrait builds a memory graph and a portrait graph that belong on
 
 ## Where it's going
 
-**The capture system is already fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac and always have. Keystrokes / AX (macOS accessibility APIs — what you actually typed) never leave it either.
+**The capture system is fully local.** Screen OCR, audio transcription and speaker diarization all run on your Mac. Keystrokes / AX (macOS accessibility APIs — what you actually typed) never leave it either.
 
-**The understanding layers are not, yet.** Turning raw data into events, working out what you actually wrote, distilling the portrait, learning personality and writing style — these currently call out to a cloud LLM with your own API key. That is the one thing left to fix.
+**Session understanding is local too.** A Qwen3.5-9B vision-language model, distilled and quantized to 4 bits, turns each working session into a structured record on your Mac while it is charging and idle.
 
-Right now we're working on local screenshot understanding, and on computing typing events on-device.
+**Two layers are still in progress:** merging sessions into events across days (research code in [`research/event-merge`](research/event-merge)), and the portrait, which is being rebuilt. Until they run locally, these call a cloud LLM with your own API key.
 
 ## Our Goal
 
