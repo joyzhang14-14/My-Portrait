@@ -5,7 +5,7 @@
 
   <p><b>A long-term digital portrait of you, built on your Mac.</b></p>
 
-  <p>It quietly captures your screen, voice, and writing, and over months and years distills them into a portrait of you — what you do, who you spend time with, how you think and write. <b>Everything stays on your Mac.</b></p>
+  <p>It quietly captures your screen, voice, and keystrokes, and over months and years distills them into a portrait of you — what you work on, who you spend time with, what you can do, and how you decide. <b>Everything stays on your Mac.</b></p>
 
   <a href="https://github.com/joyzhang14-14/My-Portrait/releases/latest">
     <img src="https://img.shields.io/github/v/release/joyzhang14-14/My-Portrait?label=download&style=flat-square" alt="latest release" />
@@ -82,7 +82,7 @@ As My Portrait keeps running, the events it finds grow into a graph that belongs
 
 The goal is a digital portrait that keeps growing with you for years, built with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
 
-- local models sized to fit 16 GB alongside everything else that's running;
+- local models sized to fit 16 GB alongside everything else that's running (the session layer already runs this way);
 - telling apart what was merely _on screen_ from what you were actually _doing_;
 - keeping the portrait anchored to real evidence instead of inventing the missing parts.
 
