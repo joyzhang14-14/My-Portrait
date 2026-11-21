@@ -1,0 +1,6 @@
+mlx
+mlx-lm
+mlx-vlm
+numpy
+transformers
+huggingface_hub
