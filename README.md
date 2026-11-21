@@ -18,30 +18,48 @@
 
 ```mermaid
 flowchart TB
-  subgraph CAP["Capture"]
-    A1["Screenshots on interaction events"] --> B1["OCR"]
-    A2["Mic + system audio"] --> B2["Transcribe + diarize"]
-    A3["Keystrokes / AX"]
-    A1 --> TL["Timeline"]
-
-    TL --> MT[("~/.portrait<br/>Capture DB")]
-    B1 --> MT
-    B2 --> MT
-    A3 --> MT
+  subgraph CAP["1 · Capture · on your Mac"]
+    direction TB
+    subgraph SCR["Screen"]
+      T["Triggers: app switch, click, Return,<br/>typing burst, scroll stop, idle tick"] --> PG["Privacy gates<br/>password fields, private windows"] --> DD["Dedup<br/>hash + histogram distance"] --> OCR["Apple Vision OCR<br/>Chinese + English"]
+    end
+    subgraph KEY["Keyboard"]
+      K["Listen-only event tap<br/>input-method text kept as typed"]
+    end
+    subgraph AUD["Audio"]
+      M["Mic + system audio"] --> VAD["Silero VAD"] --> ASR["Qwen3-ASR / Whisper"] --> DZ["Speaker diarization<br/>pyannote + CAM++"]
+    end
+    OCR --> DB[("~/.portrait<br/>capture DB")]
+    K --> DB
+    DZ --> DB
+    DB --> TL["Timeline"]
   end
 
-  subgraph UND["Understanding"]
-    S["Session records<br/>local 9B model"] --> E["Events<br/>in development"]
-    E --> P["Portrait<br/>being rebuilt"]
+  subgraph ES["2 · EventSession · local"]
+    SP["Sessions by window identity<br/>+ frame selection"] --> OBS["Per-frame observation<br/>Qwen3.5-9B VLM, QAD 4-bit"] --> SR["Session record<br/>what was done, with whom, outcome"]
   end
 
-  MT --> S
+  subgraph EM["3 · Events · in development"]
+    R1["EmbeddingGemma recall<br/>top 4 + latest"] --> Q1["Narrow questions<br/>anything done? same event?"] --> W1["One narrative per event"] --> LIB["Cross-day library<br/>vectors + tags + last 48 h"]
+  end
+
+  subgraph PT["4 · Portrait · being rebuilt"]
+    R2["Recall<br/>vectors + BM25 + title overlap"] --> Q2["Narrow questions<br/>evidence? counter-example?"] --> W2["Entries: title, detail, evidence IDs<br/>skills · experiences · decisions · interests<br/>background · social · patterns"]
+  end
+
+  DB --> SP
+  SR --> R1
+  LIB --> R2
+  W2 -.-> AG(["Proactive agent · the goal"])
 
   style CAP fill:#f9731626,stroke:#f97316,stroke-width:2px
-  style UND fill:#3b82f626,stroke:#3b82f6,stroke-width:2px
-  style E stroke-dasharray:4 3
-  style P stroke-dasharray:4 3
+  style ES fill:#3b82f626,stroke:#3b82f6,stroke-width:2px
+  style EM fill:#3b82f614,stroke:#3b82f6,stroke-width:2px,stroke-dasharray:5 4
+  style PT fill:#3b82f614,stroke:#3b82f6,stroke-width:2px,stroke-dasharray:5 4
+  style AG fill:#a855f714,stroke:#a855f7,stroke-dasharray:5 4
 ```
+
+Solid boxes run in the app today; dashed boxes are in development.
 
 ## The Neural Graph
 
