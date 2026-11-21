@@ -98,7 +98,7 @@ As My Portrait keeps running, the events it finds grow into a graph that belongs
 
 ## Our Goal
 
-The goal is a digital portrait that keeps growing with you for years, built with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
+The goal is a **proactive agent** that knows you well enough to act for you: it suggests, plans and does things in the way you would. It stands on a digital portrait that keeps growing with you for years, built with **no cloud API at all** — your data **never** leaves your device: every step, end to end, on an Apple silicon Mac with 16 GB of memory. Work in progress toward that:
 
 - local models sized to fit 16 GB alongside everything else that's running (the session layer already runs this way);
 - telling apart what was merely _on screen_ from what you were actually _doing_;
